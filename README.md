@@ -6,6 +6,11 @@
    ```bash
    firebase use <alias>
 
-alias 
-1. default - Test project
-2. production - Product project
+    alias 
+    1. default - Test project
+    2. production - Product project
+
+3. To Deploy
+
+  ```bash
+  firebase deploy --only functions:<FunctionName>
