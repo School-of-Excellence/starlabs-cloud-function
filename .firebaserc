@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "starlabs-test",
+    "production": "fir-sample-aae4a",
+    "staging": "launch-your-legacy-development"
+  }
+}
