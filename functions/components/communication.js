@@ -3384,6 +3384,7 @@ exports.workshopprogressmessagev2 = onRequest({
       }
 
       try {
+
         await commonService.postmarkClient.sendEmailWithTemplate({
           From: "starlabs@excellenceinstallation.com",
           To: email,
@@ -3394,6 +3395,25 @@ exports.workshopprogressmessagev2 = onRequest({
             message: message
           }
         });
+
+        // var dataModel = {
+        //   name: name,
+        //   subject: subject,
+        //   message: message
+        // }
+        // await commonService.createEmailArchiveDocument({
+        //   emailData : dataModel,
+        //   datamodel : dataModel,
+        //   attachments : [],
+        //   emailTo : [email],
+        //   emailMap : [{[email] : }],
+        //   fileURL : '',
+        //   from:'starlabs@excellenceinstallation.com',
+        //   notes : '',
+        //   profileId : [],
+        //   postmarkTemplateId: '42136886',
+        //   templateAlias:'workshopprogressmessage'
+        // });
 
         console.log(`Email sent to ${name} (${email})`);
         return { success: true, email, name };
@@ -3786,6 +3806,25 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
           }
         });
 
+        // var dataModel = {
+        //   name: name,
+        //   subject: subject,
+        //   message: message
+        // }
+        // await commonService.createEmailArchiveDocument({
+        //   emailData : dataModel,
+        //   datamodel : dataModel,
+        //   attachments : [],
+        //   emailTo : [email],
+        //   emailMap : [{[email] : }],
+        //   fileURL : '',
+        //   from:'starlabs@excellenceinstallation.com',
+        //   notes : '',
+        //   profileId : [],
+        //   postmarkTemplateId: '42136886',
+        //   templateAlias:'workshopprogressmessage'
+        // });
+
         console.log(`Email sent to ${name} (${email})`);
         return { success: true, email, name };
 
@@ -4016,9 +4055,8 @@ exports.workshopenrolledwatti = onDocumentCreated(
           ]
         };
         try {
-          const templateAlias = categorybased
-            ? "WorkshopEnrolledMessage-1"
-            : "WorkshopEnrolledMessage";
+          const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
+          const postmarktemplateId = categorybased ? '43859890' : '42135513';
           await commonService.postmarkClient.sendEmailWithTemplate({
             From: "starlabs@excellenceinstallation.com",
             To: profile['email'],
@@ -4033,6 +4071,30 @@ exports.workshopenrolledwatti = onDocumentCreated(
               workshopurl : workshopurl,
             },
           });
+
+          // var dataModel = {
+            // name: profile['name'],
+            // email: profile['email'],
+            // subject: mailsubject,
+            // workshopName:workshopName,
+            // maildescription : maildescription,
+            // mailliveCallText : mailliveCallText,
+            // workshopurl : workshopurl,
+          // }
+          // await commonService.createEmailArchiveDocument({
+          //   emailData : dataModel,
+          //   datamodel : dataModel,
+          //   attachments : [],
+          //   emailTo : [profile['email']],
+          //   emailMap : [{[profile['email']] : }],
+          //   fileURL : '',
+          //   from:'starlabs@excellenceinstallation.com',
+          //   notes : '',
+          //   profileId : [],
+          //   postmarkTemplateId: postmarktemplateId,
+          //   templateAlias:templateAlias
+          // });
+
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
         }

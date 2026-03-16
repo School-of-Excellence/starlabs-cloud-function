@@ -930,14 +930,32 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       date: appointmentdate,
       company_name: "Antano & Harini",
     }
-    await commonService.postmarkClient.sendEmailWithTemplate({
-      From: "starlabs@excellenceinstallation.com",
-      To: bookedby.email,
-      TemplateAlias: "appointment-cancelled",
-      TemplateModel: clientModel,
-    }).catch(err=>{
-      console.log(err)
-    });
+
+    // await commonService.postmarkClient.sendEmailWithTemplate({
+    //   From: "starlabs@excellenceinstallation.com",
+    //   To: bookedby.email,
+    //   TemplateAlias: "appointment-cancelled",
+    //   TemplateModel: clientModel,
+    // }).catch(err=>{
+    //   console.log(err)
+    // });
+
+    await commonService.createEmailArchiveDocument({
+      emailData : clientModel,
+      datamodel : clientModel,
+      attachments : [],
+      emailTo : [bookedby.email],
+      emailMap : [{[bookedby['email']] : bookedby.profileid}],
+      fileURL : '',
+      from:'starlabs@excellenceinstallation.com',
+      notes : '',
+      profileId : [bookedby.profileid],
+      postmarkTemplateId: '24640180',
+      templateAlias:'appointment-cancelled'
+    }).then(()=>{
+      console.log('Sent for email archive');
+    });    
+
     // Send To Hosts
     for (let i = 0; i < hosts.length; i++) {
       const element = hosts[i];
@@ -951,14 +969,31 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         date: appointmentdate,
         company_name: "Antano & Harini",
       }
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: element.email,
-        TemplateAlias: "appointment-cancelled",
-        TemplateModel: hostModel
-      }).catch(err=>{
-        console.log(err)
-      });
+      
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: element.email,
+      //   TemplateAlias: "appointment-cancelled",
+      //   TemplateModel: hostModel
+      // }).catch(err=>{
+      //   console.log(err)
+      // });
+
+      await commonService.createEmailArchiveDocument({
+        emailData : clientModel,
+        datamodel : clientModel,
+        attachments : [],
+        emailTo : [bookedby.email],
+        emailMap : [{[bookedby['email']] : bookedby.profileid}],
+        fileURL : '',
+        from:'starlabs@excellenceinstallation.com',
+        notes : '',
+        profileId : [bookedby.profileid],
+        postmarkTemplateId: '24640180',
+        templateAlias:'appointment-cancelled'
+      }).then(()=>{
+        console.log('Sent for email archive');
+      });  
     }
 
     // Send Notification
