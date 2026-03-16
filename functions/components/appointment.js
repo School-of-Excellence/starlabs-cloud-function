@@ -969,7 +969,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         date: appointmentdate,
         company_name: "Antano & Harini",
       }
-      
+
       // await commonService.postmarkClient.sendEmailWithTemplate({
       //   From: "starlabs@excellenceinstallation.com",
       //   To: element.email,

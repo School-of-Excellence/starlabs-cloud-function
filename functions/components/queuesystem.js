@@ -2435,7 +2435,7 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     zoomlink: zoomlink,
     company_name: "Antano & Harini",
   }
-  
+
   // await commonService.postmarkClient.sendEmailWithTemplate({
   //   From: "starlabs@excellenceinstallation.com",
   //   To: email,

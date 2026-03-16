@@ -1771,7 +1771,7 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({document:'email templat
         Alias: currentData['templatealias'],
       }
 
-      const templateId = currentData['postmarktemplateid']
+      const templattemplateIdeId = currentData['postmarktemplateid']
 
       try {
 
@@ -4056,7 +4056,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
         };
         try {
           const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
-          const postmarktemplateId = categorybased ? '43859890' : '42135513';
+          // const postmarktemplateId = categorybased ? '43859890' : '42135513';
           await commonService.postmarkClient.sendEmailWithTemplate({
             From: "starlabs@excellenceinstallation.com",
             To: profile['email'],
@@ -4073,13 +4073,13 @@ exports.workshopenrolledwatti = onDocumentCreated(
           });
 
           // var dataModel = {
-            // name: profile['name'],
-            // email: profile['email'],
-            // subject: mailsubject,
-            // workshopName:workshopName,
-            // maildescription : maildescription,
-            // mailliveCallText : mailliveCallText,
-            // workshopurl : workshopurl,
+          // name: profile['name'],
+          // email: profile['email'],
+          // subject: mailsubject,
+          // workshopName:workshopName,
+          // maildescription : maildescription,
+          // mailliveCallText : mailliveCallText,
+          // workshopurl : workshopurl,
           // }
           // await commonService.createEmailArchiveDocument({
           //   emailData : dataModel,
