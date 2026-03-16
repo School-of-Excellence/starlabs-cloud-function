@@ -35,45 +35,201 @@ function getRoomClient() {
     return roomClient;
 }
 
-exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
-  cors(req, res, async () => {
-		if (req.method !== "POST") {
-			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
-		}
+const CONFIG = {
+    maxRoomsPerInstance: 1
+};
 
-		const { roomName, participantName, participantId } = req.body;
+exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET, mediaASGName]}, async (req, res) => {
+    cors(req, res, async () => {
+        if (req.method !== "POST") {
+            return res.status(405).json({ error: "Method Not Allowed. Only POST allowed" });
+        }
 
-		if (!roomName || !participantName) {
-			return res.status(400).json({
-				error: "roomName and participantName are required",
-			});
-		}
+        const { roomName, participantName, participantId } = req.body;
 
-		try {
-			const liveKitApiKey = LIVEKIT_API_KEY.value();
-			const livekitApiSecret = LIVEKIT_API_SECRET.value();
-			const livekitURL = LIVEKIT_URL.value();
+        if (!roomName || !participantName) {
+            return res.status(400).json({
+                error: "roomName and participantName are required",
+            });
+        }
 
-			const at = new livekitServer.AccessToken(liveKitApiKey, livekitApiSecret, {
-				identity: participantId,
-				name: participantName,
-			});
+        console.log(`[${roomName}] Token request from: ${participantName} (${participantId})`);
 
-			at.addGrant({
-				roomJoin: true,
-				room: roomName,
-				canSubscribe: true,
-			});
+        try {
+            // Initialize AWS
+            const autoscaling = new AWS.AutoScaling({
+                region: 'us-east-1',
+                accessKeyId: AWS_ACCESS_KEY.value(),
+                secretAccessKey: AWS_SECRET.value()
+            });
 
-			const token = await at.toJwt();
+            // Initialize LiveKit Room Client
+            const roomClient = new livekitServer.RoomServiceClient(
+                LIVEKIT_URL.value(),
+                LIVEKIT_API_KEY.value(),
+                LIVEKIT_API_SECRET.value()
+            );
 
-			return res.status(200).json({ url: livekitURL, token });
-		} catch (err) {
-			console.error("Token Creation error:", err);
-      return res.status(500).json({ error: err.message || err.toString() });
-		}
-	});
+            // Check capacity BEFORE creating room
+            const canCreateRoom = await checkCapacity(autoscaling, roomClient);
+
+            if (!canCreateRoom.allowed) {
+                console.log(`[${roomName}] At capacity - scaling up`);
+                await scaleUp(autoscaling);
+                
+                return res.status(503).json({
+                    success: false,
+                    code: 'SCALING_IN_PROGRESS',
+                    message: 'All instances at capacity. Scaling in progress.',
+                    retryAfter: 60,
+                    currentRooms: canCreateRoom.activeRooms,
+                    maxRooms: canCreateRoom.maxRooms,
+                    instances: canCreateRoom.totalInstances
+                });
+            }
+
+            console.log(`[${roomName}] Capacity OK: ${canCreateRoom.activeRooms}/${canCreateRoom.maxRooms} rooms`);
+
+            // Create room (or use existing)
+            try {
+                await roomClient.createRoom({
+                    name: roomName,
+                    emptyTimeout: 300,
+                    maxParticipants: 50
+                });
+                console.log(`[${roomName}] New room created`);
+            } catch (createError) {
+                // Check if error is "room already exists"
+                if (createError.message && 
+                    (createError.message.includes('already exists') || 
+                     createError.message.includes('RoomExists'))) {
+                    console.log(`[${roomName}] Room already exists - joining existing room`);
+                } else {
+                    // Different error - throw it
+                    console.error(`[${roomName}] Room creation error:`, createError);
+                    throw createError;
+                }
+            }
+
+            // Generate token
+            const liveKitApiKey = LIVEKIT_API_KEY.value();
+            const livekitApiSecret = LIVEKIT_API_SECRET.value();
+            const livekitURL = LIVEKIT_URL.value();
+
+            const at = new livekitServer.AccessToken(liveKitApiKey, livekitApiSecret, {
+                identity: participantId,
+                name: participantName,
+            });
+
+            at.addGrant({
+                roomJoin: true,
+                room: roomName,
+                canSubscribe: true,
+                canPublish: true,
+                canPublishData: true
+            });
+
+            const token = await at.toJwt();
+
+            console.log(`[${roomName}] Token generated for ${participantName}`);
+
+            return res.status(200).json({ 
+                success: true,
+                url: livekitURL, 
+                token,
+                roomName,
+                instanceCount: canCreateRoom.totalInstances
+            });
+
+        } catch (err) {
+            console.error(`[${roomName}] Error:`, err);
+            return res.status(500).json({ 
+                success: false,
+                error: err.message || err.toString() 
+            });
+        }
+    });
 });
+
+/**
+ * Check capacity
+ */
+async function checkCapacity(autoscaling, roomClient) {
+    try {
+        const asgResult = await autoscaling.describeAutoScalingGroups({
+            AutoScalingGroupNames: [mediaASGName.value()]
+        }).promise();
+
+        const asg = asgResult.AutoScalingGroups[0];
+        const instances = asg.Instances.filter(i => i.LifecycleState === 'InService');
+        const totalInstances = instances.length;
+
+        if (totalInstances === 0) {
+            return {
+                allowed: false,
+                activeRooms: 0,
+                maxRooms: 0,
+                totalInstances: 0,
+                reason: 'No instances running'
+            };
+        }
+
+        const rooms = await roomClient.listRooms();
+        const activeRoomCount = rooms.length;
+        const maxRooms = totalInstances * CONFIG.maxRoomsPerInstance;
+        const allowed = activeRoomCount < maxRooms;
+
+        console.log(`Capacity: ${activeRoomCount}/${maxRooms} rooms (${totalInstances} instances)`);
+
+        return {
+            allowed,
+            activeRooms: activeRoomCount,
+            maxRooms,
+            totalInstances,
+            desiredCapacity: asg.DesiredCapacity,
+            maxSize: asg.MaxSize
+        };
+    } catch (error) {
+        console.error('Capacity check error:', error.message);
+        throw error;
+    }
+}
+
+/**
+ * Scale up by 1 instance
+ */
+async function scaleUp(autoscaling) {
+    try {
+        const result = await autoscaling.describeAutoScalingGroups({
+            AutoScalingGroupNames: [mediaASGName.value()]
+        }).promise();
+
+        const asg = result.AutoScalingGroups[0];
+        const current = asg.DesiredCapacity;
+        const max = asg.MaxSize;
+
+        if (current >= max) {
+            console.log(`Already at max capacity (${max} instances)`);
+            return false;
+        }
+
+        const newCapacity = current + 1;
+        console.log(`Scaling up: ${current} → ${newCapacity} instances`);
+
+        await autoscaling.setDesiredCapacity({
+            AutoScalingGroupName: mediaASGName.value(),
+            DesiredCapacity: newCapacity,
+            HonorCooldown: false
+        }).promise();
+
+        console.log(`✓ Scaled to ${newCapacity} instances`);
+        return true;
+    } catch (error) {
+        console.error('Scale up failed:', error.message);
+        return false;
+    }
+}
+
 
 exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET] }, async (req, res) => {
 	cors(req, res, async () => {
@@ -475,7 +631,7 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 
 
 		// Stop master node if idle
-		if (masterRunning && activeRooms === 0) {
+		if (masterRunning && activeRooms === 0 && meetings.length === 0) {
 			console.log('No active rooms and no upcoming meetings');
 			await stopMasterNode();
 			console.log('Master node stopped successfully');

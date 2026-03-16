@@ -372,14 +372,29 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 productname: afterData['productname']
               }
               console.log("sending email");
-              await commonService.postmarkClient.sendEmailWithTemplate({
-                From: "starlabs@excellenceinstallation.com",
-                To: profiledata["email"],
-                TemplateAlias: "queue_stage_formtype",
-                TemplateModel: clientModel,
-              }).catch(err=>{
-                console.log(err)
+              // await commonService.postmarkClient.sendEmailWithTemplate({
+              //   From: "starlabs@excellenceinstallation.com",
+              //   To: profiledata["email"],
+              //   TemplateAlias: "queue_stage_formtype",
+              //   TemplateModel: clientModel,
+              // }).catch(err=>{
+              //   console.log(err)
+              // });
+
+              await commonService.createEmailArchiveDocument({
+                emailData : clientModel,
+                datamodel : clientModel,
+                attachments : [],
+                emailTo : [profiledata["email"]],
+                emailMap : [{[profiledata["email"]] : profileid}],
+                fileURL : '',
+                from:'starlabs@excellenceinstallation.com',
+                notes : '',
+                profileId : [profileid],
+                postmarkTemplateId: '31423529',
+                templateAlias:'queue_stage_formtype'
               });
+
             // mobileapp
               console.log("sending app notification");
               await commonService.saveNotificationRecord({
@@ -422,14 +437,29 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               productname:afterData['productname']
             }
             console.log("sending link email");
-            await commonService.postmarkClient.sendEmailWithTemplate({
-              From: "starlabs@excellenceinstallation.com",
-              To: profiledata["email"],
-              TemplateAlias: "queue_stage_actiontype_link",
-              TemplateModel: clientModel,
-            }).catch(err=>{
-              console.log(err)
+            // await commonService.postmarkClient.sendEmailWithTemplate({
+            //   From: "starlabs@excellenceinstallation.com",
+            //   To: profiledata["email"],
+            //   TemplateAlias: "queue_stage_actiontype_link",
+            //   TemplateModel: clientModel,
+            // }).catch(err=>{
+            //   console.log(err)
+            // });
+
+            await commonService.createEmailArchiveDocument({
+              emailData : clientModel,
+              datamodel : clientModel,
+              attachments : [],
+              emailTo : [profiledata["email"]],
+              emailMap : [{[profiledata["email"]] : profiledata['profileid']}],
+              fileURL : '',
+              from:'starlabs@excellenceinstallation.com',
+              notes : '',
+              profileId : [profileid],
+              postmarkTemplateId: '31423534',
+              templateAlias:'queue_stage_actiontype_link'
             });
+
             // mobileapp
             console.log("sending app notification");
             await commonService.saveNotificationRecord({
@@ -806,14 +836,30 @@ exports.studioZoomLink = onDocumentCreated({
       var receiverList = [liveassignmentData["participantid"]]
       for (let i = 0; i < receiverList.length; i++) {
         const receiver = receiverList[i];
-        await commonService.postmarkClient.sendEmailWithTemplate({
-          From: "starlabs@excellenceinstallation.com",
-          To: mapProfile[receiver]["email"],
-          TemplateAlias: "queuestudioinvitation",
-          TemplateModel: clientModel,
-        }).catch(err=>{
-          console.log(err)
-        }); 
+
+        // await commonService.postmarkClient.sendEmailWithTemplate({
+        //   From: "starlabs@excellenceinstallation.com",
+        //   To: mapProfile[receiver]["email"],
+        //   TemplateAlias: "queuestudioinvitation",
+        //   TemplateModel: clientModel,
+        // }).catch(err=>{
+        //   console.log(err)
+        // }); 
+
+        await commonService.createEmailArchiveDocument({
+          emailData : clientModel,
+          datamodel : clientModel,
+          attachments : [],
+          emailTo : [mapProfile[receiver]["email"]],
+          emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+          fileURL : '',
+          from:'starlabs@excellenceinstallation.com',
+          notes : '',
+          profileId : [receiver],
+          postmarkTemplateId: '42760699',
+          templateAlias:'queuestudioinvitation'
+        });
+
       }
 
       // Send Watti
@@ -1309,14 +1355,29 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
     var receiverList = [liveassignmentData["participantid"]]
     for (let i = 0; i < receiverList.length; i++) {
       const receiver = receiverList[i];
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: mapProfile[receiver]["email"],
-        TemplateAlias: "queuestudioinvitation",
-        TemplateModel: clientModel,
-      }).catch(err=>{
-        console.log(err)
-      }); 
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: mapProfile[receiver]["email"],
+      //   TemplateAlias: "queuestudioinvitation",
+      //   TemplateModel: clientModel,
+      // }).catch(err=>{
+      //   console.log(err)
+      // }); 
+
+      await commonService.createEmailArchiveDocument({
+        emailData : clientModel,
+        datamodel : clientModel,
+        attachments : [],
+        emailTo : [mapProfile[receiver]["email"]],
+        emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+        fileURL : '',
+        from:'starlabs@excellenceinstallation.com',
+        notes : '',
+        profileId : [receiver],
+        postmarkTemplateId: '42760699',
+        templateAlias:'queuestudioinvitation'
+      });
+
     }
 
     // Send Watti
@@ -2374,14 +2435,30 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     zoomlink: zoomlink,
     company_name: "Antano & Harini",
   }
-  await commonService.postmarkClient.sendEmailWithTemplate({
-    From: "starlabs@excellenceinstallation.com",
-    To: email,
-    TemplateAlias: "queueavtest",
-    TemplateModel: messageModel,
-  }).catch(err=>{
-    console.log(err)
-  }); 
+
+  // await commonService.postmarkClient.sendEmailWithTemplate({
+  //   From: "starlabs@excellenceinstallation.com",
+  //   To: email,
+  //   TemplateAlias: "queueavtest",
+  //   TemplateModel: messageModel,
+  // }).catch(err=>{
+  //   console.log(err)
+  // }); 
+
+  await commonService.createEmailArchiveDocument({
+    emailData: messageModel,
+    datamodel: messageModel,
+    attachments: [],
+    emailTo: [email],
+    emailMap: [{ [email]: data["profileid"] }],
+    fileURL: '',
+    from: 'starlabs@excellenceinstallation.com',
+    notes: '',
+    profileId: [data["profileid"]],
+    postmarkTemplateId: '33910948',
+    templateAlias: 'queueavtest'
+  });
+
   // App notification
   if(profileUID != null){
     var message = `Hi ${profileData['name']}, You’re invited for a brief audio-video test on Zoom to ensure everything is set before your session. The Zoom link has been sent to your email. Please join from your laptop.`

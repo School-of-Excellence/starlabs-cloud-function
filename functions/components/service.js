@@ -1011,7 +1011,7 @@ async function createEmailArchiveDocument({
 	}
 	console.log('Broadcast Name',broadcast_name);
 	
-	await admin.firestore().collection('email templates').where('postmarktemplateid','==',parseInt(postmarkTemplateId)).limit(1).get().then(async(templatedoc)=>{
+	await admin.firestore().collection('email templates').where('templatealias','==',templateAlias).limit(1).get().then(async(templatedoc)=>{
 		
 		if(templatedoc.docs.length != 0){
 			templateData = templatedoc.docs[0].data();
@@ -1031,7 +1031,7 @@ async function createEmailArchiveDocument({
 				fileUrl:fileURL,
 				from:from,
 				notes:notes,
-				postmarktemplateid: postmarkTemplateId,
+				postmarktemplateid: postmarkTemplateId || null,
 				profileid: profileId,
 				sent: [],
 				status:'send',

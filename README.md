@@ -1,16 +1,37 @@
-## Setup
+# Cloud Functions Setup
 
-1. Install the Firebase CLI.
-2. Select the appropriate Firebase project alias:
+## Prerequisites
 
-   ```bash
-   firebase use <alias>
+Install Firebase CLI:
 
-    alias 
-    1. default - Test project
-    2. production - Product project
+```bash
+npm install -g firebase-tools
+```
 
-3. To Deploy
+## Deployment
 
-  ```bash
-  firebase deploy --only functions:<FunctionName>
+### 1. Select Project
+
+```bash
+firebase use <alias>
+```
+
+**Available aliases:**
+- `default` - Test project
+- `production` - Production project
+
+### 2. Deploy Function
+
+```bash
+firebase deploy --only functions:<FunctionName>
+```
+
+### 3. Push Code
+
+After deployment, commit and push your changes:
+
+```bash
+git add .
+git commit -m "your message"
+git push origin development
+```
