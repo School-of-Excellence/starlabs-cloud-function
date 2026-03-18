@@ -2155,7 +2155,7 @@ async function sendWatiTemplateMsg(body, broadcastData) {
 
   await admin.firestore().collection('classify').doc('wati').get().then((wati) => {
     if (wati.exists) {
-      apikey = wati.data()['wati'].find(e => e['endpoint'] === broadcastData['serverurl'])?.['watitoken'];
+      apikey = wati.data()[broadcastData['serverid']]['watitoken'];
     }
   });
 
@@ -3486,7 +3486,7 @@ exports.workshopprogressmessagev2 = onRequest({
       if(wati.exists) {
         const watiData = wati.data()['101723']
         apikey = watiData['watitoken'];
-        serverid = watiData["101723"];
+        serverid = '101723';
       }
     })
 
@@ -3877,8 +3877,8 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
         const watiData = wati.data()['101723']
-        apikey = watiData['watotoken'];
-        serverid = watiData["101723"];
+        apikey = watiData['watitoken'];
+        serverid = "101723";
       }
     })
 
@@ -4009,7 +4009,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
         if(wati.exists) {
           const watiData = wati.data()['101723'];
           apikey = watiData['watitoken'];
-          serverid = watiData["101723"];
+          serverid = "101723";
         }
       })
 

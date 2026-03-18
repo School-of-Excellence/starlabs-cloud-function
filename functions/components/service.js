@@ -172,7 +172,7 @@ async function sendToWhatsappViaWati(data) {
 		if(wati.exists) {
 			const watiData = wati.data()['101723']
 			apikey = watiData['watitoken'];
-			serverid = watiData["101723"];
+			serverid = "101723";
 		}
 	})
 
