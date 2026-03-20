@@ -1539,11 +1539,33 @@ exports.appointmentremainder = onSchedule({schedule: "every 5 minutes"}, async (
                 template_name: 'onboarding_1hr_reminder_v1'
               }
             };
-    
-            await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-              console.log("Wati Appointment Remainder Error")
-              console.log(err)
+
+            const parameterConfig = watiParams.map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+            
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(profileData['number'])],
+              numbermap : {[`${profileData['number']}`] : profileData.id},
+              broadcastname : 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileData.id],
+              templateid: null,
+              watitemplateid: 'onboarding_1hr_reminder_v1',
             });
+            console.log('WATI ARCHIVE RESPONSE', response);
+            
+            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+            //   console.log("Wati Appointment Remainder Error")
+            //   console.log(err)
+            // });
           }
         } catch (error) {
           console.log("Wati Appointment Remainder Exception")

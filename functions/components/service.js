@@ -967,6 +967,7 @@ module.exports = {
 	updateParticipantTouchPoint,
 	generateZoomMeeting,
 	createEmailArchiveDocument,
+	createWatiArchiveDocument
 }
 
 async function createEmailArchiveDocument({
@@ -1050,4 +1051,64 @@ async function createEmailArchiveDocument({
 		}
 	});
 
+}
+
+async function createWatiArchiveDocument({
+	numbers = '', // Array of string numbers 
+	numbermap = {}, // Object {'phonenumber': 'profileid'}
+	broadcastname = '', // String
+	paramFillMode = '', // String data fetch from static,metadata,excel
+	parameterConfig = [{}], //Array of Object [{excelColumn: null,fillType: 'static',metadataField: null,name: param.namestaticValue: param.value}],
+	params = [], // Array of parameter fields
+	profileid = [], // Array of profileids
+	templateid = '', // template ID from wati 
+	watitemplateid = '', // String template name
+}){
+	console.log('Started creating Wati Archive');
+	
+	const now = new Date();
+	const day = String(now.getDate()).padStart(2, '0');
+	const month = String(now.getMonth() + 1).padStart(2, '0');
+	const year = now.getFullYear();
+	const hours = String(now.getHours()).padStart(2, '0');
+	const minutes = String(now.getMinutes()).padStart(2, '0');
+	const seconds = String(now.getSeconds()).padStart(2, '0');
+
+	const broadCastName = `${broadcastname}_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`
+
+	const docid = admin.firestore().collection('wati archive').doc().id;
+
+	try {
+		await admin.firestore().collection('wati archive').doc(docid).set({
+			docid: docid,
+			body : null,
+			numbers: numbers,
+			createdby: null,
+			date: new Date(),
+			numbermap: numbermap,
+			broadcastname: broadCastName,
+			paramFillMode: paramFillMode,
+			parameterConfig: parameterConfig,
+			params: params,
+			profileid: profileid,
+			sentAt : new Date(),
+			serverid: '101723',
+			serverurl: `https://live-mt-server.wati.io/${'101723'}`,
+			status: 'sent',
+			templateid: templateid,
+			templatevalidated: true,
+			validated: true,
+			watitemplateid: watitemplateid
+		}).then(() => {
+			console.log('Wati Archive Created Successfully');
+			return 'Wati Archive Created Successfully';
+		}).catch((err) => {
+			console.error('Oops Error while creating Wati archive', err);
+			return `Oops Error while creating Wati archive, ${err}`
+		});
+	} catch (error) {
+		console.log('Oops error', error);
+		return error;
+	};
+	
 }
