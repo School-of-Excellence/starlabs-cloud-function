@@ -530,7 +530,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
         await admin.firestore().collection("EISzoomcontact").doc(host.id).get().then(async contact=>{
           if(contact.exists){
             hosts.push({
-              profileid: contact.id,
+              profileid: host.id,
               name: contact.data()["name"],
               email: contact.data()["email"],
               role: roleName
@@ -1010,7 +1010,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         fileURL : '',
         from:'starlabs@excellenceinstallation.com',
         notes : '',
-        profileId : [bookedby.profileid],
+        profileId : [element.profileid],
         postmarkTemplateId: '24640180',
         templateAlias:'appointment-cancelled'
       }).then(()=>{
@@ -1561,11 +1561,33 @@ exports.appointmentremainder = onSchedule({schedule: "every 5 minutes"}, async (
                 template_name: 'onboarding_1hr_reminder_v1'
               }
             };
-    
-            await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-              console.log("Wati Appointment Remainder Error")
-              console.log(err)
+
+            const parameterConfig = watiParams.map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+            
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(profileData['number'])],
+              numbermap : {[`${profileData['number']}`] : profileData.id},
+              broadcastname : 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileData.id],
+              templateid: null,
+              watitemplateid: 'onboarding_1hr_reminder_v1',
             });
+            console.log('WATI ARCHIVE RESPONSE', response);
+            
+            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+            //   console.log("Wati Appointment Remainder Error")
+            //   console.log(err)
+            // });
           }
         } catch (error) {
           console.log("Wati Appointment Remainder Exception")
