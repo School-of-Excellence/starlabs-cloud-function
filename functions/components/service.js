@@ -27,11 +27,14 @@ const https = require('https'); // HTTP Request/Response
 
 const KJUR = require('jsrsasign');
 
-var monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sept", "Oct", "Nov", "Dec"];
+const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sept", "Oct", "Nov", "Dec"];
 
 // Post Mark
-var postmark = require("postmark");
-var postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+const postmark = require("postmark");
+const postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+
+// Event wati Server ID
+const eventWatiServerId = '101723';
 
 const axios = require("axios"); // Promise based HTTP Client
 
@@ -170,9 +173,9 @@ async function sendToWhatsappViaWati(data) {
 	var serverid = null;
 	await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
 		if(wati.exists) {
-			const watiData = wati.data()['101723']
+			const watiData = wati.data()[eventWatiServerId]
 			apikey = watiData['watitoken'];
-			serverid = "101723";
+			serverid = eventWatiServerId;
 		}
 	})
 
@@ -1092,8 +1095,8 @@ async function createWatiArchiveDocument({
 			params: params,
 			profileid: profileid,
 			sentAt : new Date(),
-			serverid: '101723',
-			serverurl: `https://live-mt-server.wati.io/${'101723'}`,
+			serverid: eventWatiServerId,
+			serverurl: `https://live-mt-server.wati.io/${eventWatiServerId}`,
 			status: 'sent',
 			templateid: templateid,
 			templatevalidated: true,

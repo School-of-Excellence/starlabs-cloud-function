@@ -3484,9 +3484,9 @@ exports.workshopprogressmessagev2 = onRequest({
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()['101723']
+        const watiData = wati.data()[commonService.eventWatiServerId]
         apikey = watiData['watitoken'];
-        serverid = '101723';
+        serverid = commonService.eventWatiServerId;
       }
     })
 
@@ -3876,9 +3876,9 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()['101723']
+        const watiData = wati.data()[commonService.eventWatiServerId]
         apikey = watiData['watitoken'];
-        serverid = "101723";
+        serverid = commonService.eventWatiServerId;
       }
     })
 
@@ -4007,9 +4007,9 @@ exports.workshopenrolledwatti = onDocumentCreated(
       var serverid = null;
       await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
         if(wati.exists) {
-          const watiData = wati.data()['101723'];
+          const watiData = wati.data()[commonService.eventWatiServerId];
           apikey = watiData['watitoken'];
-          serverid = "101723";
+          serverid = commonService.eventWatiServerId;
         }
       })
 
