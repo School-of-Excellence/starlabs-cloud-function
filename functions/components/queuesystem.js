@@ -95,27 +95,27 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
 
         // await commonService.sendToWhatsappViaWati(waticontent);
 
-          const parameterConfig = waticontent['body']['parameters'].map(param => ({
-            excelColumn: null,
-            fillType: 'static',
-            metadataField: null,
-            name: param.name,
-            staticValue: param.value
-          }));
-          console.log('Triggered Wati Archive Creation');
-          
-          const response = await commonService.createWatiArchiveDocument({
-            numbers: [parseInt(waticontent['phonenumber'])],
-            numbermap : {[`${waticontent['phonenumber']}`] : profileid},
-            broadcastname : 'Individual',
-            paramFillMode: 'static',
-            parameterConfig: parameterConfig,
-            params: [],
-            profileid: [profileid],
-            templateid: null,
-            watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
-          });
-          console.log('WATI ARCHIVE RESPONSE', response);
+        const parameterConfig = waticontent['body']['parameters'].map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+        console.log('Triggered Wati Archive Creation');
+        
+        const response = await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap : {[`${waticontent['phonenumber']}`] : profileid},
+          broadcastname : 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [profileid],
+          templateid: null,
+          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+        });
+        console.log('WATI ARCHIVE RESPONSE', response);
 
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
 
@@ -176,7 +176,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           params: [],
           profileid: [profileid],
           templateid: null,
-          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+          watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
         });
         console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -383,7 +383,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             params: [],
             profileid: [profileid],
             templateid: null,
-            watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+            watitemplateid: queueGenerationDoc['queuewelcometemplate'],
           });
           console.log('WATI ARCHIVE RESPONSE', response);
 

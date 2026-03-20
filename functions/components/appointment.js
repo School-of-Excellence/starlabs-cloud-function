@@ -115,6 +115,7 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         }
         var date = ""
         var hosts = [{
+          profileid: "",
           name: "",
           email: "",
           role: "",
@@ -443,6 +444,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     }
     var date = ""
     var hosts = [{
+      profileid: "",
       name: "",
       email: "",
       role: "",
@@ -520,6 +522,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
         await admin.firestore().collection("EISzoomcontact").doc(host.id).get().then(async contact=>{
           if(contact.exists){
             hosts.push({
+              profileid: host.id,
               name: contact.data()["name"],
               email: contact.data()["email"],
               role: roleName
@@ -533,6 +536,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
           else{
             await admin.firestore().doc(host.path).get().then(profile=>{
               hosts.push({
+                profileid: host.id,
                 name: profile.data()["name"],
                 email: profile.data()["email"],
                 role: roleName
@@ -898,6 +902,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       await admin.firestore().collection("EISzoomcontact").doc(element.id).get().then(async contact=>{
         if(contact.exists){
           hosts.push({
+            profileid: element.id,
             name: contact.data()["name"],
             email: contact.data()["email"],
           })
@@ -905,6 +910,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         else{
           await admin.firestore().doc(element.path).get().then(profile=>{
             hosts.push({
+              profileid: element.id,
               name: profile.data()["name"],
               email: profile.data()["email"],
             })
@@ -980,15 +986,15 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       // });
 
       await commonService.createEmailArchiveDocument({
-        emailData : clientModel,
-        datamodel : clientModel,
+        emailData : hostModel,
+        datamodel : hostModel,
         attachments : [],
-        emailTo : [bookedby.email],
-        emailMap : [{[bookedby['email']] : bookedby.profileid}],
+        emailTo : [element.email],
+        emailMap : [{[element['email']] : element.profileid}],
         fileURL : '',
         from:'starlabs@excellenceinstallation.com',
         notes : '',
-        profileId : [bookedby.profileid],
+        profileId : [element.profileid],
         postmarkTemplateId: '24640180',
         templateAlias:'appointment-cancelled'
       }).then(()=>{
