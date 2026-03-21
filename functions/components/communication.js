@@ -1889,24 +1889,93 @@ async function sendWatiBroadCast(watiarchiveid) {
   console.log("Total batches:", batchList.length);
   console.log("First batch sample:", JSON.stringify(batchList[0]?.receivers?.[0]));
 
+  let sentNumbers = [];
+  let failedNumbers = [];
+
   // ── 6. Send all batches ───────────────────────────────────────────────
   for (let b = 0; b < batchList.length; b++) {
     const watiContent = batchList[b];
+    const batchNumbers = watiContent.receivers.map(r => r.whatsappNumber);
     try {
       const response = await sendWatiTemplateMsg(watiContent, broadCastData);
       console.log(`Batch ${b + 1} sent (${watiContent['broadcast_name']}):`, response);
+
+      if (response && response.result === true) {
+        const errors = response.errors || {};
+        const invalidWhatsapp = errors.invalidWhatsappNumbers || [];
+        const invalidParams = errors.invalidCustomParameters || [];
+
+        const invalidParamNumbers = invalidParams.map(msg => {
+          const match = msg.match(/contact\s+(\d+)/);
+          return match ? match[1] : null;
+        }).filter(Boolean);
+
+        // Combine all failed numbers for this batch
+        const batchFailed = new Set([...invalidWhatsapp, ...invalidParamNumbers]);
+
+        // Separate sent vs failed
+        batchNumbers.forEach(num => {
+          if (batchFailed.has(num)) {
+            failedNumbers.push(num);
+          } else {
+            sentNumbers.push(num);
+          }
+        });
+      } else {
+        // response.result is not true — treat entire batch as failed
+        failedNumbers.push(...batchNumbers);
+      }
+
     } catch (error) {
       console.error(`Batch ${b + 1} failed (${watiContent['broadcast_name']}):`, error);
+      failedNumbers.push(...batchNumbers);
     }
   }
 
   // ── 7. Update archive status ──────────────────────────────────────────
-  await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+
+  const updatePayload = {
     status: 'sent',
     sentAt: admin.firestore.FieldValue.serverTimestamp(),
     batchCount: batchList.length,
-    totalSent: broadCastData['numbers'].length
+    totalSent: sentNumbers.length,
+    totalFailed: failedNumbers.length,
+  };
+
+  if (sentNumbers.length > 0) {
+    updatePayload.sent = sentNumbers;
+  }
+  if (failedNumbers.length > 0) {
+    updatePayload.failed = failedNumbers;
+  }
+
+  await admin.firestore().collection('wati archive').doc(watiarchiveid).update(updatePayload).then(()=>{
+    console.log('Wati Archive Updated Successfully',`Total Sent: ${sentNumbers.length}, Total Failed: ${failedNumbers.length},`);
+  }).catch((error)=>{
+    console.log('Error while updating wati Archive', error);
   });
+
+  // await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //   status: 'sent',
+  //   sentAt: admin.firestore.FieldValue.serverTimestamp(),
+  //   batchCount: batchList.length,
+  //   totalSent: sentNumbers.length,
+  //   totalFailed: failedNumbers.length,
+  //   sent: admin.firestore.FieldValue.arrayUnion(...(sentNumbers.length ? sentNumbers : ['__placeholder__'])),
+  //   failed: admin.firestore.FieldValue.arrayUnion(...(failedNumbers.length ? failedNumbers : ['__placeholder__'])),
+  // });
+
+  // // Remove placeholder if no items existed
+  // if (sentNumbers.length === 0) {
+  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //     sent: admin.firestore.FieldValue.delete()
+  //   });
+  // }
+  // if (failedNumbers.length === 0) {
+  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //     failed: admin.firestore.FieldValue.delete()
+  //   });
+  // }
 
   return {
     success: true,
