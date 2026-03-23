@@ -519,7 +519,7 @@ async function updateSalesLead(leaddata, flag) {
 	}
 
 
-	if (leaddata['completed']['tentativeschedule'].length != 0) {
+	if (![null, undefined].includes(leaddata['completed']['tentativeschedule']) && leaddata['completed']['tentativeschedule'].length != 0) {
 		element['tentativeschedule'] = leaddata['completed']['tentativeschedule'].map(item => {
 			let date = item.tentativestartdate;
 
@@ -540,7 +540,7 @@ async function updateSalesLead(leaddata, flag) {
 		});
 	}
 
-	if (leaddata['completed']['tentativebonusschedule'].length != 0) {
+	if (![null, undefined].includes(leaddata['completed']['tentativebonusschedule']) && leaddata['completed']['tentativebonusschedule'].length != 0) {
 		element['tentativebonusschedule'] = leaddata['completed']['tentativebonusschedule'].map(item => {
 			let date = item.tentativestartdate;
 
