@@ -99,45 +99,66 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
                 LIVEKIT_API_SECRET.value()
             );
 
-            // Check capacity BEFORE creating room
-            const canCreateRoom = await checkCapacity(autoscaling, roomClient);
+            let roomExists = false;
+            try {
+              const existingRooms = await roomClient.listRooms([roomName]);
+              roomExists = existingRooms.length > 0;
+              console.log(`[${roomName}] Room exists: ${roomExists}`);
+            } catch (error) {
+              console.log(`[${roomName}] Could not check room existence:`, error.message);
+              roomExists = false;
+            }
 
-            if (!canCreateRoom.allowed) {
+            const canCreateRoom = await checkCapacity(autoscaling, roomClient);
+            if (!roomExists) {
+              console.log(`[${roomName}] Room doesn't exist - checking capacity before creating`);
+
+              // Initialize AWS
+              const autoscaling = getAutoScaling();
+
+              // Check capacity BEFORE creating room
+              // const canCreateRoom = await checkCapacity(autoscaling, roomClient);
+
+              if (!canCreateRoom.allowed) {
                 console.log(`[${roomName}] At capacity - scaling up`);
                 await scaleUp(autoscaling);
                 
                 return res.status(503).json({
-                    success: false,
-                    code: 'SCALING_IN_PROGRESS',
-                    message: 'All instances at capacity. Scaling in progress.',
-                    retryAfter: 60,
-                    currentRooms: canCreateRoom.activeRooms,
-                    maxRooms: canCreateRoom.maxRooms,
-                    instances: canCreateRoom.totalInstances
+                  success: false,
+                  code: 'SCALING_IN_PROGRESS',
+                  message: 'All instances at capacity. Scaling in progress.',
+                  retryAfter: 60,
+                  currentRooms: canCreateRoom.activeRooms,
+                  maxRooms: canCreateRoom.maxRooms,
+                  instances: canCreateRoom.totalInstances
                 });
-            }
+              }
 
-            console.log(`[${roomName}] Capacity OK: ${canCreateRoom.activeRooms}/${canCreateRoom.maxRooms} rooms`);
+              console.log(`[${roomName}] Capacity OK: ${canCreateRoom.activeRooms}/${canCreateRoom.maxRooms} rooms`);
 
-            // Create room (or use existing)
-            try {
+              // Create new room
+              try {
                 await roomClient.createRoom({
-                    name: roomName,
-                    emptyTimeout: 300,
-                    maxParticipants: 50
+                  name: roomName,
+                  emptyTimeout: 300,
+                  maxParticipants: 50
                 });
-                console.log(`[${roomName}] New room created`);
-            } catch (createError) {
-                // Check if error is "room already exists"
+                console.log(`[${roomName}] ✅ New room created`);
+              } catch (createError) {
+                // Check if error is "room already exists" (race condition)
                 if (createError.message && 
                     (createError.message.includes('already exists') || 
-                     createError.message.includes('RoomExists'))) {
-                    console.log(`[${roomName}] Room already exists - joining existing room`);
+                    createError.message.includes('RoomExists'))) {
+                  console.log(`[${roomName}] Room was created by another request - continuing`);
                 } else {
-                    // Different error - throw it
-                    console.error(`[${roomName}] Room creation error:`, createError);
-                    throw createError;
+                  // Different error - throw it
+                  console.error(`[${roomName}] Room creation error:`, createError);
+                  throw createError;
                 }
+              }
+            } else {
+              // ✅ Room already exists - just join it (no capacity check, no scaling)
+              console.log(`[${roomName}] ✅ Joining existing room (no capacity check)`);
             }
 
             // Generate token
@@ -718,123 +739,206 @@ async function isMasterNodeRunning() {
 
 
 async function createRoomForMeeting(meeting) {
-    const client = getRoomClient();
+  try {
     const roomName = meeting.id;
     
-    try {
-        // Create the room in LiveKit
-        const room = await client.createRoom({
-            name: roomName,
-            emptyTimeout: 300, // Auto-close room 5 minutes after last participant leaves
-            maxParticipants: 10, 
-            metadata: JSON.stringify({
-                meetingId: meeting.id,
-                startTime: meeting.starttime.toDate().toISOString(),
-                createdAt: new Date().toISOString()
-            })
+    console.log(`[Pre-create] Creating room for meeting ${meeting.id}`);
+    
+    // Initialize clients
+    const autoscaling = getAutoScaling();
+    const roomClient = new livekitServer.RoomServiceClient(
+      LIVEKIT_URL.value(),
+      LIVEKIT_API_KEY.value(),
+      LIVEKIT_API_SECRET.value()
+    );
+
+    // ✅ STEP 1: Check if room exists (with retry for LiveKit not ready)
+    let roomExists = false;
+    let retries = 3;
+    
+    while (retries > 0) {
+      try {
+        const existingRooms = await roomClient.listRooms([roomName]);
+        roomExists = existingRooms.length > 0;
+        console.log(`[Pre-create] Room ${roomName} exists: ${roomExists}`);
+        break; // Success, exit retry loop
+      } catch (error) {
+        retries--;
+        if (error.status === 503 && retries > 0) {
+          console.log(`[Pre-create] LiveKit not ready, retrying in 10s... (${retries} retries left)`);
+          await sleep(10000);
+        } else {
+          console.log(`[Pre-create] Could not check room existence: ${error.message}`);
+          roomExists = false;
+          break;
+        }
+      }
+    }
+    
+    // ✅ STEP 2: If room doesn't exist, check capacity and create
+    if (!roomExists) {
+      console.log(`[Pre-create] Room doesn't exist - checking capacity`);
+      
+      // Check capacity
+      let capacity;
+      try {
+        capacity = await checkCapacity(autoscaling, roomClient);
+      } catch (error) {
+        console.error(`[Pre-create] Capacity check failed: ${error.message}`);
+        // If capacity check fails, assume we need to scale
+        capacity = { allowed: false, activeRooms: 0, maxRooms: 0 };
+      }
+      
+      if (!capacity.allowed) {
+        console.log(`[Pre-create] At capacity (${capacity.activeRooms}/${capacity.maxRooms}) - scaling up`);
+        await scaleUp(autoscaling);
+        
+        // Wait for instance to be ready AND LiveKit to be ready
+        console.log(`[Pre-create] Waiting 90s for instance and LiveKit to be ready...`);
+        await sleep(90000); // ✅ Increased wait time
+        
+        // ✅ Wait for LiveKit to respond
+        let livekitReady = false;
+        for (let i = 0; i < 6; i++) { // Try for 60 more seconds
+          try {
+            await roomClient.listRooms();
+            livekitReady = true;
+            console.log(`[Pre-create] LiveKit is ready!`);
+            break;
+          } catch (error) {
+            console.log(`[Pre-create] LiveKit not ready yet, waiting 10s...`);
+            await sleep(10000);
+          }
+        }
+        
+        if (!livekitReady) {
+          throw new Error('LiveKit did not become ready in time');
+        }
+      } else {
+        console.log(`[Pre-create] Capacity OK: ${capacity.activeRooms}/${capacity.maxRooms} rooms`);
+      }
+      
+      // ✅ STEP 3: Create the room (ONLY ONCE)
+      try {
+        await roomClient.createRoom({
+          name: roomName,
+          emptyTimeout: 300,
+          maxParticipants: 50,
+          metadata: JSON.stringify({
+            meetingId: meeting.id,
+            startTime: meeting.starttime?.toDate().toISOString(),
+            createdAt: new Date().toISOString()
+          })
         });
         
-        console.log(`LiveKit room created: ${roomName}`);
-
-    } catch (error) {
-        if (error.message && error.message.includes('already exists')) {
-            console.log(`LiveKit room ${roomName} already exists - continuing with Firestore setup`);
+        console.log(`[Pre-create] ✅ Room ${roomName} created in LiveKit`);
+      } catch (createError) {
+        if (createError.message && createError.message.includes('already exists')) {
+          console.log(`[Pre-create] Room ${roomName} already exists - continuing`);
         } else {
-            throw error;
+          throw createError;
         }
+      }
+    } else {
+      console.log(`[Pre-create] ✅ Room ${roomName} already exists, skipping creation`);
     }
-
+    
+    // ✅ STEP 4: Update Firestore (appointments + openviduroom)
     try {
-        // Update appointment document
-        await admin.firestore()
-            .collection('appointments')
-            .doc(meeting.id)
-            .update({
-                livekitRoomName: roomName,
-                livekitRoomCreated: true,
-                livekitRoomCreatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
+      // Get host and participant info
+      const hostIds = meeting.hosts ? meeting.hosts.map(ref => {
+        return ref.path?.split('/').pop() || ref.id;
+      }) : [];
 
-        const hostIds = meeting.hosts ? meeting.hosts.map(ref => {
-            return ref.path?.split('/').pop() || ref.id;
-        }) : [];
+      const participantid = meeting.bookedby?.id || meeting.bookedby;
 
-        const participantid = meeting.bookedby?.id || meeting.bookedby;
+      // Fetch profile data
+      const mapProfile = {};
+      const profilesSnapshot = await admin.firestore()
+        .collection('profile_data')
+        .get();
+      
+      profilesSnapshot.forEach(doc => {
+        mapProfile[doc.id] = doc.data().name || 'Unknown';
+      });
 
-        // Fetch profile data 
-        const mapProfile = {};
-        const profilesSnapshot = await admin.firestore()
-            .collection('profile_data')
-            .get();
+      // Fetch appointment type name
+      let appointmentTypeName = 'Appointment';
+      if (meeting.appointment?.id) {
+        const appointmentDoc = await admin.firestore()
+          .collection('appointmenttype')
+          .doc(meeting.appointment.id)
+          .get();
         
-        profilesSnapshot.forEach(doc => {
-            mapProfile[doc.id] = doc.data().name || 'Unknown';
+        if (appointmentDoc.exists) {
+          appointmentTypeName = appointmentDoc.data().appointmenttype || 'Appointment';
+        }
+      }
+
+      const participantName = mapProfile[participantid] || 'Guest';
+      const hostNames = hostIds.map(hostId => mapProfile[hostId] || 'Unknown').join(', ');
+      const title = `${participantName} - ${appointmentTypeName} (${hostNames})`;
+
+      // Create/update openviduroom document
+      const roomRef = admin.firestore()
+        .collection('openviduroom')
+        .doc(meeting.id);
+
+      const roomDoc = await roomRef.get();
+
+      if (!roomDoc.exists) {
+        await roomRef.set({
+          active: true,
+          createddate: admin.firestore.FieldValue.serverTimestamp(),
+          hosts: hostIds,
+          metadata: {
+            sessiontype: "appointment",
+            sessionid: meeting.id,
+            roomid: meeting.id,
+            appointmentid: meeting.id,
+            participantid: participantid,
+            title: title
+          }
+        });
+        console.log(`[Pre-create] Firestore room document created: ${meeting.id}`);
+      } else {
+        if (!roomDoc.data().active) {
+          await roomRef.update({
+            active: true,
+            metadata: {
+              ...roomDoc.data().metadata,
+              title: title
+            }
+          });
+          console.log(`[Pre-create] Firestore room document reactivated: ${meeting.id}`);
+        } else {
+          console.log(`[Pre-create] Firestore room document already active: ${meeting.id}`);
+        }
+      }
+
+      // ✅ STEP 5: Mark appointment as pre-created
+      await admin.firestore()
+        .collection('appointments')
+        .doc(meeting.id)
+        .update({
+          livekitRoomPreCreated: true, 
+          livekitRoomName: roomName,
+          livekitRoomCreatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // Fetch appointment type name
-        let appointmentTypeName = 'Appointment';
-        if (meeting.appointment?.id) {
-            const appointmentDoc = await admin.firestore()
-                .collection('appointmenttype') 
-                .doc(meeting.appointment.id)
-                .get();
-            
-            if (appointmentDoc.exists) {
-                appointmentTypeName = appointmentDoc.data().appointmenttype || 'Appointment';
-            }
-        }
+      console.log(`[Pre-create] ✅ Appointment marked as pre-created: ${meeting.id}`);
 
-        const participantName = mapProfile[participantid] || 'Guest';
-        const hostNames = hostIds.map(hostId => mapProfile[hostId] || 'Unknown').join(', ');
-        const title = `${participantName} - ${appointmentTypeName} (${hostNames})`;
+      return { success: true, roomName };
 
-        // Create or update openviduroom document
-        const roomRef = admin.firestore()
-            .collection('openviduroom')
-            .doc(meeting.id);
-
-        const roomDoc = await roomRef.get();
-
-        if (!roomDoc.exists) {
-            // Create new room document
-            const roomData = {
-                active: true,
-                createddate: admin.firestore.FieldValue.serverTimestamp(),
-                hosts: hostIds,
-                metadata: {
-                    sessiontype: "appointment",
-                    sessionid: meeting.id,
-                    roomid: meeting.id,
-                    appointmentid: meeting.id,
-                    participantid: participantid,
-                    title: title
-                }
-            };
-            
-            await roomRef.set(roomData);
-            console.log(`Firestore room document created: ${meeting.id}`);
-        } else {
-            // Update existing room if not active
-            if (!roomDoc.data().active) {
-                await roomRef.update({ 
-                    active: true,
-                    metadata: {
-                        ...roomDoc.data().metadata,
-                        title: title
-                    }
-                });
-                console.log(`Firestore room document reactivated: ${meeting.id}`);
-            } else {
-                console.log(`Firestore room document already active: ${meeting.id}`);
-            }
-        }
-
-        return { success: true, roomName };
-
-    } catch (error) {
-        console.error(`Error setting up Firestore for meeting ${meeting.id}:`, error);
-        throw error;
+    } catch (firestoreError) {
+      console.error(`[Pre-create] Firestore update error:`, firestoreError);
+      throw firestoreError;
     }
+
+  } catch (error) {
+    console.error(`[Pre-create] Error for meeting ${meeting.id}:`, error.message);
+    throw error;
+  }
 }
 
 /**
