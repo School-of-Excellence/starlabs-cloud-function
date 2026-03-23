@@ -215,6 +215,10 @@ exports.openViduStopRecording = openViduSystem.openViduStopRecording
 exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
 exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
 exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
+exports.awsEventWebhook = openViduSystem.awsEventWebhook
+exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
+exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
+exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
