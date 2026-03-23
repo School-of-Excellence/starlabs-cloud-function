@@ -1,11 +1,14 @@
 const admin = require("firebase-admin")
 const throwParticipantMetaDataException = require("./service").throwParticipantMetaDataException
 const { onDocumentWritten } = require("firebase-functions/v2/firestore")
+const commonService = require('./service');
 
 async function updateParticipantMetadataTierAccess(profileidArg, triggerPath){
   console.log("Tier update Triggered from", triggerPath)
+  console.log("new update");
   const profileid = profileidArg
   let mapProfileData = {}
+  let previousTier = []
   await admin.firestore().collection("profile_data").where("profileid","==",profileid).get().then(snap => {
     for (let i = 0; i < snap.docs.length; i++) {
       const element = snap.docs[i].data();
@@ -13,10 +16,12 @@ async function updateParticipantMetadataTierAccess(profileidArg, triggerPath){
     }
   })
   let mapTier = {}
+  let mapTierMeta = {}
   await admin.firestore().collection("tier").get().then(tierSnap => {
     for (let i = 0; i < tierSnap.docs.length; i++) {
       const element = tierSnap.docs[i].data();
       mapTier[element['id']] = element['tier']
+      mapTierMeta[element['id']] = element;
     }
   })
   let profileData = null
@@ -30,6 +35,7 @@ async function updateParticipantMetadataTierAccess(profileidArg, triggerPath){
     await admin.firestore().collection("user").doc(userid).get().then(async userSnap => {
       console.log("checking user_data exist : ",userSnap.exists);
       if(userSnap.exists){
+        previousTier = userSnap.data()['metatier'] || []
         await admin.firestore().collection("tier access config").get().then(async tierConfigSnap => {
           let configElement = tierConfigSnap.docs.map(e => e.data())
           await admin.firestore().collection("big aggregate level").where("profileid","==",profileid).get().then(async levelAggregateSnap => {
@@ -101,10 +107,54 @@ async function updateParticipantMetadataTierAccess(profileidArg, triggerPath){
             await admin.firestore().collection("user").doc(userid).set({
               tier: convertToTierString,
               metatier: getTier
-            },{merge:true}).then(() => {
+            },{merge:true}).then(async () => {
               admin.firestore().collection("participant metadata").doc(profileid).set({
                 tier:getTier
               },{merge:true})
+              const newTierAdded = getTier.filter(t => !previousTier.includes(t))
+              const removedTier = previousTier.filter(t => !getTier.includes(t));
+              if (newTierAdded.length === 0 && removedTier.length === 0) {
+                console.log("No Change")
+                return;
+              } else {
+                for (let i = 0; i < newTierAdded.length; i++) {
+                  const element = newTierAdded[i];
+                  const tiermeta = mapTierMeta[element]
+                  if(!tiermeta) continue
+                  await commonService.saveNotificationRecord({
+                    title: `${tiermeta['tier']} - UNLOCKED`,
+                    message: tiermeta['tierUpgrademessage'] || "",
+                    subtitle: null,
+                    date: admin.firestore.FieldValue.serverTimestamp(),
+                    landingpage: null,
+                    logged: true,
+                    profileid: [profileid],
+                    sticky: false,
+                    notificationtype: "ahupdate",
+                    notificationimage: null,
+                    metadata: {}
+                  })
+                }
+                for (let i = 0; i < removedTier.length; i++) {
+                  const element = removedTier[i];
+                  const tiermeta = mapTierMeta[element]
+                  if(!tiermeta) continue
+                  await commonService.saveNotificationRecord({
+                    title: `${tiermeta['tier']} - LOCKED`,
+                    message: tiermeta['tierdowngrademessage'] || "",
+                    subtitle: null,
+                    date: admin.firestore.FieldValue.serverTimestamp(),
+                    landingpage: null,
+                    logged: true,
+                    profileid: [profileid],
+                    sticky: false,
+                    notificationtype: "ahupdate",
+                    notificationimage: null,
+                    metadata: {}
+                  })
+                } 
+              }
+
             })
           })
         })
@@ -122,10 +172,12 @@ exports.totalparticipant_tierupdate = onDocumentWritten("/tier access config/{do
     }
   })
   let mapTier = {}
+  let mapTierMeta = {}
   await admin.firestore().collection("tier").get().then(tierSnap => {
     for (let i = 0; i < tierSnap.docs.length; i++) {
       const element = tierSnap.docs[i].data();
       mapTier[element['id']] = element['tier']
+      mapTierMeta[element['id']] = element;
     }
   })
   let tierAccessConfigData = []
@@ -136,6 +188,7 @@ exports.totalparticipant_tierupdate = onDocumentWritten("/tier access config/{do
   await admin.firestore().collection("user").get().then(snap => {
     for (let i = 0; i < snap.docs.length; i++) {
       const element = snap.docs[i].data();
+      // previousTier = element['metatier'] || []
       mapUserData[snap.docs[i].id] = element
     }
   })
@@ -164,6 +217,7 @@ exports.totalparticipant_tierupdate = onDocumentWritten("/tier access config/{do
       if(![null,undefined].includes(userid)){
         // console.log("checking user_data exist : ",mapUserData.hasOwnProperty(userid));
         if(Object.prototype.hasOwnProperty.call(mapUserData,userid)){
+          let previousTier = mapUserData[userid]['metatier'] || [] 
           let configElement = tierAccessConfigData
           let levelAggregateElement = mapBigLvlData['profileid'] ? mapBigLvlData['profileid'] : []
           let tierUpdated = false
@@ -238,6 +292,48 @@ exports.totalparticipant_tierupdate = onDocumentWritten("/tier access config/{do
               console.log("batch size",n/500);
               batch = admin.firestore().batch()
             })
+          }
+          const newTierAdded = getTier.filter(t => !previousTier.includes(t))
+          const removedTier = previousTier.filter(t => !getTier.includes(t))
+          if (newTierAdded.length === 0 && removedTier.length === 0) {
+            console.log("No Change for", profileid)
+          } else {
+            for (let i = 0; i < newTierAdded.length; i++) {
+              const element = newTierAdded[i];
+              const tiermeta = mapTierMeta[element]
+              if (!tiermeta) continue
+              await commonService.saveNotificationRecord({
+                title: `${tiermeta['tier']} - UNLOCKED`,
+                message: tiermeta['tierUpgrademessage'] || "",
+                subtitle: null,
+                date: admin.firestore.FieldValue.serverTimestamp(),
+                landingpage: null,
+                logged: true,
+                profileid: [profileid],
+                sticky: false,
+                notificationtype: "ahupdate",
+                notificationimage: null,
+                metadata: {}
+              })
+            }
+            for (let i = 0; i < removedTier.length; i++) {
+              const element = removedTier[i];
+              const tiermeta = mapTierMeta[element]
+              if (!tiermeta) continue
+              await commonService.saveNotificationRecord({
+                title: `${tiermeta['tier']} - LOCKED`,
+                message: tiermeta['tierdowngrademessage'] || "",
+                subtitle: null,
+                date: admin.firestore.FieldValue.serverTimestamp(),
+                landingpage: null,
+                logged: true,
+                profileid: [profileid],
+                sticky: false,
+                notificationtype: "ahupdate",
+                notificationimage: null,
+                metadata: {}
+              })
+            }
           }
         }
       }
