@@ -292,9 +292,9 @@ exports.verifyEmailOTPNewUsers = onCall(
           var serverid = null;
           await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
             if(wati.exists) {
-              const watiData = wati.data()['101723'];
+              const watiData = wati.data()[commonService.eventWatiServerId];
               apikey = watiData['watitoken'];
-              serverid = "101723";
+              serverid = commonService.eventWatiServerId;
             }
           })
 

@@ -77,7 +77,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        const phoneNumber = `${countrycode}${profiledata['number']}`;
+        // const phoneNumber = `${countrycode}${profiledata['number']}`;
+        const phoneNumber = `${profiledata['number']}`;
 
         const waticontent = {
           phonenumber: phoneNumber,
@@ -92,7 +93,30 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           }
         };
 
-        await commonService.sendToWhatsappViaWati(waticontent);
+        // await commonService.sendToWhatsappViaWati(waticontent);
+
+        const parameterConfig = waticontent['body']['parameters'].map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+        console.log('Triggered Wati Archive Creation');
+        
+        const response = await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap : {[`${waticontent['phonenumber']}`] : profileid},
+          broadcastname : 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [profileid],
+          templateid: null,
+          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+        });
+        console.log('WATI ARCHIVE RESPONSE', response);
+
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
 
       } catch (watiError) {
@@ -118,7 +142,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        const phoneNumber = `${countrycode}${profiledata['number']}`;
+        const phoneNumber = `${profiledata['number']}`;
 
         const waticontent = {
           phonenumber: phoneNumber,
@@ -132,7 +156,30 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           }
         };
 
-        await commonService.sendToWhatsappViaWati(waticontent);
+        // await commonService.sendToWhatsappViaWati(waticontent);
+
+        const parameterConfig = waticontent['body']['parameters'].map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+        console.log('Triggered Wati Archive Creation');
+
+        const response = await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [profileid],
+          templateid: null,
+          watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
+        });
+        console.log('WATI ARCHIVE RESPONSE', response);
+
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
 
       } catch (watiError) {
@@ -302,8 +349,9 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         console.log(afterData['tokenstatus'], afterData['stagestatus'] == 'Approved');
         if(afterData['tokenstatus'] === 'Active' && afterData['stagestatus'] === 'Approved' && firststage === afterData['currentstage']){
           let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
+          
           let waticontent = {
-            phonenumber : `${countrycode}${profiledata['number']}`,
+            phonenumber : `${profiledata['number']}`,
             body : {
               parameters: [
                 {name: 'name', value: profiledata['name']},
@@ -312,9 +360,33 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               broadcast_name: queueGenerationDoc['queuewelcometemplate'],
               template_name: queueGenerationDoc['queuewelcometemplate']
             }
-          }
+          };
+
           console.log('wati content',waticontent);
-          await commonService.sendToWhatsappViaWati(waticontent)
+          // await commonService.sendToWhatsappViaWati(waticontent)
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          const response = await commonService.createWatiArchiveDocument({
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: queueGenerationDoc['queuewelcometemplate'],
+          });
+          console.log('WATI ARCHIVE RESPONSE', response);
+
         }
       }
       else if(change.data.before.exists && change.data.after.exists){
@@ -348,7 +420,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             //wati
             let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
             let waticontent = {
-              phonenumber: `${countrycode}${profiledata['number']}`,
+              phonenumber: `${profiledata['number']}`,
               body: {
                 parameters: [
                   { name: 'productname', value: afterData['productname'] },
@@ -358,12 +430,34 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 template_name: 'queuecompletion_v3'
               }
             }
-            await commonService.sendToWhatsappViaWati(waticontent)
+            // await commonService.sendToWhatsappViaWati(waticontent)
+
+            const parameterConfig = waticontent['body']['parameters'].map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(waticontent['phonenumber'])],
+              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileid],
+              templateid: null,
+              watitemplateid: 'queuecompletion_v3',
+            });
+            console.log('WATI ARCHIVE RESPONSE', response);
 
           }
 
           // when moved to next stage check stage action type if form or lint based action we have to send notification via email wati and mobile app.
-          if(queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'form'){
+          if(queueGenerationDocData['stageproperty'][afterData['currentstage']]?.['actiontype'] === 'form'){
             console.log("action type form");
             //email
               let clientModel = {
@@ -409,13 +503,13 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 notificationtype: "queue",
                 notificationimage: null,
                 metadata: {
-                  queuetoken: change.data.after.ref
+                  queuetoken: change.data.after.ref,
                 },
-              })
+              });
               //wati
               let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
               let waticontent = {
-                phonenumber : `${countrycode}${profiledata['number']}`,
+                phonenumber : `${profiledata['number']}`,
                 body : {
                   parameters: [
                     {name: 'name', value: profiledata['name']},
@@ -426,7 +520,30 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 }
               }
               console.log('wati content',waticontent);
-              await commonService.sendToWhatsappViaWati(waticontent)
+              // await commonService.sendToWhatsappViaWati(waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'queue_stage_formtype_v3',
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
+
           }else if(queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link'){
             console.log("action type link");
             //email
@@ -487,7 +604,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             //wati
             let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
             let waticontent = {
-              phonenumber : `${countrycode}${profiledata['number']}`,
+              phonenumber : `${profiledata['number']}`,
               body : {
                 parameters: [
                   {name: 'name', value: profiledata['name']},
@@ -499,7 +616,31 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               }
             }
             console.log('wati content',waticontent);
-            await commonService.sendToWhatsappViaWati(waticontent)
+            // await commonService.sendToWhatsappViaWati(waticontent);
+
+          
+            const parameterConfig = waticontent['body']['parameters'].map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(waticontent['phonenumber'])],
+              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileid],
+              templateid: null,
+              watitemplateid: 'queue_stage_linktype_v4',
+            });
+            console.log('WATI ARCHIVE RESPONSE', response);
+            
           } //action type link
         }
       }
@@ -865,7 +1006,7 @@ exports.studioZoomLink = onDocumentCreated({
       // Send Watti
       let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
       let waticontent = {
-        phonenumber : `${countrycode}${mapProfile[liveassignmentData['participantid']]['number']}`,
+        phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
         body : {
           parameters: [
             {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
@@ -878,10 +1019,33 @@ exports.studioZoomLink = onDocumentCreated({
           template_name: 'queue_link_generationv2'
         }
       }
-      await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-        console.log("Watti Message Failed")
-        console.log(err)
-      })
+
+      const parameterConfig = waticontent['body']['parameters'].map(param => ({
+        excelColumn: null,
+        fillType: 'static',
+        metadataField: null,
+        name: param.name,
+        staticValue: param.value
+      }));
+      console.log('Triggered Wati Archive Creation');
+
+      const response = await commonService.createWatiArchiveDocument({
+        numbers: [parseInt(waticontent['phonenumber'])],
+        numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
+        broadcastname: 'Individual',
+        paramFillMode: 'static',
+        parameterConfig: parameterConfig,
+        params: [],
+        profileid: [liveassignmentData['participantid']],
+        templateid: null,
+        watitemplateid: 'queue_link_generationv2',
+      });
+      console.log('WATI ARCHIVE RESPONSE', response);
+
+      // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+      //   console.log("Watti Message Failed")
+      //   console.log(err)
+      // })
     }
     
     // Activity Log
@@ -1383,7 +1547,7 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
     // Send Watti
     let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
     let waticontent = {
-      phonenumber : `${countrycode}${mapProfile[liveassignmentData['participantid']]['number']}`,
+      phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
       body : {
         parameters: [
           {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
@@ -1396,10 +1560,32 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
         template_name: 'queue_link_generationv2'
       }
     }
-    await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-      console.log("Watti Message Failed")
-      console.log(err)
-    })
+    // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+    //   console.log("Watti Message Failed")
+    //   console.log(err)
+    // })
+
+    const parameterConfig = waticontent['body']['parameters'].map(param => ({
+      excelColumn: null,
+      fillType: 'static',
+      metadataField: null,
+      name: param.name,
+      staticValue: param.value
+    }));
+    console.log('Triggered Wati Archive Creation');
+
+    const response = await commonService.createWatiArchiveDocument({
+      numbers: [parseInt(waticontent['phonenumber'])],
+      numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
+      broadcastname: 'Individual',
+      paramFillMode: 'static',
+      parameterConfig: parameterConfig,
+      params: [],
+      profileid: [liveassignmentData['participantid']],
+      templateid: null,
+      watitemplateid: 'queue_link_generationv2',
+    });
+    console.log('WATI ARCHIVE RESPONSE', response);
   }
   catch(err){
     console.log(err)
@@ -1800,7 +1986,7 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
       let profileData = profilesnap.data()
       let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
       let waticontent = {
-        phonenumber : `${countrycode}${profileData['number']}`,
+        phonenumber : `${profileData['number']}`,
         body : {
           parameters: [
             {name: 'name', value: profileData['name']},
@@ -1811,7 +1997,30 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
         }
       }
       console.log('wati content',waticontent);
-      await commonService.sendToWhatsappViaWati(waticontent)
+      // await commonService.sendToWhatsappViaWati(waticontent)
+
+      const parameterConfig = waticontent['body']['parameters'].map(param => ({
+        excelColumn: null,
+        fillType: 'static',
+        metadataField: null,
+        name: param.name,
+        staticValue: param.value
+      }));
+      console.log('Triggered Wati Archive Creation');
+
+      const response = await commonService.createWatiArchiveDocument({
+        numbers: [parseInt(waticontent['phonenumber'])],
+        numbermap: { [`${waticontent['phonenumber']}`]: profileData['profileid'] },
+        broadcastname: 'Individual',
+        paramFillMode: 'static',
+        parameterConfig: parameterConfig,
+        params: [],
+        profileid: [profileData['profileid']],
+        templateid: null,
+        watitemplateid: 'bulkinvitetemplate_v3',
+      });
+      console.log('WATI ARCHIVE RESPONSE', response);
+
     })
   }
 })
@@ -2414,8 +2623,9 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
   var profileUID = profileData["user_ref"] != null && profileData["user_ref"] != undefined ? profileData["user_ref"].id : null
   //whatsapp
   let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
+  
   let waticontent = {
-    phonenumber : `${countrycode}${profileData['number']}`,
+    phonenumber : `${profileData['number']}`,
     body : {
       parameters: [
         {name: 'name', value: profileData['name']},
@@ -2425,8 +2635,34 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
       template_name: "audio_video_zoom_v3"
     }
   }
+
   console.log('wati content',waticontent);
-  await commonService.sendToWhatsappViaWati(waticontent)
+
+  // await commonService.sendToWhatsappViaWati(waticontent)
+
+  const parameterConfig = waticontent['body']['parameters'].map(param => ({
+    excelColumn: null,
+    fillType: 'static',
+    metadataField: null,
+    name: param.name,
+    staticValue: param.value
+  }));
+  
+  console.log('Triggered Wati Archive Creation');
+
+  const response = await commonService.createWatiArchiveDocument({
+    numbers: [parseInt(waticontent['phonenumber'])],
+    numbermap: { [`${waticontent['phonenumber']}`]: profileData['profileid'] },
+    broadcastname: 'Individual',
+    paramFillMode: 'static',
+    parameterConfig: parameterConfig,
+    params: [],
+    profileid: [profileData['profileid']],
+    templateid: null,
+    watitemplateid: 'audio_video_zoom_v3',
+  });
+  console.log('WATI ARCHIVE RESPONSE', response);
+
   // Email
   var messageModel = {
     queuename: data["queuename"],
