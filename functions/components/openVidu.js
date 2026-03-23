@@ -18,9 +18,38 @@ const AWS_ACCESS_KEY = defineSecret("AWS_ACCESS_KEY");
 const AWS_SECRET = defineSecret("AWS_SECRET");
 const masterInstanceId = defineSecret("MASTER_INSTANCE_ID");
 const mediaASGName = defineSecret("MEDIA_ASG_NAME");
+const { AccessToken } = require('livekit-server-sdk');
 
-let ec2;
-let autoscaling;
+let ec2 = null;
+let autoscaling = null;
+
+/**
+ * Get EC2 client (lazy initialization)
+ */
+function getEC2() {
+  if (!ec2) {
+    ec2 = new AWS.EC2({
+      region: 'us-east-1',
+      accessKeyId: AWS_ACCESS_KEY.value(),
+      secretAccessKey: AWS_SECRET.value()
+    });
+  }
+  return ec2;
+}
+
+/**
+ * Get AutoScaling client (lazy initialization)
+ */
+function getAutoScaling() {
+  if (!autoscaling) {
+    autoscaling = new AWS.AutoScaling({
+      region: 'us-east-1',
+      accessKeyId: AWS_ACCESS_KEY.value(),
+      secretAccessKey: AWS_SECRET.value()
+    });
+  }
+  return autoscaling;
+}
 
 // LiveKit client
 let roomClient;
@@ -568,17 +597,9 @@ exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SE
 
 
 exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", secrets: [masterInstanceId, mediaASGName, AWS_SECRET, AWS_ACCESS_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET ]}, async (event) => {
-	ec2 = new AWS.EC2({
-		region: 'us-east-1',
-		accessKeyId: AWS_ACCESS_KEY.value(),
-		secretAccessKey: AWS_SECRET.value()
-	});
+	ec2 = getEC2();
 
-	autoscaling = new AWS.AutoScaling({
-		region: 'us-east-1',
-		accessKeyId: AWS_ACCESS_KEY.value(),
-		secretAccessKey: AWS_SECRET.value()
-	});
+	autoscaling = getAutoScaling();
 
 	// AWS Configuration
 	AWS.config.update({
@@ -593,14 +614,14 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 
 		// 2. Check for upcoming meetings (for auto-start)
 		const now = admin.firestore.Timestamp.now();
-		const tenMinutesFromNow = admin.firestore.Timestamp.fromMillis(
-			Date.now() + 10 * 60 * 1000
+		const fifteenMinutesFromNow = admin.firestore.Timestamp.fromMillis(
+			Date.now() + 15 * 60 * 1000
 		);
 		const meetingsSnapshot = await admin.firestore()
 			.collection('appointments')
 			.where('platform', '==', 'openvidu')
 			.where('starttime', '>', now)
-			.where('starttime', '<=', tenMinutesFromNow)
+			.where('starttime', '<=', fifteenMinutesFromNow)
 			.where('cancelled', '==', false)
 			.where('attended', '==', false)
 			.get();
@@ -620,6 +641,24 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 			await startMasterNode();
 			console.log('Master node started successfully');
 			return null;
+		}
+
+		if (masterRunning && meetings.length > 0) {
+			console.log('Pre-creating LiveKit rooms...');
+			
+			for (const meeting of meetings) {
+				// Only create if not already pre-created
+				if (!meeting.livekitRoomPreCreated) {
+				try {
+					await createRoomForMeeting(meeting);
+					console.log(` Room pre-created for meeting ${meeting.id}`);
+				} catch (error) {
+					console.error(` Failed to create room for meeting ${meeting.id}:`, error);
+				}
+				} else {
+				console.log(`Room already exists for meeting ${meeting.id}`);
+				}
+			}
 		}
 
 		// 3. Check for active rooms (for auto-stop)
@@ -658,37 +697,179 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
  */
 async function isMasterNodeRunning() {
     try {
-        const result = await ec2.describeInstances({
-            InstanceIds: [masterInstanceId.value()]
-        }).promise();
-        
-        const instance = result.Reservations[0]?.Instances[0];
-        const state = instance?.State.Name;
-        
-        console.log(`Master node state: ${state}`);
-        
-        return state === 'running';
+      const ec2 = getEC2();
+      const result = await ec2.describeInstances({
+          InstanceIds: [masterInstanceId.value()]
+      }).promise();
+      
+      const instance = result.Reservations[0]?.Instances[0];
+      const state = instance?.State.Name;
+      
+      console.log(`Master node state: ${state}`);
+      
+      return state === 'running';
         
     } catch (error) {
-        console.error('Error checking master node:', error);
-        return false;
+      console.error('Error checking master node:', error);
+      return false;
+    }
+}
+
+
+
+async function createRoomForMeeting(meeting) {
+    const client = getRoomClient();
+    const roomName = meeting.id;
+    
+    try {
+        // Create the room in LiveKit
+        const room = await client.createRoom({
+            name: roomName,
+            emptyTimeout: 300, // Auto-close room 5 minutes after last participant leaves
+            maxParticipants: 10, 
+            metadata: JSON.stringify({
+                meetingId: meeting.id,
+                startTime: meeting.starttime.toDate().toISOString(),
+                createdAt: new Date().toISOString()
+            })
+        });
+        
+        console.log(`LiveKit room created: ${roomName}`);
+
+    } catch (error) {
+        if (error.message && error.message.includes('already exists')) {
+            console.log(`LiveKit room ${roomName} already exists - continuing with Firestore setup`);
+        } else {
+            throw error;
+        }
+    }
+
+    try {
+        // Update appointment document
+        await admin.firestore()
+            .collection('appointments')
+            .doc(meeting.id)
+            .update({
+                livekitRoomName: roomName,
+                livekitRoomCreated: true,
+                livekitRoomCreatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+        const hostIds = meeting.hosts ? meeting.hosts.map(ref => {
+            return ref.path?.split('/').pop() || ref.id;
+        }) : [];
+
+        const participantid = meeting.bookedby?.id || meeting.bookedby;
+
+        // Fetch profile data 
+        const mapProfile = {};
+        const profilesSnapshot = await admin.firestore()
+            .collection('profile_data')
+            .get();
+        
+        profilesSnapshot.forEach(doc => {
+            mapProfile[doc.id] = doc.data().name || 'Unknown';
+        });
+
+        // Fetch appointment type name
+        let appointmentTypeName = 'Appointment';
+        if (meeting.appointment?.id) {
+            const appointmentDoc = await admin.firestore()
+                .collection('appointmenttype') 
+                .doc(meeting.appointment.id)
+                .get();
+            
+            if (appointmentDoc.exists) {
+                appointmentTypeName = appointmentDoc.data().appointmenttype || 'Appointment';
+            }
+        }
+
+        const participantName = mapProfile[participantid] || 'Guest';
+        const hostNames = hostIds.map(hostId => mapProfile[hostId] || 'Unknown').join(', ');
+        const title = `${participantName} - ${appointmentTypeName} (${hostNames})`;
+
+        // Create or update openviduroom document
+        const roomRef = admin.firestore()
+            .collection('openviduroom')
+            .doc(meeting.id);
+
+        const roomDoc = await roomRef.get();
+
+        if (!roomDoc.exists) {
+            // Create new room document
+            const roomData = {
+                active: true,
+                createddate: admin.firestore.FieldValue.serverTimestamp(),
+                hosts: hostIds,
+                metadata: {
+                    sessiontype: "appointment",
+                    sessionid: meeting.id,
+                    roomid: meeting.id,
+                    appointmentid: meeting.id,
+                    participantid: participantid,
+                    title: title
+                }
+            };
+            
+            await roomRef.set(roomData);
+            console.log(`Firestore room document created: ${meeting.id}`);
+        } else {
+            // Update existing room if not active
+            if (!roomDoc.data().active) {
+                await roomRef.update({ 
+                    active: true,
+                    metadata: {
+                        ...roomDoc.data().metadata,
+                        title: title
+                    }
+                });
+                console.log(`Firestore room document reactivated: ${meeting.id}`);
+            } else {
+                console.log(`Firestore room document already active: ${meeting.id}`);
+            }
+        }
+
+        return { success: true, roomName };
+
+    } catch (error) {
+        console.error(`Error setting up Firestore for meeting ${meeting.id}:`, error);
+        throw error;
     }
 }
 
 /**
  * Get active rooms count
  */
+// async function getActiveRoomsCount() {
+//     try {
+//         const client = getRoomClient();
+//         const rooms = await client.listRooms();
+//         return rooms.filter(r => r.numParticipants > 0).length;
+//     } catch (error) {
+// 		if (error.status === 503) {
+//           return 0;  // LiveKit down = no rooms = safe to stop
+//         }
+//         return 1; 
+        
+//     }
+// }
+
 async function getActiveRoomsCount() {
     try {
-        const client = getRoomClient();
-        const rooms = await client.listRooms();
-        return rooms.filter(r => r.numParticipants > 0).length;
-    } catch (error) {
-		if (error.status === 503) {
-          return 0;  // LiveKit down = no rooms = safe to stop
-        }
-        return 1; 
+        const activeSessionsSnapshot = await admin.firestore()
+            .collection('openviduroom') 
+            .where('active', '==', true)
+            .get();
+
+        const activeCount = activeSessionsSnapshot.size;
         
+        console.log(`Active sessions in Firestore: ${activeCount}`);
+        
+        return activeCount;
+
+    } catch (error) {
+        console.error('Error checking Firestore for active sessions:', error);
+        return 1; 
     }
 }
 
@@ -697,23 +878,24 @@ async function getActiveRoomsCount() {
  */
 async function startMasterNode() {
     try {
-        await ec2.startInstances({
-            InstanceIds: [masterInstanceId.value()]
-        }).promise();
-        
-        console.log(`Starting master node: ${masterInstanceId.value()}`);
-        
-        await ec2.waitFor('instanceRunning', {
-            InstanceIds: [masterInstanceId.value()]
-        }).promise();
-        
-        console.log('Master node is running');
-        
-        await sleep(30000);
-        
-        await ensureMediaNodesReady();
-        
-        return true;
+      const ec2 = getEC2();
+      await ec2.startInstances({
+          InstanceIds: [masterInstanceId.value()]
+      }).promise();
+      
+      console.log(`Starting master node: ${masterInstanceId.value()}`);
+      
+      await ec2.waitFor('instanceRunning', {
+          InstanceIds: [masterInstanceId.value()]
+      }).promise();
+      
+      console.log('Master node is running');
+      
+      await sleep(30000);
+      
+      await ensureMediaNodesReady();
+      
+      return true;
         
     } catch (error) {
         console.error('Failed to start master node:', error);
@@ -726,31 +908,33 @@ async function startMasterNode() {
  */
 async function stopMasterNode() {
     try {
-        // Stop media nodes first
-        console.log('Stopping media nodes...');
-        
-        await autoscaling.setDesiredCapacity({
-            AutoScalingGroupName: mediaASGName.value(),
-            DesiredCapacity: 0,
-            HonorCooldown: false
-        }).promise();
-        
-        console.log('Media nodes ASG set to 0');
-        
-        // Then stop master
-        await ec2.stopInstances({
-            InstanceIds: [masterInstanceId.value()]
-        }).promise();
-        
-        console.log(`Stopping master node: ${masterInstanceId.value()}`);
-        
-        await ec2.waitFor('instanceStopped', {
-            InstanceIds: [masterInstanceId.value()]
-        }).promise();
-        
-        console.log('Master node stopped');
-        
-        return true;
+      const ec2 = getEC2();
+      const autoscaling = getAutoScaling();
+      // Stop media nodes first
+      console.log('Stopping media nodes...');
+      
+      await autoscaling.setDesiredCapacity({
+          AutoScalingGroupName: mediaASGName.value(),
+          DesiredCapacity: 0,
+          HonorCooldown: false
+      }).promise();
+      
+      console.log('Media nodes ASG set to 0');
+      
+      // Then stop master
+      await ec2.stopInstances({
+          InstanceIds: [masterInstanceId.value()]
+      }).promise();
+      
+      console.log(`Stopping master node: ${masterInstanceId.value()}`);
+      
+      await ec2.waitFor('instanceStopped', {
+          InstanceIds: [masterInstanceId.value()]
+      }).promise();
+      
+      console.log('Master node stopped');
+      
+      return true;
         
     } catch (error) {
         console.error('Failed to stop master node:', error);
@@ -763,23 +947,24 @@ async function stopMasterNode() {
  */
 async function ensureMediaNodesReady() {
     try {
-        const result = await autoscaling.describeAutoScalingGroups({
-            AutoScalingGroupNames: [mediaASGName.value()]
-        }).promise();
-        
-        const asg = result.AutoScalingGroups[0];
-        
-        if (asg.DesiredCapacity === 0) {
-            console.log('Setting media nodes desired capacity to 1');
-            
-            await autoscaling.setDesiredCapacity({
-                AutoScalingGroupName: mediaASGName.value(),
-                DesiredCapacity: 1,
-                HonorCooldown: false
-            }).promise();
-            
-            console.log('Media nodes ASG activated');
-        }
+      const autoscaling = getAutoScaling();
+      const result = await autoscaling.describeAutoScalingGroups({
+          AutoScalingGroupNames: [mediaASGName.value()]
+      }).promise();
+      
+      const asg = result.AutoScalingGroups[0];
+      
+      if (asg.DesiredCapacity === 0) {
+          console.log('Setting media nodes desired capacity to 1');
+          
+          await autoscaling.setDesiredCapacity({
+              AutoScalingGroupName: mediaASGName.value(),
+              DesiredCapacity: 1,
+              HonorCooldown: false
+          }).promise();
+          
+          console.log('Media nodes ASG activated');
+      }
         
     } catch (error) {
         console.error('Error ensuring media nodes ready:', error);
@@ -789,3 +974,448 @@ async function ensureMediaNodesReady() {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ========== ADD THIS NEW WEBHOOK FOR AWS EVENTS ==========
+
+exports.awsEventWebhook = onRequest({
+  cors: true
+}, async (req, res) => {
+  try {
+     // STEP 1: Parse the outer body (which is a string)
+    let body;
+    if (typeof req.body === 'string') {
+      console.log('Body is a string, parsing...');
+      body = JSON.parse(req.body);
+    } else {
+      console.log('Body is already an object');
+      body = req.body;
+    }
+    
+    console.log('Type:', body.Type);
+    
+    // STEP 2: Handle SNS subscription confirmation
+    if (body.Type === 'SubscriptionConfirmation') {
+      console.log('SNS Subscription Confirmation');
+      
+      const https = require('https');
+      https.get(body.SubscribeURL, (response) => {
+        console.log('Subscription confirmed');
+      });
+      
+      return res.status(200).send('Subscription confirmed');
+    }
+    
+    // STEP 3: Handle notification
+    if (body.Type === 'Notification') {
+      console.log('Processing Notification...');
+      
+      // STEP 4: Parse the nested Message (also a string)
+      let message;
+      if (typeof body.Message === 'string') {
+        console.log('Message is a string, parsing...');
+        message = JSON.parse(body.Message);
+      } else {
+        message = body.Message;
+      }
+      
+      console.log('Event parsed successfully');
+      console.log('Detail-type:', message['detail-type']);
+      console.log('Source:', message.source);
+      
+      // STEP 5: Route to appropriate handler
+      if (message['detail-type'] === 'EC2 Instance State-change Notification') {
+        console.log('Handling EC2 State Change...');
+        await handleEC2StateChange(message.detail);
+      } 
+      else if (message.source === 'aws.autoscaling') {
+        console.log('Handling Auto Scaling Event...');
+        await handleAutoScalingEvent(message.detail);
+      }
+      else {
+        console.log('Unknown event type:', message['detail-type']);
+      }
+    }
+    
+    res.status(200).send('OK');
+    
+  } catch (error) {
+    console.error('Error in webhook:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).send('Error');
+  }
+});
+
+async function handleEC2StateChange(detail) {
+  try {
+    const instanceId = detail['instance-id'];
+    const state = detail.state;
+    
+    console.log('EC2 Event:');
+    console.log('   Instance:', instanceId);
+    console.log('   State:', state);
+    
+    const ourMasterId = masterInstanceId.value();
+    console.log('   Our master:', ourMasterId);
+    
+    if (instanceId !== ourMasterId) {
+      console.log('Not our master node, skipping');
+      return;
+    }
+    
+    console.log('This is our master node!');
+    
+    const mappedState = mapMasterState(state);
+    console.log('   Mapped to:', mappedState);
+     const updateData = {
+      master: {  // ← Nested object, not "master.state"
+        state: mappedState,
+        status: state,
+        lastExternalChange: admin.firestore.FieldValue.serverTimestamp(),
+        changedExternally: true,
+        instanceId: instanceId
+      },
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    // Update Firestore
+    console.log('Updating Firestore...');
+    
+    await admin.firestore()
+      .doc('AWS_System/instance_status')
+      .set(updateData, { merge: true });
+    
+    console.log('Firestore updated!');
+    
+    // If running, fetch and update IP addresses
+    if (state === 'running') {
+      console.log('Fetching instance details...');
+      
+      const ec2 = getEC2();
+      
+      const result = await ec2.describeInstances({
+        InstanceIds: [instanceId]
+      }).promise();
+      
+      const instance = result.Reservations[0].Instances[0];
+      
+      await admin.firestore()
+        .doc('AWS_System/instance_status')
+        .set({
+          master: {
+            publicIp: instance.PublicIpAddress || null,
+            privateIp: instance.PrivateIpAddress || null,
+            launchTime: instance.LaunchTime ? instance.LaunchTime.toISOString() : null,
+            instanceType: instance.InstanceType || null
+          },
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      
+      console.log('IP addresses updated');
+    }
+    
+  } catch (error) {
+    console.error('Error in handleEC2StateChange:', error);
+    throw error;
+  }
+}
+
+async function handleAutoScalingEvent(detail) {
+  try {
+    const asgName = detail.AutoScalingGroupName;
+    
+    console.log('Auto Scaling Event:');
+    console.log('   ASG:', asgName);
+    
+    const ourMediaASG = mediaASGName.value();
+    console.log('   Our ASG:', ourMediaASG);
+    
+    if (asgName !== ourMediaASG) {
+      console.log('Not our media ASG, skipping');
+      return;
+    }
+    
+    console.log('This is our media ASG!');
+    
+    const autoscaling = getAutoScaling();
+    
+    console.log('Fetching ASG details...');
+    
+    const asgData = await autoscaling.describeAutoScalingGroups({
+      AutoScalingGroupNames: [asgName]
+    }).promise();
+    
+    const asg = asgData.AutoScalingGroups[0];
+    
+    const instanceStates = {
+      healthy: 0,
+      unhealthy: 0,
+      pending: 0,
+      terminating: 0,
+      total: asg.Instances.length
+    };
+    
+    const instances = asg.Instances.map(instance => {
+      const isHealthy = instance.HealthStatus === 'Healthy' && instance.LifecycleState === 'InService';
+      
+      // Count states
+      if (isHealthy) {
+        instanceStates.healthy++;
+      } else if (instance.LifecycleState === 'Pending') {
+        instanceStates.pending++;
+      } else if (instance.LifecycleState === 'Terminating') {
+        instanceStates.terminating++;
+      } else {
+        instanceStates.unhealthy++;
+      }
+      
+      // Return instance details
+      return {
+        instanceId: instance.InstanceId,
+        healthStatus: instance.HealthStatus,
+        lifecycleState: instance.LifecycleState,
+        availabilityZone: instance.AvailabilityZone,
+        isHealthy: isHealthy
+      };
+    });
+    
+    let scalingStatus = 'stable';
+    if (asg.DesiredCapacity > instanceStates.healthy) {
+      scalingStatus = 'scaling-up';
+    } else if (instanceStates.terminating > 0) {
+      scalingStatus = 'scaling-down';
+    }
+    
+    console.log('   Desired:', asg.DesiredCapacity);
+    console.log('   Healthy:', instanceStates.healthy);
+    console.log('   Status:', scalingStatus);
+
+
+    
+    console.log('Updating Firestore...');
+    
+    await admin.firestore()
+      .doc('AWS_System/instance_status')
+      .set({
+        media: {  
+          asgName: asg.AutoScalingGroupName,
+          desiredCapacity: asg.DesiredCapacity,
+          minSize: asg.MinSize,
+          maxSize: asg.MaxSize,
+          instanceStates: instanceStates,
+          instances: instances,
+          scalingStatus: scalingStatus,
+          lastExternalChange: admin.firestore.FieldValue.serverTimestamp(),
+          changedExternally: true
+        },
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    
+    console.log('Firestore updated!');
+    
+  } catch (error) {
+    console.error('Error in handleAutoScalingEvent:', error);
+    throw error;
+  }
+}
+
+function mapMasterState(awsState) {
+  const stateMap = {
+    'running': 'running',
+    'stopped': 'stopped',
+    'stopping': 'stopping',
+    'pending': 'starting',
+    'shutting-down': 'stopping',
+    'terminated': 'terminated'
+  };
+  return stateMap[awsState] || 'unknown';
+}
+
+
+/**
+ * HTTP endpoint to start master node
+ * Webhooks will update Firestore automatically
+ */
+exports.startMasterNodeHTTP = onRequest({
+  secrets: [masterInstanceId, mediaASGName, AWS_ACCESS_KEY, AWS_SECRET],
+  cors: true
+}, async (req, res) => {
+  try {
+    console.log('Start master node request');
+    const ec2 = getEC2();
+    const autoscaling = getAutoScaling();
+
+    // Check if already running
+    const isRunning = await isMasterNodeRunning();
+    if (isRunning) {
+      return res.status(400).json({
+        error: 'Master node is already running'
+      });
+    }
+
+    // Start EC2 instance
+    await ec2.startInstances({
+      InstanceIds: [masterInstanceId.value()]
+    }).promise();
+
+    console.log('Master node start initiated');
+
+    // Prepare media nodes
+    ensureMediaNodesReady().catch(err => console.error(err));
+
+    // AWS webhook will update Firestore when state changes
+    res.status(200).json({
+      message: 'Master node starting... (status will update automatically)'
+    });
+
+  } catch (error) {
+    console.error('Error starting master:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to start master node'
+    });
+  }
+});
+
+/**
+ * HTTP endpoint to stop master node
+ * Webhooks will update Firestore automatically
+ */
+exports.stopMasterNodeHTTP = onRequest({
+  secrets: [masterInstanceId, mediaASGName, AWS_ACCESS_KEY, AWS_SECRET],
+  cors: true
+}, async (req, res) => {
+  try {
+    console.log('Stop master node request');
+    const ec2 = getEC2();
+    const autoscaling = getAutoScaling();
+
+    // Check if already stopped
+    const isRunning = await isMasterNodeRunning();
+    if (!isRunning) {
+      return res.status(400).json({
+        error: 'Master node is already stopped'
+      });
+    }
+
+    // Check for active rooms
+    const activeRooms = await getActiveRoomsCount();
+    if (activeRooms > 0) {
+      return res.status(400).json({
+        error: `Cannot stop: ${activeRooms} active room(s)`,
+        activeRooms: activeRooms
+      });
+    }
+
+    // Stop media nodes first
+    await autoscaling.setDesiredCapacity({
+      AutoScalingGroupName: mediaASGName.value(),
+      DesiredCapacity: 0,
+      HonorCooldown: false
+    }).promise();
+
+    // Stop EC2 instance
+    await ec2.stopInstances({
+      InstanceIds: [masterInstanceId.value()]
+    }).promise();
+
+    console.log('Master node stop initiated');
+
+    // AWS webhook will update Firestore when state changes
+    res.status(200).json({
+      message: 'Master node stopping... (status will update automatically)'
+    });
+
+  } catch (error) {
+    console.error('Error stopping master:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to stop master node'
+    });
+  }
+});
+
+/**
+ * HTTP endpoint to scale media nodes
+ * Webhooks will update Firestore automatically
+ */
+exports.scaleMediaNodes = onRequest({
+  secrets: [mediaASGName, AWS_ACCESS_KEY, AWS_SECRET],
+  cors: true
+}, async (req, res) => {
+  try {
+    const { action } = req.body;
+
+    if (!action || !['scale-up', 'scale-down'].includes(action)) {
+      return res.status(400).json({
+        error: 'Invalid action. Use "scale-up" or "scale-down"'
+      });
+    }
+
+    console.log(`Scale media nodes: ${action}`);
+    const autoscaling = getAutoScaling();
+
+    // Get current ASG state
+    const asgResult = await autoscaling.describeAutoScalingGroups({
+      AutoScalingGroupNames: [mediaASGName.value()]
+    }).promise();
+
+    const asg = asgResult.AutoScalingGroups[0];
+    const currentCapacity = asg.DesiredCapacity;
+    const minSize = asg.MinSize;
+    const maxSize = asg.MaxSize;
+
+    let newCapacity;
+
+    if (action === 'scale-up') {
+      if (currentCapacity >= maxSize) {
+        return res.status(400).json({
+          error: `Already at maximum capacity (${maxSize})`,
+          currentCapacity,
+          maxSize
+        });
+      }
+      newCapacity = currentCapacity + 1;
+    } else {
+      if (currentCapacity <= minSize) {
+        return res.status(400).json({
+          error: `Already at minimum capacity (${minSize})`,
+          currentCapacity,
+          minSize
+        });
+      }
+      newCapacity = currentCapacity - 1;
+    }
+
+    console.log(`Scaling: ${currentCapacity} → ${newCapacity}`);
+
+    // Set new desired capacity in AWS
+    await autoscaling.setDesiredCapacity({
+      AutoScalingGroupName: mediaASGName.value(),
+      DesiredCapacity: newCapacity,
+      HonorCooldown: false
+    }).promise();
+
+    console.log(`ASG scaled to ${newCapacity}`);
+
+    // AWS webhook will update Firestore when scaling completes
+    res.status(200).json({
+      message: `Media nodes ${action === 'scale-up' ? 'scaling up' : 'scaling down'}...`,
+      previousCapacity: currentCapacity,
+      newCapacity: newCapacity
+    });
+
+  } catch (error) {
+    console.error('Error scaling media:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to scale media nodes'
+    });
+  }
+});
+
+
+
+
+
+
+
+
+
