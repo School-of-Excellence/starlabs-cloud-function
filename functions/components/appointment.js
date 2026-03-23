@@ -110,11 +110,13 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         var appointmentname = ""
         var duration;
         var bookedby = {
+          profileid: "",
           name: "",
           email: ""
         }
         var date = ""
         var hosts = [{
+          profileid: "",
           name: "",
           email: "",
           role: "",
@@ -223,9 +225,10 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
           date: date,
           duration: duration,
           client: bookedby.name,
-          zoomurl: zoomurl,
-          zoomid: zoomid,
-          zoompassword: zoompassword,
+          meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+          // zoomurl: zoomurl,
+          // zoomid: zoomid,
+          // zoompassword: zoompassword,
           company_name: "Antano & Harini",
         }
         if(appointmentname.includes("Journey")){
@@ -328,6 +331,10 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         //   console.log(err)
         // });
         
+        // Specialist Email
+        if(snapshot.data()["onboarding"]){
+          dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
+        }
         for (let i = 0; i < hosts.length; i++) {
           const element = hosts[i];
           await commonService.createEmailArchiveDocument({
@@ -438,11 +445,13 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     var appointmentname = ""
     var duration;
     var bookedby = {
+      profileid: "",
       name: "",
       email: ""
     }
     var date = ""
     var hosts = [{
+      profileid: "",
       name: "",
       email: "",
       role: "",
@@ -472,6 +481,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       duration = appointmentDoc.data()["duration"].toString() + " Mins"
     })
     await admin.firestore().doc(snapshot.data()["bookedby"].path).get().then(profile=>{
+      bookedby.profileid = profile.id
       bookedby.name = profile.data()["name"]
       bookedby.email = profile.data()["email"]
     })
@@ -520,6 +530,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
         await admin.firestore().collection("EISzoomcontact").doc(host.id).get().then(async contact=>{
           if(contact.exists){
             hosts.push({
+              profileid: host.id,
               name: contact.data()["name"],
               email: contact.data()["email"],
               role: roleName
@@ -533,6 +544,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
           else{
             await admin.firestore().doc(host.path).get().then(profile=>{
               hosts.push({
+                profileid: profile.id,
                 name: profile.data()["name"],
                 email: profile.data()["email"],
                 role: roleName
@@ -557,9 +569,10 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       date: date,
       duration: duration,
       client: bookedby.name,
-      zoomurl: zoomurl,
-      zoomid: zoomid,
-      zoompassword: zoompassword,
+      meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+      // zoomurl: zoomurl,
+      // zoomid: zoomid,
+      // zoompassword: zoompassword,
       company_name: "Antano & Harini",
     }
     // if(appointmentname.includes("Journey")){
@@ -658,6 +671,11 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     // }).catch(err=>{
     //   console.log(err)
     // });
+
+    // Specialist Mail
+    if(snapshot.data()["onboarding"]) {
+      dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
+    }
     for (let i = 0; i < hosts.length; i++) {
       const element = hosts[i];
 
@@ -853,6 +871,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
   var appointmentName;
   var appointmentdate;
   var bookedby = {
+    profileid: "",
     name: "",
     email: ""
   };
@@ -890,6 +909,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
     var formatedTime = new Date(time.getFullYear(), time.getMonth(), time.getDate(), time.getHours()+5, time.getMinutes()+30, 0);
     appointmentdate = formatedTime.toDateString() + " at " + (formatedTime.getHours()%12 || 12) + ":" + (formatedTime.getMinutes().toString().length == 1 ? ("0"+formatedTime.getMinutes().toString()) : formatedTime.getMinutes()) + " " + (formatedTime.getHours() < 12 ? "AM" : "PM") + " IST"
     await admin.firestore().doc(newData["bookedby"].path).get().then(profile=>{
+      bookedby.profileid = profile.id
       bookedby.name = profile.data()["name"]
       bookedby.email = profile.data()["email"]
     })
@@ -898,6 +918,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       await admin.firestore().collection("EISzoomcontact").doc(element.id).get().then(async contact=>{
         if(contact.exists){
           hosts.push({
+            profileid: contact.id,
             name: contact.data()["name"],
             email: contact.data()["email"],
           })
@@ -905,6 +926,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         else{
           await admin.firestore().doc(element.path).get().then(profile=>{
             hosts.push({
+              profileid: profile.id,
               name: profile.data()["name"],
               email: profile.data()["email"],
             })
@@ -930,14 +952,32 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       date: appointmentdate,
       company_name: "Antano & Harini",
     }
-    await commonService.postmarkClient.sendEmailWithTemplate({
-      From: "starlabs@excellenceinstallation.com",
-      To: bookedby.email,
-      TemplateAlias: "appointment-cancelled",
-      TemplateModel: clientModel,
-    }).catch(err=>{
-      console.log(err)
-    });
+
+    // await commonService.postmarkClient.sendEmailWithTemplate({
+    //   From: "starlabs@excellenceinstallation.com",
+    //   To: bookedby.email,
+    //   TemplateAlias: "appointment-cancelled",
+    //   TemplateModel: clientModel,
+    // }).catch(err=>{
+    //   console.log(err)
+    // });
+
+    await commonService.createEmailArchiveDocument({
+      emailData : clientModel,
+      datamodel : clientModel,
+      attachments : [],
+      emailTo : [bookedby.email],
+      emailMap : [{[bookedby['email']] : bookedby.profileid}],
+      fileURL : '',
+      from:'starlabs@excellenceinstallation.com',
+      notes : '',
+      profileId : [bookedby.profileid],
+      postmarkTemplateId: '24640180',
+      templateAlias:'appointment-cancelled'
+    }).then(()=>{
+      console.log('Sent for email archive');
+    });    
+
     // Send To Hosts
     for (let i = 0; i < hosts.length; i++) {
       const element = hosts[i];
@@ -951,14 +991,31 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
         date: appointmentdate,
         company_name: "Antano & Harini",
       }
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: element.email,
-        TemplateAlias: "appointment-cancelled",
-        TemplateModel: hostModel
-      }).catch(err=>{
-        console.log(err)
-      });
+
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: element.email,
+      //   TemplateAlias: "appointment-cancelled",
+      //   TemplateModel: hostModel
+      // }).catch(err=>{
+      //   console.log(err)
+      // });
+
+      await commonService.createEmailArchiveDocument({
+        emailData : hostModel,
+        datamodel : hostModel,
+        attachments : [],
+        emailTo : [element.email],
+        emailMap : [{[element['email']] : element.profileid}],
+        fileURL : '',
+        from:'starlabs@excellenceinstallation.com',
+        notes : '',
+        profileId : [element.profileid],
+        postmarkTemplateId: '24640180',
+        templateAlias:'appointment-cancelled'
+      }).then(()=>{
+        console.log('Sent for email archive');
+      });  
     }
 
     // Send Notification
@@ -1504,11 +1561,33 @@ exports.appointmentremainder = onSchedule({schedule: "every 5 minutes"}, async (
                 template_name: 'onboarding_1hr_reminder_v1'
               }
             };
-    
-            await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-              console.log("Wati Appointment Remainder Error")
-              console.log(err)
+
+            const parameterConfig = watiParams.map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+            
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(profileData['number'])],
+              numbermap : {[`${profileData['number']}`] : profileData.id},
+              broadcastname : 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileData.id],
+              templateid: null,
+              watitemplateid: 'onboarding_1hr_reminder_v1',
             });
+            console.log('WATI ARCHIVE RESPONSE', response);
+            
+            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+            //   console.log("Wati Appointment Remainder Error")
+            //   console.log(err)
+            // });
           }
         } catch (error) {
           console.log("Wati Appointment Remainder Exception")

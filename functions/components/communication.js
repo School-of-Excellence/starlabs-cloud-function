@@ -1889,24 +1889,93 @@ async function sendWatiBroadCast(watiarchiveid) {
   console.log("Total batches:", batchList.length);
   console.log("First batch sample:", JSON.stringify(batchList[0]?.receivers?.[0]));
 
+  let sentNumbers = [];
+  let failedNumbers = [];
+
   // ── 6. Send all batches ───────────────────────────────────────────────
   for (let b = 0; b < batchList.length; b++) {
     const watiContent = batchList[b];
+    const batchNumbers = watiContent.receivers.map(r => r.whatsappNumber);
     try {
       const response = await sendWatiTemplateMsg(watiContent, broadCastData);
       console.log(`Batch ${b + 1} sent (${watiContent['broadcast_name']}):`, response);
+
+      if (response && response.result === true) {
+        const errors = response.errors || {};
+        const invalidWhatsapp = errors.invalidWhatsappNumbers || [];
+        const invalidParams = errors.invalidCustomParameters || [];
+
+        const invalidParamNumbers = invalidParams.map(msg => {
+          const match = msg.match(/contact\s+(\d+)/);
+          return match ? match[1] : null;
+        }).filter(Boolean);
+
+        // Combine all failed numbers for this batch
+        const batchFailed = new Set([...invalidWhatsapp, ...invalidParamNumbers]);
+
+        // Separate sent vs failed
+        batchNumbers.forEach(num => {
+          if (batchFailed.has(num)) {
+            failedNumbers.push(num);
+          } else {
+            sentNumbers.push(num);
+          }
+        });
+      } else {
+        // response.result is not true — treat entire batch as failed
+        failedNumbers.push(...batchNumbers);
+      }
+
     } catch (error) {
       console.error(`Batch ${b + 1} failed (${watiContent['broadcast_name']}):`, error);
+      failedNumbers.push(...batchNumbers);
     }
   }
 
   // ── 7. Update archive status ──────────────────────────────────────────
-  await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+
+  const updatePayload = {
     status: 'sent',
     sentAt: admin.firestore.FieldValue.serverTimestamp(),
     batchCount: batchList.length,
-    totalSent: broadCastData['numbers'].length
+    totalSent: sentNumbers.length,
+    totalFailed: failedNumbers.length,
+  };
+
+  if (sentNumbers.length > 0) {
+    updatePayload.sent = sentNumbers;
+  }
+  if (failedNumbers.length > 0) {
+    updatePayload.failed = failedNumbers;
+  }
+
+  await admin.firestore().collection('wati archive').doc(watiarchiveid).update(updatePayload).then(()=>{
+    console.log('Wati Archive Updated Successfully',`Total Sent: ${sentNumbers.length}, Total Failed: ${failedNumbers.length},`);
+  }).catch((error)=>{
+    console.log('Error while updating wati Archive', error);
   });
+
+  // await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //   status: 'sent',
+  //   sentAt: admin.firestore.FieldValue.serverTimestamp(),
+  //   batchCount: batchList.length,
+  //   totalSent: sentNumbers.length,
+  //   totalFailed: failedNumbers.length,
+  //   sent: admin.firestore.FieldValue.arrayUnion(...(sentNumbers.length ? sentNumbers : ['__placeholder__'])),
+  //   failed: admin.firestore.FieldValue.arrayUnion(...(failedNumbers.length ? failedNumbers : ['__placeholder__'])),
+  // });
+
+  // // Remove placeholder if no items existed
+  // if (sentNumbers.length === 0) {
+  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //     sent: admin.firestore.FieldValue.delete()
+  //   });
+  // }
+  // if (failedNumbers.length === 0) {
+  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+  //     failed: admin.firestore.FieldValue.delete()
+  //   });
+  // }
 
   return {
     success: true,
@@ -2155,7 +2224,7 @@ async function sendWatiTemplateMsg(body, broadcastData) {
 
   await admin.firestore().collection('classify').doc('wati').get().then((wati) => {
     if (wati.exists) {
-      apikey = wati.data()['wati'].find(e => e['endpoint'] === broadcastData['serverurl'])?.['watitoken'];
+      apikey = wati.data()[broadcastData['serverid']]['watitoken'];
     }
   });
 
@@ -3384,6 +3453,7 @@ exports.workshopprogressmessagev2 = onRequest({
       }
 
       try {
+
         await commonService.postmarkClient.sendEmailWithTemplate({
           From: "starlabs@excellenceinstallation.com",
           To: email,
@@ -3394,6 +3464,25 @@ exports.workshopprogressmessagev2 = onRequest({
             message: message
           }
         });
+
+        // var dataModel = {
+        //   name: name,
+        //   subject: subject,
+        //   message: message
+        // }
+        // await commonService.createEmailArchiveDocument({
+        //   emailData : dataModel,
+        //   datamodel : dataModel,
+        //   attachments : [],
+        //   emailTo : [email],
+        //   emailMap : [{[email] : }],
+        //   fileURL : '',
+        //   from:'starlabs@excellenceinstallation.com',
+        //   notes : '',
+        //   profileId : [],
+        //   postmarkTemplateId: '42136886',
+        //   templateAlias:'workshopprogressmessage'
+        // });
 
         console.log(`Email sent to ${name} (${email})`);
         return { success: true, email, name };
@@ -3462,11 +3551,11 @@ exports.workshopprogressmessagev2 = onRequest({
 
     var apikey = null;
     var serverid = null;
-    await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()
-        apikey = watiData['apikey'];
-        serverid = watiData["serverid"];
+        const watiData = wati.data()[commonService.eventWatiServerId]
+        apikey = watiData['watitoken'];
+        serverid = commonService.eventWatiServerId;
       }
     })
 
@@ -3786,6 +3875,25 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
           }
         });
 
+        // var dataModel = {
+        //   name: name,
+        //   subject: subject,
+        //   message: message
+        // }
+        // await commonService.createEmailArchiveDocument({
+        //   emailData : dataModel,
+        //   datamodel : dataModel,
+        //   attachments : [],
+        //   emailTo : [email],
+        //   emailMap : [{[email] : }],
+        //   fileURL : '',
+        //   from:'starlabs@excellenceinstallation.com',
+        //   notes : '',
+        //   profileId : [],
+        //   postmarkTemplateId: '42136886',
+        //   templateAlias:'workshopprogressmessage'
+        // });
+
         console.log(`Email sent to ${name} (${email})`);
         return { success: true, email, name };
 
@@ -3835,11 +3943,11 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
 
     var apikey = null;
     var serverid = null;
-    await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()
-        apikey = watiData['apikey'];
-        serverid = watiData["serverid"];
+        const watiData = wati.data()[commonService.eventWatiServerId]
+        apikey = watiData['watitoken'];
+        serverid = commonService.eventWatiServerId;
       }
     })
 
@@ -3966,11 +4074,11 @@ exports.workshopenrolledwatti = onDocumentCreated(
 
       var apikey = null;
       var serverid = null;
-      await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+      await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
         if(wati.exists) {
-          const watiData = wati.data()
-          apikey = watiData['apikey'];
-          serverid = watiData["serverid"];
+          const watiData = wati.data()[commonService.eventWatiServerId];
+          apikey = watiData['watitoken'];
+          serverid = commonService.eventWatiServerId;
         }
       })
 
@@ -4016,9 +4124,8 @@ exports.workshopenrolledwatti = onDocumentCreated(
           ]
         };
         try {
-          const templateAlias = categorybased
-            ? "WorkshopEnrolledMessage-1"
-            : "WorkshopEnrolledMessage";
+          const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
+          // const postmarktemplateId = categorybased ? '43859890' : '42135513';
           await commonService.postmarkClient.sendEmailWithTemplate({
             From: "starlabs@excellenceinstallation.com",
             To: profile['email'],
@@ -4033,6 +4140,30 @@ exports.workshopenrolledwatti = onDocumentCreated(
               workshopurl : workshopurl,
             },
           });
+
+          // var dataModel = {
+          // name: profile['name'],
+          // email: profile['email'],
+          // subject: mailsubject,
+          // workshopName:workshopName,
+          // maildescription : maildescription,
+          // mailliveCallText : mailliveCallText,
+          // workshopurl : workshopurl,
+          // }
+          // await commonService.createEmailArchiveDocument({
+          //   emailData : dataModel,
+          //   datamodel : dataModel,
+          //   attachments : [],
+          //   emailTo : [profile['email']],
+          //   emailMap : [{[profile['email']] : }],
+          //   fileURL : '',
+          //   from:'starlabs@excellenceinstallation.com',
+          //   notes : '',
+          //   profileId : [],
+          //   postmarkTemplateId: postmarktemplateId,
+          //   templateAlias:templateAlias
+          // });
+
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
         }

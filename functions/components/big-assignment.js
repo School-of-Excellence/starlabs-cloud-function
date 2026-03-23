@@ -212,7 +212,8 @@ async function sendWatiConfirmation(assignment){
     const profileid = assignment['participantidlist'][i]
     let countrycode = (![null,undefined].includes(mapProfileId[profileid]['countrycode']) ? mapProfileId[profileid]['countrycode'] : '+91').replace(/\+/g,"")
     let waticontent = {
-      phonenumber : `${countrycode}${mapProfileId[profileid]['number']}`,
+      // phonenumber : `${countrycode}${mapProfileId[profileid]['number']}`,
+      phonenumber : `${mapProfileId[profileid]['number']}`,
       body : {
         parameters: [
           {name: '1', value: mapProfileId[profileid]['name']},
@@ -226,7 +227,30 @@ async function sendWatiConfirmation(assignment){
       }
     }
     console.log('wati content',waticontent);
-    commonService.sendToWhatsappViaWati(waticontent)
+
+    const parameterConfig = waticontent['body']['parameters'].map(param => ({
+      excelColumn: null,
+      fillType: 'static',
+      metadataField: null,
+      name: param.name,
+      staticValue: param.value
+    }));
+    console.log('Triggered Wati Archive Creation');
+    
+    const response = await commonService.createWatiArchiveDocument({
+      numbers: [parseInt(waticontent['phonenumber'])],
+      numbermap : {[`${waticontent['phonenumber']}`] : profileid},
+      broadcastname : 'Individual',
+      paramFillMode: 'static',
+      parameterConfig: parameterConfig,
+      params: [],
+      profileid: [profileid],
+      templateid: null,
+      watitemplateid: 'big_activity_confirmation',
+    });
+    console.log('WATI ARCHIVE RESPONSE', response);
+
+    // commonService.sendToWhatsappViaWati(waticontent)
   }
   return {message:"participant confirmation messages are sent through wati"}
 }
@@ -375,11 +399,11 @@ exports.updateBigParticipantsAssignment = onDocumentWritten("big participants as
 
     var apikey = null;
     var serverid = null;
-    await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()
-        apikey = watiData['apikey'];
-        serverid = watiData["serverid"];
+        const watiData = wati.data()[commonService.eventWatiServerId]
+        apikey = watiData['watitoken'];
+        serverid = commonService.eventWatiServerId;
       }
     })
 

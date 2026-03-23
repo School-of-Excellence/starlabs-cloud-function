@@ -19,7 +19,7 @@ exports.evolutionFamilyWishlistOnWrite = onDocumentWritten("/evolutionwishlistlo
         element['profilename'] = profileData['name']
         if(element['type'].trim() === 'number'){
           let waticontent = {
-            phonenumber : `${element['contact'].trim()}`,
+            phonenumber : `${element['contact'].trim().replace(/^\+\d{1,3}/, '')}`,
             body : {
               parameters: [
                 {name: 'name', value:profileData['name']},
@@ -32,7 +32,35 @@ exports.evolutionFamilyWishlistOnWrite = onDocumentWritten("/evolutionwishlistlo
               template_name: 'evolution_wishlist_prod_v12'
             }
           }
-          allPromises.push(await commonService.sendToWhatsappViaWati(waticontent));
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+
+          console.log('Triggered Wati Archive Creation');
+
+          allPromises.push(
+            // await commonService.sendToWhatsappViaWati(waticontent)
+            
+            await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(waticontent['phonenumber'])],
+              numbermap: { [`${waticontent['phonenumber']}`]: profileData['profileid'] },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileData['profileid']],
+              templateid: null,
+              watitemplateid: 'evolution_wishlist_prod_v12',
+            }),
+            
+            console.log('WATI ARCHIVE RESPONSE')
+
+          );
         }else if(element['type'].trim() === 'gmail'){
           console.log("email");
           var clientModel = {

@@ -27,11 +27,14 @@ const https = require('https'); // HTTP Request/Response
 
 const KJUR = require('jsrsasign');
 
-var monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sept", "Oct", "Nov", "Dec"];
+const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sept", "Oct", "Nov", "Dec"];
 
 // Post Mark
-var postmark = require("postmark");
-var postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+const postmark = require("postmark");
+const postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+
+// Event wati Server ID
+const eventWatiServerId = '101723';
 
 const axios = require("axios"); // Promise based HTTP Client
 
@@ -168,11 +171,11 @@ async function sendToWhatsappViaWati(data) {
 
 	var apikey = null;
 	var serverid = null;
-	await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+	await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
 		if(wati.exists) {
-			const watiData = wati.data()
-			apikey = watiData['apikey'];
-			serverid = watiData["serverid"];
+			const watiData = wati.data()[eventWatiServerId]
+			apikey = watiData['watitoken'];
+			serverid = eventWatiServerId;
 		}
 	})
 
@@ -516,7 +519,7 @@ async function updateSalesLead(leaddata, flag) {
 	}
 
 
-	if (leaddata['completed']['tentativeschedule'].length != 0) {
+	if (![null, undefined].includes(leaddata['completed']['tentativeschedule']) && leaddata['completed']['tentativeschedule'].length != 0) {
 		element['tentativeschedule'] = leaddata['completed']['tentativeschedule'].map(item => {
 			let date = item.tentativestartdate;
 
@@ -537,7 +540,7 @@ async function updateSalesLead(leaddata, flag) {
 		});
 	}
 
-	if (leaddata['completed']['tentativebonusschedule'].length != 0) {
+	if (![null, undefined].includes(leaddata['completed']['tentativebonusschedule']) && leaddata['completed']['tentativebonusschedule'].length != 0) {
 		element['tentativebonusschedule'] = leaddata['completed']['tentativebonusschedule'].map(item => {
 			let date = item.tentativestartdate;
 
@@ -967,6 +970,7 @@ module.exports = {
 	updateParticipantTouchPoint,
 	generateZoomMeeting,
 	createEmailArchiveDocument,
+	createWatiArchiveDocument
 }
 
 async function createEmailArchiveDocument({
@@ -1011,7 +1015,7 @@ async function createEmailArchiveDocument({
 	}
 	console.log('Broadcast Name',broadcast_name);
 	
-	await admin.firestore().collection('email templates').where('postmarktemplateid','==',parseInt(postmarkTemplateId)).limit(1).get().then(async(templatedoc)=>{
+	await admin.firestore().collection('email templates').where('templatealias','==',templateAlias).limit(1).get().then(async(templatedoc)=>{
 		
 		if(templatedoc.docs.length != 0){
 			templateData = templatedoc.docs[0].data();
@@ -1031,7 +1035,7 @@ async function createEmailArchiveDocument({
 				fileUrl:fileURL,
 				from:from,
 				notes:notes,
-				postmarktemplateid: postmarkTemplateId,
+				postmarktemplateid: postmarkTemplateId || null,
 				profileid: profileId,
 				sent: [],
 				status:'send',
@@ -1050,4 +1054,64 @@ async function createEmailArchiveDocument({
 		}
 	});
 
+}
+
+async function createWatiArchiveDocument({
+	numbers = '', // Array of string numbers 
+	numbermap = {}, // Object {'phonenumber': 'profileid'}
+	broadcastname = '', // String
+	paramFillMode = '', // String data fetch from static,metadata,excel
+	parameterConfig = [{}], //Array of Object [{excelColumn: null,fillType: 'static',metadataField: null,name: param.namestaticValue: param.value}],
+	params = [], // Array of parameter fields
+	profileid = [], // Array of profileids
+	templateid = '', // template ID from wati 
+	watitemplateid = '', // String template name
+}){
+	console.log('Started creating Wati Archive');
+	
+	const now = new Date();
+	const day = String(now.getDate()).padStart(2, '0');
+	const month = String(now.getMonth() + 1).padStart(2, '0');
+	const year = now.getFullYear();
+	const hours = String(now.getHours()).padStart(2, '0');
+	const minutes = String(now.getMinutes()).padStart(2, '0');
+	const seconds = String(now.getSeconds()).padStart(2, '0');
+
+	const broadCastName = `${broadcastname}_${day}_${month}_${year}_${hours}_${minutes}_${seconds}`
+
+	const docid = admin.firestore().collection('wati archive').doc().id;
+
+	try {
+		await admin.firestore().collection('wati archive').doc(docid).set({
+			docid: docid,
+			body : null,
+			numbers: numbers,
+			createdby: null,
+			date: new Date(),
+			numbermap: numbermap,
+			broadcastname: broadCastName,
+			paramFillMode: paramFillMode,
+			parameterConfig: parameterConfig,
+			params: params,
+			profileid: profileid,
+			sentAt : new Date(),
+			serverid: eventWatiServerId,
+			serverurl: `https://live-mt-server.wati.io/${eventWatiServerId}`,
+			status: 'sent',
+			templateid: templateid,
+			templatevalidated: true,
+			validated: true,
+			watitemplateid: watitemplateid
+		}).then(() => {
+			console.log('Wati Archive Created Successfully');
+			return 'Wati Archive Created Successfully';
+		}).catch((err) => {
+			console.error('Oops Error while creating Wati archive', err);
+			return `Oops Error while creating Wati archive, ${err}`
+		});
+	} catch (error) {
+		console.log('Oops error', error);
+		return error;
+	};
+	
 }

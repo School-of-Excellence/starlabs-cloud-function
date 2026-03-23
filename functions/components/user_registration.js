@@ -145,12 +145,27 @@ exports.sendEmailOTPNewUsers = onCall(
         email: email,
         validity: '5 minutes',
       };
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
+      // });
+
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: [{ [email]: null }],
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '42066392',
+        templateAlias: 'register-otp-newuser'
       });
+
       console.log(`OTP sent to ${email}: ${otpDoc.id}`);
       return {
         success: true,
@@ -236,20 +251,38 @@ exports.verifyEmailOTPNewUsers = onCall(
         };
         await admin.firestore().collection('new_user_data').doc(profileid).set(userData);
         await otpDocRef.update({
-			verified: true,
-			verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-			userId: userRecord.uid,
+          verified: true,
+          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          userId: userRecord.uid,
         });
         try {
-          await commonService.postmarkClient.sendEmailWithTemplate({
-            From: "starlabs@excellenceinstallation.com",
-            To: otpData.email,
-            TemplateAlias: "welcome-email",
-            TemplateModel: {
-              name: otpData.name,
-              email: otpData.email,
-            },
+          // await commonService.postmarkClient.sendEmailWithTemplate({
+          //   From: "starlabs@excellenceinstallation.com",
+          //   To: otpData.email,
+          //   TemplateAlias: "welcome-email",
+          //   TemplateModel: {
+          //     name: otpData.name,
+          //     email: otpData.email,
+          //   },
+          // });
+          const templateModel = {
+            name: otpData.name,
+            email: otpData.email,
+          }
+          await commonService.createEmailArchiveDocument({
+            emailData: templateModel,
+            datamodel: templateModel,
+            attachments: [],
+            emailTo: [otpData.email],
+            emailMap: [{ [otpData.email]: profileid }],
+            fileURL: '',
+            from: 'starlabs@excellenceinstallation.com',
+            notes: '',
+            profileId: [profileid],
+            postmarkTemplateId: '42066826',
+            templateAlias: 'welcome-email'
           });
+
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
         }
@@ -257,11 +290,11 @@ exports.verifyEmailOTPNewUsers = onCall(
         try {
           var apikey = null;
           var serverid = null;
-          await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+          await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
             if(wati.exists) {
-              const watiData = wati.data()
-              apikey = watiData['apikey'];
-              serverid = watiData["serverid"];
+              const watiData = wati.data()[commonService.eventWatiServerId];
+              apikey = watiData['watitoken'];
+              serverid = commonService.eventWatiServerId;
             }
           })
 
@@ -379,11 +412,26 @@ exports.resendEmailOTPNewUsers = onCall(
         email: email,
         validity: '5 minutes',
       };
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
+      
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
+      // });
+      
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: [{ [email]: null }],
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '42066392',
+        templateAlias: 'register-otp-newuser'
       });
 
       console.log(`OTP resent to ${email}: ${otpDoc.id}`);
