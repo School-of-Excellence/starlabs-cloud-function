@@ -225,7 +225,8 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
           date: date,
           duration: duration,
           client: bookedby.name,
-          meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+          meetingurl: zoomurl,
+          // snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` :
           // zoomurl: zoomurl,
           // zoomid: zoomid,
           // zoompassword: zoompassword,
@@ -332,9 +333,9 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         // });
         
         // Specialist Email
-        if(snapshot.data()["onboarding"]){
-          dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
-        }
+        // if(snapshot.data()["onboarding"]){
+        //   dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
+        // }
         for (let i = 0; i < hosts.length; i++) {
           const element = hosts[i];
           await commonService.createEmailArchiveDocument({
@@ -569,7 +570,8 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       date: date,
       duration: duration,
       client: bookedby.name,
-      meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+      meetingurl: zoomurl,
+      // snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` :
       // zoomurl: zoomurl,
       // zoomid: zoomid,
       // zoompassword: zoompassword,
@@ -673,9 +675,9 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     // });
 
     // Specialist Mail
-    if(snapshot.data()["onboarding"]) {
-      dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
-    }
+    // if(snapshot.data()["onboarding"]) {
+    //   dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
+    // }
     for (let i = 0; i < hosts.length; i++) {
       const element = hosts[i];
 
