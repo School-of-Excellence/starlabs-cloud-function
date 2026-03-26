@@ -18,7 +18,6 @@ const AWS_ACCESS_KEY = defineSecret("AWS_ACCESS_KEY");
 const AWS_SECRET = defineSecret("AWS_SECRET");
 const masterInstanceId = defineSecret("MASTER_INSTANCE_ID");
 const mediaASGName = defineSecret("MEDIA_ASG_NAME");
-const { AccessToken } = require('livekit-server-sdk');
 
 let ec2 = null;
 let autoscaling = null;
@@ -310,7 +309,7 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 				output: {
 					case: "s3",
 					value: {
-						bucket: commonService.production ? "openvidu-elastic-recording" : "openvidu-community-recording",
+						bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-community-recording",
 						region: "us-east-1",
 						accessKey: awsAccessKey,
 						secret: awsSecret
@@ -890,15 +889,15 @@ async function createRoomForMeeting(meeting) {
         await roomRef.set({
           active: true,
           createddate: admin.firestore.FieldValue.serverTimestamp(),
+          sessiontype: "appointment",
+          sessionid: meeting.id,
+          roomid: meeting.id,
           hosts: hostIds,
+          participantid: participantid,
+          title: title,
           metadata: {
-            sessiontype: "appointment",
-            sessionid: meeting.id,
-            roomid: meeting.id,
-            appointmentid: meeting.id,
-            participantid: participantid,
-            title: title
-          }
+            appointmentid: meeting.id
+          },
         });
         console.log(`[Pre-create] Firestore room document created: ${meeting.id}`);
       } else {
