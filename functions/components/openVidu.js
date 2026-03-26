@@ -1082,6 +1082,7 @@ function sleep(ms) {
 // ========== ADD THIS NEW WEBHOOK FOR AWS EVENTS ==========
 
 exports.awsEventWebhook = onRequest({
+  secrets: [masterInstanceId, mediaASGName, AWS_ACCESS_KEY, AWS_SECRET],
   cors: true
 }, async (req, res) => {
   try {
@@ -1100,6 +1101,8 @@ exports.awsEventWebhook = onRequest({
     // STEP 2: Handle SNS subscription confirmation
     if (body.Type === 'SubscriptionConfirmation') {
       console.log('SNS Subscription Confirmation');
+      console.log(body.SubscribeURL, "body.SubscribeURL");
+      
       
       const https = require('https');
       https.get(body.SubscribeURL, (response) => {
