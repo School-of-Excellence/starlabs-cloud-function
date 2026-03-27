@@ -592,24 +592,6 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
     }
   }
 
-  if (newDoc && newDoc['fileref'] && newDoc['fileref'].length != 0) {
-    for (let i = 0; i < newDoc['fileref'].length; i++) {
-      const element = newDoc['fileref'][i];
-
-      var map = {
-        'deliveryRef': newDocRef,
-      }
-
-      if (newDoc['participantproductid']) {
-        map['participantproductid'] = newDoc['participantproductid'];
-      }
-
-      element.update(map).catch(err =>
-        console.error('Failed to update:', err)
-      );
-    }
-  }
-
   // Delivery Activity Completed
   if(oldDoc['status'] != newDoc['status'] && newDoc['status'] == "completed"){
     // Check Next Delivery
@@ -647,6 +629,24 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
         }
       }
     })
+  }
+
+  if (newDoc && newDoc['fileref'] && newDoc['fileref'].length != 0) {
+    for (let i = 0; i < newDoc['fileref'].length; i++) {
+      const element = newDoc['fileref'][i];
+
+      var map = {
+        'deliveryRef': newDocRef,
+      }
+
+      if (newDoc['participantproductid']) {
+        map['participantproductid'] = newDoc['participantproductid'];
+      }
+
+      element.update(map).catch(err =>
+        console.error('Failed to update:', err)
+      );
+    }
   }
 });
 
