@@ -430,7 +430,7 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
             transaction.set(counterRef, { 
               value: tokenno, 
               lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-              lastDelivery: deliveryRef 
+              lastDelivery: newDocRef 
             }, { merge: true });
     
             // Create token
@@ -458,7 +458,7 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
               denynote: null,
               logdate: admin.firestore.Timestamp.now(),
               variationid: participantProductData['queuevariationid'] || null,
-              deliveryRef: deliveryRef, // For tracking
+              deliveryRef: newDocRef, // For tracking
               participantproductid: participantProductData["docid"], // For tracking
               createdAttempt: attempts
             };
@@ -589,6 +589,24 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
       await batch.commit().then(() =>{
         console.log("Successfully initiated Product.", participantProductData["docid"])
       })
+    }
+  }
+
+  if (newDoc && newDoc['fileref'] && newDoc['fileref'].length != 0) {
+    for (let i = 0; i < newDoc['fileref'].length; i++) {
+      const element = newDoc['fileref'][i];
+
+      var map = {
+        'deliveryRef': newDocRef,
+      }
+
+      if (newDoc['participantproductid']) {
+        map['participantproductid'] = newDoc['participantproductid'];
+      }
+
+      element.update(map).catch(err =>
+        console.error('Failed to update:', err)
+      );
     }
   }
 
