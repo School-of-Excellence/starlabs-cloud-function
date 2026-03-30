@@ -22,9 +22,9 @@ const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
-
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
+exports.onTicketChanged = ticketSystem.onTicketChanged;
 
 //Achievements
 // no deployment needs validation
