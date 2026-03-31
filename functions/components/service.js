@@ -984,6 +984,8 @@ async function createEmailArchiveDocument({
 	profileId = '', // Array of String, Profile IDs
 	postmarkTemplateId = 0, // Number Postmark Template ID 
 	templateAlias = '', // String Postmark Template name
+	type = null, // type of message
+	metadata = null // metadata of individual message
 }){
 
 	console.log('Triggered Email Archive',{
@@ -1022,7 +1024,8 @@ async function createEmailArchiveDocument({
 			console.log('Email Template',templateData);
 
 			const docid = admin.firestore().collection('email archive').doc().id
-			await admin.firestore().collection('email archive').doc(docid).set({
+
+			var map = {
 				docid : docid,
 				body:templateData['htmlbody'],
 				broadcastname: broadcast_name,
@@ -1043,7 +1046,11 @@ async function createEmailArchiveDocument({
 				templatedocid:templateData['docid'],
 				templateid:templateData['templateid'] || templateAlias || null,
 				variableoption:'automated',
-			}).then(()=>{
+			}
+			if(type) map['type'] = type;
+			if(metadata) map['metadata'] = metadata;
+
+			await admin.firestore().collection('email archive').doc(docid).set(map).then(()=>{
 				console.log('Email Archive Created Successfully');
 			}).catch((err)=>{
 				console.error('Oops Error while creating email archive',err);
@@ -1066,6 +1073,8 @@ async function createWatiArchiveDocument({
 	profileid = [], // Array of profileids
 	templateid = '', // template ID from wati 
 	watitemplateid = '', // String template name
+	type = null, // type of message
+	metadata = null // metadata of individual message
 }){
 	console.log('Started creating Wati Archive');
 	
@@ -1082,7 +1091,8 @@ async function createWatiArchiveDocument({
 	const docid = admin.firestore().collection('wati archive').doc().id;
 
 	try {
-		await admin.firestore().collection('wati archive').doc(docid).set({
+
+		var map = {
 			docid: docid,
 			body : null,
 			numbers: numbers,
@@ -1102,7 +1112,12 @@ async function createWatiArchiveDocument({
 			templatevalidated: true,
 			validated: true,
 			watitemplateid: watitemplateid
-		}).then(() => {
+		};
+
+		if(type) map['type'] = type;
+		if(metadata) map['metadata'] = metadata;
+		
+		await admin.firestore().collection('wati archive').doc(docid).set(map).then(() => {
 			console.log('Wati Archive Created Successfully');
 			return 'Wati Archive Created Successfully';
 		}).catch((err) => {
