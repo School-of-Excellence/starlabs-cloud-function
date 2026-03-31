@@ -1,7 +1,7 @@
-const admin = require('firebase-admin');
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
-const { IncomingWebhook } = require('@slack/client');
-const commonService = require('./service');
+// const admin = require('firebase-admin');
+// const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+// const { IncomingWebhook } = require('@slack/client');
+// const commonService = require('./service');
 
 // Initialize Admin if not already
 // if (!admin.apps.length) {
@@ -260,6 +260,7 @@ const commonService = require('./service');
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const commonService = require('./service');
+const { IncomingWebhook } = require('@slack/client');
 
 if (!admin.apps.length) admin.initializeApp();
 
