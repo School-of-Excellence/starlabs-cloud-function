@@ -26,6 +26,7 @@ const workshop = require("./components/workshop")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
+exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification
 
 //Achievements
 // no deployment needs validation

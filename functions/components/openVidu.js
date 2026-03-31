@@ -309,7 +309,7 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 				output: {
 					case: "s3",
 					value: {
-						bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-community-recording",
+						bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-meet-recordings-test",
 						region: "us-east-1",
 						accessKey: awsAccessKey,
 						secret: awsSecret
