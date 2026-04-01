@@ -41,7 +41,7 @@ const apn = require("apn");
 const APPLE_AUTHKEY_P8 = defineSecret("APPLE_AUTHKEY_P8");
 const APPLE_APN_KEYID = defineSecret("APPLE_APN_KEYID");
 const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
-const MYOPERATOR_TOKEN = defineSecret("APPLE_TEAMID");
+const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
