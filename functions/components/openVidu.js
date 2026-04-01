@@ -1516,12 +1516,3 @@ exports.scaleMediaNodes = onRequest({
     });
   }
 });
-
-
-
-
-
-
-
-
-
