@@ -114,6 +114,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           profileid: [profileid],
           templateid: null,
           watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+          type: 'queue',
+          metadata: {...afterData}
         });
         console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -177,6 +179,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           profileid: [profileid],
           templateid: null,
           watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
+          type: 'queue',
+          metadata: {...afterData}
         });
         console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -384,6 +388,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             profileid: [profileid],
             templateid: null,
             watitemplateid: queueGenerationDoc['queuewelcometemplate'],
+            type: 'queue',
+            metadata: {...afterData}
           });
           console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -451,6 +457,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queuecompletion_v3',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -480,13 +488,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 datamodel : clientModel,
                 attachments : [],
                 emailTo : [profiledata["email"]],
-                emailMap : [{[profiledata["email"]] : profileid}],
+                emailMap : {[profiledata["email"]] : profileid},
                 fileURL : '',
                 from:'starlabs@excellenceinstallation.com',
                 notes : '',
                 profileId : [profileid],
                 postmarkTemplateId: '31423529',
-                templateAlias:'queue_stage_formtype'
+                templateAlias:'queue_stage_formtype',
+                type: 'queue',
+                metadata: {...afterData}
               });
 
             // mobileapp
@@ -502,9 +512,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 sticky: false,
                 notificationtype: "queue",
                 notificationimage: null,
-                metadata: {
-                  queuetoken: change.data.after.ref,
-                },
+                metadata: {...afterData},
               });
               //wati
               let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
@@ -541,6 +549,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 profileid: [profileid],
                 templateid: null,
                 watitemplateid: 'queue_stage_formtype_v3',
+                type: 'queue',
+                metadata: {...afterData}
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -568,13 +578,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               datamodel : clientModel,
               attachments : [],
               emailTo : [profiledata["email"]],
-              emailMap : [{[profiledata["email"]] : profiledata['profileid']}],
+              emailMap : {[profiledata["email"]] : profiledata['profileid']},
               fileURL : '',
               from:'starlabs@excellenceinstallation.com',
               notes : '',
               profileId : [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link'
+              templateAlias:'queue_stage_actiontype_link',
+              type: 'queue',
+              metadata: {...afterData}
             });
 
             // mobileapp
@@ -590,9 +602,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {
-                queuetoken: change.data.after.ref
-              },
+              metadata: {...afterData},
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -638,6 +648,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queue_stage_linktype_v4',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
             
@@ -992,13 +1004,15 @@ exports.studioZoomLink = onDocumentCreated({
           datamodel : clientModel,
           attachments : [],
           emailTo : [mapProfile[receiver]["email"]],
-          emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+          emailMap : {[mapProfile[receiver]["email"]] : receiver},
           fileURL : '',
           from:'starlabs@excellenceinstallation.com',
           notes : '',
           profileId : [receiver],
           postmarkTemplateId: '42760699',
-          templateAlias:'queuestudioinvitation'
+          templateAlias:'queuestudioinvitation',
+          type: 'queue',
+          metadata: {...participantTokenData}
         });
 
       }
@@ -1039,6 +1053,8 @@ exports.studioZoomLink = onDocumentCreated({
         profileid: [liveassignmentData['participantid']],
         templateid: null,
         watitemplateid: 'queue_link_generationv2',
+        type: 'queue',
+        metadata: {...participantTokenData}
       });
       console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -1533,13 +1549,15 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
         datamodel : clientModel,
         attachments : [],
         emailTo : [mapProfile[receiver]["email"]],
-        emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+        emailMap : {[mapProfile[receiver]["email"]] : receiver},
         fileURL : '',
         from:'starlabs@excellenceinstallation.com',
         notes : '',
         profileId : [receiver],
         postmarkTemplateId: '42760699',
-        templateAlias:'queuestudioinvitation'
+        templateAlias:'queuestudioinvitation',
+        type: 'queue',
+        metadata: {...participantTokenData}
       });
 
     }
@@ -1584,6 +1602,8 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       profileid: [liveassignmentData['participantid']],
       templateid: null,
       watitemplateid: 'queue_link_generationv2',
+      type: 'queue',
+      metadata: {...participantTokenData}
     });
     console.log('WATI ARCHIVE RESPONSE', response);
   }
@@ -1961,6 +1981,14 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
   
   if(snapshot.exists){
     var inviteData = snapshot.data()
+
+    // Fetch Queue Token Data
+    var participantTokenData = {}
+    await inviteData['tokenref'].get().then(token => {
+      token.forEach(doc => {
+        participantTokenData = doc.data()
+      })
+    })
     await commonService.saveNotificationRecord({
       title: `${inviteData["stage"]} invitation received.`,
       message: "Our specialist has invited you for the '" + inviteData["stage"] + "' Call. Please open the app, accept the invitation, and join the call from your laptop.",
@@ -2018,6 +2046,8 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
         profileid: [profileData['profileid']],
         templateid: null,
         watitemplateid: 'bulkinvitetemplate_v3',
+        type: 'queue',
+        metadata: snap.data.data()
       });
       console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2621,6 +2651,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
   var email = profileData["email"]
   var zoomlink = data["zoomlink"]
   var profileUID = profileData["user_ref"] != null && profileData["user_ref"] != undefined ? profileData["user_ref"].id : null
+
+  // Fetch Queue Token Data
+  var participantTokenData = {}
+  await data['tokenref'].get().then(token => {
+    token.forEach(doc => {
+      participantTokenData = doc.data()
+    })
+  })
+
   //whatsapp
   let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
   
@@ -2660,6 +2699,8 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     profileid: [profileData['profileid']],
     templateid: null,
     watitemplateid: 'audio_video_zoom_v3',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
   console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2686,13 +2727,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     datamodel: messageModel,
     attachments: [],
     emailTo: [email],
-    emailMap: [{ [email]: data["profileid"] }],
+    emailMap: { [email]: data["profileid"] },
     fileURL: '',
     from: 'starlabs@excellenceinstallation.com',
     notes: '',
     profileId: [data["profileid"]],
     postmarkTemplateId: '33910948',
-    templateAlias: 'queueavtest'
+    templateAlias: 'queueavtest',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
 
   // App notification
@@ -2709,7 +2752,7 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
       sticky: false,
       notificationtype: "queue",
       notificationimage: null,
-      metadata: snap.data.data()
+      metadata: {...participantTokenData}
     })
     
     // await admin.firestore().collection("notifications").doc(profileUID).set({

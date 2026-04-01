@@ -22,9 +22,11 @@ const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
+const workshop = require("./components/workshop")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
+exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification
 
 //Achievements
 // no deployment needs validation
@@ -188,7 +190,7 @@ exports.dashboardPaymentplanWatsonRequest = watsonUpdates.dashboardPaymentplanWa
 
 // Chat
 exports.ChatxNotification = communication.ChatxNotification
-
+//workshop
 //workshop New User Login
 exports.sendEmailOTPNewUsers = userRegistration.sendEmailOTPNewUsers
 exports.verifyEmailOTPNewUsers = userRegistration.verifyEmailOTPNewUsers
@@ -204,20 +206,26 @@ exports.workshopAssignment = communication.workshopAssignment
 exports.workshopenrolledwatti = communication.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
+exports.workshopconfiguration = workshop.workshopconfiguration
 
 //product enquiry
 exports.productenquiryfromeiflix = communication.productenquiryfromeiflix
 
 // OpenVidu
-// exports.createOpenViduToken = openViduSystem.createOpenViduToken
-// exports.openViduStartRecording = openViduSystem.openViduStartRecording
-// exports.openViduStopRecording = openViduSystem.openViduStopRecording
-// exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
-// exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
-// exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
+exports.createOpenViduToken = openViduSystem.createOpenViduToken
+exports.openViduStartRecording = openViduSystem.openViduStartRecording
+exports.openViduStopRecording = openViduSystem.openViduStopRecording
+exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
+exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
+exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
+exports.awsEventWebhook = openViduSystem.awsEventWebhook
+exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
+exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
+exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
+

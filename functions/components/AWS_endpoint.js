@@ -5,7 +5,6 @@ const cors = require("cors")({ origin: true });
 const commonService = require('./service');
 const AWS_S3Request = require("@aws-sdk/s3-request-presigner")
 const AWS_ClientS3 = require("@aws-sdk/client-s3");
-const { onDocumentUpdated } = require("firebase-functions/firestore");
 
 const AWS_ACCESS_KEY = defineSecret("AWS_ACCESS_KEY");
 const AWS_SECRET = defineSecret("AWS_SECRET");
@@ -36,7 +35,7 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
       });
 
       const command = new AWS_ClientS3.GetObjectCommand({
-        Bucket: commonService.production ? "openvidu-elastic-recording" : "openvidu-community-recording",
+        Bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-community-recording",
         Key: videoKey,
       });
 
@@ -48,14 +47,3 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
     }
   })
 });
-
-exports.testFunction = onDocumentUpdated("/test/{docid}", async (snapshot)=>{
-  const beforeData = snapshot.data.before.data()
-  const afterData = snapshot.data.after.data()
-
-  if(afterData["updated"] != beforeData["updated"]){
-    snapshot.data.after.ref.update({
-      updated: true
-    })
-  }
-})
