@@ -209,12 +209,12 @@ exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.productenquiryfromeiflix = communication.productenquiryfromeiflix
 
 // OpenVidu
-exports.createOpenViduToken = openViduSystem.createOpenViduToken
-exports.openViduStartRecording = openViduSystem.openViduStartRecording
-exports.openViduStopRecording = openViduSystem.openViduStopRecording
-exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
-exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
-exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
+// exports.createOpenViduToken = openViduSystem.createOpenViduToken
+// exports.openViduStartRecording = openViduSystem.openViduStartRecording
+// exports.openViduStopRecording = openViduSystem.openViduStopRecording
+// exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
+// exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
+// exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
