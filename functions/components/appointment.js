@@ -225,8 +225,8 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
           date: date,
           duration: duration,
           client: bookedby.name,
-          meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
-          joininstruction: snapshot.data()["onboarding"] == true,
+          meetingurl: snapshot.data()["journeycoach"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+          joininstruction: snapshot.data()["journeycoach"] == true,
           // zoomurl: zoomurl,
           // zoomid: zoomid,
           // zoompassword: zoompassword,
@@ -333,7 +333,7 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         // });
         
         // Specialist Email
-        if(snapshot.data()["onboarding"]){
+        if(snapshot.data()["journeycoach"]){
           dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
         }
         for (let i = 0; i < hosts.length; i++) {
@@ -570,8 +570,8 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       date: date,
       duration: duration,
       client: bookedby.name,
-      meetingurl: snapshot.data()["onboarding"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
-      joininstruction: snapshot.data()["onboarding"] == true,
+      meetingurl: snapshot.data()["journeycoach"] ? `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/participantstudio` : zoomurl,
+      joininstruction: snapshot.data()["journeycoach"] == true,
       // zoomurl: zoomurl,
       // zoomid: zoomid,
       // zoompassword: zoompassword,
@@ -675,7 +675,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     // });
 
     // Specialist Mail
-    if(snapshot.data()["onboarding"]) {
+    if(snapshot.data()["journeycoach"]) {
       dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
     }
     for (let i = 0; i < hosts.length; i++) {
