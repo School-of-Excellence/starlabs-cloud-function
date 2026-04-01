@@ -1652,23 +1652,73 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+
+      // Sort queuedList by selectedstageslots[currentstage].startdate ascending
+      queuedList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1   // no slot → pushed to end
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // Sort waitingList by selectedstageslots[currentstage].startdate ascending
+      waitingList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // queued: position based on startdate slot; skip if no slot data
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
@@ -1702,23 +1752,47 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
