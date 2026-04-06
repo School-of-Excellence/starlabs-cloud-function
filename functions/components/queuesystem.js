@@ -87,7 +87,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           body: {
             parameters: isPrepStage ? [
               { name: 'name', value: profiledata['name'] },
-              { name: 'title', value: addedValue['title'] ?? 'NA' }
+              { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
             ] : [
               { name: 'name', value: profiledata['name'] },
               { name: 'date_time_slot', value: formattedDate },
@@ -123,6 +123,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           metadata: {...afterData}
         }
         
+        console.log("Added Slot", map);
         const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -188,6 +189,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           metadata: {...afterData}
         }
 
+        console.log("Reverted Slot", map);
         const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
