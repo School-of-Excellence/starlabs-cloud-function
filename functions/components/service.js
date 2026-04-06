@@ -907,6 +907,13 @@ async function sendSlotConfirmationToSlackChannel(value, status, profile) {
 					"text": `*Slot End Date* : ${slotdata['enddate']?.toDate ? slotdata['enddate'].toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : new Date(slotdata['enddate']).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}`,
 				}
 			},
+			...(slotdata['title'] ? [{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": `*Title* : ${slotdata['title']}`
+				}
+			}] : []),
 		]
 	}
 
