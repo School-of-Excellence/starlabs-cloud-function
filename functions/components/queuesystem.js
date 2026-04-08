@@ -2068,9 +2068,9 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
     // Fetch Queue Token Data
     var participantTokenData = {}
     await inviteData['tokenref'].get().then(token => {
-      token.forEach(doc => {
-        participantTokenData = doc.data()
-      })
+      if (token.exists) {
+        participantTokenData = token.data();
+      }
     })
     await commonService.saveNotificationRecord({
       title: `${inviteData["stage"]} invitation received.`,
