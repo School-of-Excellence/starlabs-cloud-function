@@ -175,7 +175,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         }));
         console.log('Triggered Wati Archive Creation');
 
-        var map = {
+        map = {
           numbers: [parseInt(waticontent['phonenumber'])],
           numbermap: { [`${waticontent['phonenumber']}`]: profileid },
           broadcastname: 'Individual',
