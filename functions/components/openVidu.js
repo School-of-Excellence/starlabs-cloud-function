@@ -632,6 +632,11 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 		const masterRunning = await isMasterNodeRunning();
 		console.log(`Master node is currently: ${masterRunning ? 'RUNNING' : 'STOPPED'}`);
 
+    // 2. ✅ NEW: Check and close inactive rooms
+    if (masterRunning) {
+      await checkAndCloseInactiveRooms();
+    }
+
 		// 2. Check for upcoming meetings (for auto-start)
 		const now = admin.firestore.Timestamp.now();
 		const fifteenMinutesFromNow = admin.firestore.Timestamp.fromMillis(
@@ -734,6 +739,99 @@ async function isMasterNodeRunning() {
       return false;
     }
 }
+
+/**
+ * Check for inactive rooms and close them
+ * - Rooms with no live participants (excluding ghost) for >10 minutes
+ */
+async function checkAndCloseInactiveRooms() {
+  try {
+    console.log('Checking for inactive rooms...');
+    
+    const tenMinutesAgo = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 10 * 60 * 1000
+    );
+
+    // Get all active rooms
+    const roomsSnapshot = await admin.firestore()
+      .collection('openviduroom')
+      .where('active', '==', true)
+      .get();
+
+    if (roomsSnapshot.empty) {
+      console.log('No active rooms found');
+      return 0;
+    }
+
+    let closedCount = 0;
+
+    for (const roomDoc of roomsSnapshot.docs) {
+      const roomData = roomDoc.data();
+      const roomId = roomDoc.id;
+      
+      // Get participant data
+      const participantLive = roomData.participantlive || [];
+      const ghostId = roomData.participantghost;
+      
+      // Filter out ghost participant
+      const realParticipants = participantLive.filter(id => id !== ghostId);
+      
+      console.log(`Room ${roomId}:`, {
+        totalLive: participantLive.length,
+        afterFilteringGhost: realParticipants.length,
+        ghostId: ghostId
+      });
+
+      // Check if room is empty (no real participants)
+      if (realParticipants.length === 0) {
+        // Get last update time
+        const updateTime = roomData.egressInfo.updatedAt || roomData.createddate;
+        
+        if (!updateTime) {
+          console.log(`⚠️ Room ${roomId} has no update timestamp, skipping`);
+          continue;
+        }
+
+        // Check if it's been empty for more than 10 minutes
+        if (updateTime.toMillis() < tenMinutesAgo.toMillis()) {
+          console.log(`🔴 Closing inactive room ${roomId} (empty for >10 mins)`);
+          
+          try {
+            // Update room to inactive
+            await admin.firestore()
+              .collection('openviduroom')
+              .doc(roomId)
+              .update({
+                active: false,
+                roomstatus: 'finished',
+                closedAt: admin.firestore.FieldValue.serverTimestamp(),
+                closedReason: 'auto-closed-inactive'
+              });
+
+           
+
+            closedCount++;
+          } catch (error) {
+            console.error(`Failed to close room ${roomId}:`, error);
+          }
+        } else {
+          const emptyDuration = Math.round((Date.now() - updateTime.toMillis()) / 1000 / 60);
+          console.log(`⏳ Room ${roomId} is empty but only for ${emptyDuration} minutes`);
+        }
+      } else {
+        console.log(`✅ Room ${roomId} has ${realParticipants.length} active participant(s)`);
+      }
+    }
+
+    console.log(`Closed ${closedCount} inactive room(s)`);
+    return closedCount;
+    
+  } catch (error) {
+    console.error('Error checking inactive rooms:', error);
+    throw error;
+  }
+}
+
 
 
 
@@ -1516,6 +1614,137 @@ exports.scaleMediaNodes = onRequest({
     });
   }
 });
+
+
+/**
+ * Remove (kick out) a participant from the room
+ */
+exports.removeParticipants = onRequest({
+  cors: true
+}, async (req, res) => {
+    try {
+
+      // Get request data
+      const { roomName, participantIdentity, requesterId } = req.body;
+
+      if (!roomName || !participantIdentity || !requesterId) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+
+      // Check if requester is a host
+      const roomDoc = await admin.firestore().collection('openviduroom').doc(roomName).get();
+      
+      if (!roomDoc.exists) {
+        res.status(404).json({ error: 'Room not found' });
+        return;
+      }
+
+      const roomData = roomDoc.data();
+      const hosts = roomData?.hosts || [];
+
+      if (!hosts.includes(requesterId)) {
+        res.status(403).json({ error: 'Only hosts can remove participants' });
+        return;
+      }
+
+      
+      const roomService = getRoomClient();
+
+      await roomService.removeParticipant(roomName, participantIdentity);
+
+      console.log(`Participant ${participantIdentity} removed from room ${roomName} by ${requesterId}`);
+
+      res.status(200).json({
+        success: true,
+        message: 'Participant removed successfully'
+      });
+      
+    } catch (error) {
+      console.error('Error removing participant:', error);
+      res.status(500).json({ 
+        error: 'Internal server error',
+        message: error.message 
+      });
+    }
+  });
+
+
+/**
+ * Mute/unmute a participant's audio or video
+ */
+exports.muteParticipant = onRequest({
+  cors: true
+}, async (req, res) => {
+    try {
+      // Only allow POST requests
+      if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed' });
+        return;
+      }
+
+
+      // Get request data
+      const { roomName, participantIdentity, trackType, muted, requesterId } = req.body;
+
+      if (!roomName || !participantIdentity || !trackType || muted === undefined || !requesterId) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+      if (trackType !== 'audio' && trackType !== 'video') {
+        res.status(400).json({ error: 'Invalid track type. Must be "audio" or "video"' });
+        return;
+      }
+
+
+      // Check if requester is a host
+      const roomDoc = await admin.firestore().collection('openviduroom').doc(roomName).get();
+      
+      if (!roomDoc.exists) {
+        res.status(404).json({ error: 'Room not found' });
+        return;
+      }
+
+      const roomData = roomDoc.data();
+      const hosts = roomData?.hosts || [];
+
+      if (!hosts.includes(requesterId)) {
+        res.status(403).json({ error: 'Only hosts can mute/unmute participants' });
+        return;
+      }
+
+      
+      const roomService = getRoomClient();
+
+      const trackSource = trackType === 'audio' ? 'microphone' : 'camera';
+
+      await roomService.mutePublishedTrack(
+        roomName, 
+        participantIdentity, 
+        trackSource, 
+        muted
+      );
+
+      console.log(
+        `Participant ${participantIdentity} ${trackType} ${muted ? 'muted' : 'unmuted'} in room ${roomName} by ${requesterId}`
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Participant ${muted ? 'muted' : 'unmuted'} successfully`
+      });
+      
+    } catch (error) {
+      console.error('Error muting participant:', error);
+      res.status(500).json({ 
+        error: 'Internal server error',
+        message: error.message 
+      });
+    }
+  });
+
 
 
 
