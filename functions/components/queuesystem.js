@@ -80,21 +80,24 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         // const phoneNumber = `${countrycode}${profiledata['number']}`;
         const phoneNumber = `${profiledata['number']}`;
 
+        const isPrepStage = afterData['currentstage'] === 'Evolution Prep Orientation';
+
         const waticontent = {
           phonenumber: phoneNumber,
           body: {
-            parameters: [
+            parameters: isPrepStage ? [
+              { name: 'name', value: profiledata['name'] },
+              { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
+            ] : [
               { name: 'name', value: profiledata['name'] },
               { name: 'date_time_slot', value: formattedDate },
               { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
-            ],
-            broadcast_name: 'app_slot_confirmation_automate_app_to_wati_v1',
-            template_name: 'app_slot_confirmation_automate_app_to_wati_v1'
+            ]
           }
         };
 
         // await commonService.sendToWhatsappViaWati(waticontent);
-
+        
         const parameterConfig = waticontent['body']['parameters'].map(param => ({
           excelColumn: null,
           fillType: 'static',
@@ -103,8 +106,10 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           staticValue: param.value
         }));
         console.log('Triggered Wati Archive Creation');
-        
-        const response = await commonService.createWatiArchiveDocument({
+
+        const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
+
+        var map = {
           numbers: [parseInt(waticontent['phonenumber'])],
           numbermap : {[`${waticontent['phonenumber']}`] : profileid},
           broadcastname : 'Individual',
@@ -113,8 +118,13 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           params: [],
           profileid: [profileid],
           templateid: null,
-          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
-        });
+          watitemplateid: templateId,
+          type: 'queue',
+          metadata: {...afterData}
+        }
+        
+        console.log("Added Slot", map);
+        const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
@@ -150,9 +160,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             parameters: [
               { name: 'name', value: profiledata['name'] },
               { name: 'date_time_slot', value: formattedDate },
-            ],
-            broadcast_name: 'app_slot_revert_automate_app_to_wati_v1',
-            template_name: 'app_slot_revert_automate_app_to_wati_v1'
+            ]
           }
         };
 
@@ -167,7 +175,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         }));
         console.log('Triggered Wati Archive Creation');
 
-        const response = await commonService.createWatiArchiveDocument({
+        map = {
           numbers: [parseInt(waticontent['phonenumber'])],
           numbermap: { [`${waticontent['phonenumber']}`]: profileid },
           broadcastname: 'Individual',
@@ -177,7 +185,12 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           profileid: [profileid],
           templateid: null,
           watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
-        });
+          type: 'queue',
+          metadata: {...afterData}
+        }
+
+        console.log("Reverted Slot", map);
+        const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
@@ -384,6 +397,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             profileid: [profileid],
             templateid: null,
             watitemplateid: queueGenerationDoc['queuewelcometemplate'],
+            type: 'queue',
+            metadata: {...afterData}
           });
           console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -451,6 +466,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queuecompletion_v3',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -480,13 +497,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 datamodel : clientModel,
                 attachments : [],
                 emailTo : [profiledata["email"]],
-                emailMap : [{[profiledata["email"]] : profileid}],
+                emailMap : {[profiledata["email"]] : profileid},
                 fileURL : '',
                 from:'starlabs@excellenceinstallation.com',
                 notes : '',
                 profileId : [profileid],
                 postmarkTemplateId: '31423529',
-                templateAlias:'queue_stage_formtype'
+                templateAlias:'queue_stage_formtype',
+                type: 'queue',
+                metadata: {...afterData}
               });
 
             // mobileapp
@@ -502,9 +521,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 sticky: false,
                 notificationtype: "queue",
                 notificationimage: null,
-                metadata: {
-                  queuetoken: change.data.after.ref,
-                },
+                metadata: {...afterData},
               });
               //wati
               let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
@@ -541,6 +558,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 profileid: [profileid],
                 templateid: null,
                 watitemplateid: 'queue_stage_formtype_v3',
+                type: 'queue',
+                metadata: {...afterData}
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -568,13 +587,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               datamodel : clientModel,
               attachments : [],
               emailTo : [profiledata["email"]],
-              emailMap : [{[profiledata["email"]] : profiledata['profileid']}],
+              emailMap : {[profiledata["email"]] : profiledata['profileid']},
               fileURL : '',
               from:'starlabs@excellenceinstallation.com',
               notes : '',
               profileId : [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link'
+              templateAlias:'queue_stage_actiontype_link',
+              type: 'queue',
+              metadata: {...afterData}
             });
 
             // mobileapp
@@ -590,9 +611,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {
-                queuetoken: change.data.after.ref
-              },
+              metadata: {...afterData},
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -638,6 +657,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queue_stage_linktype_v4',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
             
@@ -992,13 +1013,15 @@ exports.studioZoomLink = onDocumentCreated({
           datamodel : clientModel,
           attachments : [],
           emailTo : [mapProfile[receiver]["email"]],
-          emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+          emailMap : {[mapProfile[receiver]["email"]] : receiver},
           fileURL : '',
           from:'starlabs@excellenceinstallation.com',
           notes : '',
           profileId : [receiver],
           postmarkTemplateId: '42760699',
-          templateAlias:'queuestudioinvitation'
+          templateAlias:'queuestudioinvitation',
+          type: 'queue',
+          metadata: {...participantTokenData}
         });
 
       }
@@ -1039,6 +1062,8 @@ exports.studioZoomLink = onDocumentCreated({
         profileid: [liveassignmentData['participantid']],
         templateid: null,
         watitemplateid: 'queue_link_generationv2',
+        type: 'queue',
+        metadata: {...participantTokenData}
       });
       console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -1533,13 +1558,15 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
         datamodel : clientModel,
         attachments : [],
         emailTo : [mapProfile[receiver]["email"]],
-        emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+        emailMap : {[mapProfile[receiver]["email"]] : receiver},
         fileURL : '',
         from:'starlabs@excellenceinstallation.com',
         notes : '',
         profileId : [receiver],
         postmarkTemplateId: '42760699',
-        templateAlias:'queuestudioinvitation'
+        templateAlias:'queuestudioinvitation',
+        type: 'queue',
+        metadata: {...participantTokenData}
       });
 
     }
@@ -1584,6 +1611,8 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       profileid: [liveassignmentData['participantid']],
       templateid: null,
       watitemplateid: 'queue_link_generationv2',
+      type: 'queue',
+      metadata: {...participantTokenData}
     });
     console.log('WATI ARCHIVE RESPONSE', response);
   }
@@ -1632,23 +1661,73 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+
+      // Sort queuedList by selectedstageslots[currentstage].startdate ascending
+      queuedList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1   // no slot → pushed to end
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // Sort waitingList by selectedstageslots[currentstage].startdate ascending
+      waitingList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // queued: position based on startdate slot; skip if no slot data
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
@@ -1682,23 +1761,47 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
@@ -1961,6 +2064,14 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
   
   if(snapshot.exists){
     var inviteData = snapshot.data()
+
+    // Fetch Queue Token Data
+    var participantTokenData = {}
+    await inviteData['tokenref'].get().then(token => {
+      if (token.exists) {
+        participantTokenData = token.data();
+      }
+    })
     await commonService.saveNotificationRecord({
       title: `${inviteData["stage"]} invitation received.`,
       message: "Our specialist has invited you for the '" + inviteData["stage"] + "' Call. Please open the app, accept the invitation, and join the call from your laptop.",
@@ -2018,6 +2129,8 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
         profileid: [profileData['profileid']],
         templateid: null,
         watitemplateid: 'bulkinvitetemplate_v3',
+        type: 'queue',
+        metadata: snap.data.data()
       });
       console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2621,6 +2734,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
   var email = profileData["email"]
   var zoomlink = data["zoomlink"]
   var profileUID = profileData["user_ref"] != null && profileData["user_ref"] != undefined ? profileData["user_ref"].id : null
+
+  // Fetch Queue Token Data
+  var participantTokenData = {}
+  await data['tokenref'].get().then(token => {
+    token.forEach(doc => {
+      participantTokenData = doc.data()
+    })
+  })
+
   //whatsapp
   let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
   
@@ -2660,6 +2782,8 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     profileid: [profileData['profileid']],
     templateid: null,
     watitemplateid: 'audio_video_zoom_v3',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
   console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2686,13 +2810,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     datamodel: messageModel,
     attachments: [],
     emailTo: [email],
-    emailMap: [{ [email]: data["profileid"] }],
+    emailMap: { [email]: data["profileid"] },
     fileURL: '',
     from: 'starlabs@excellenceinstallation.com',
     notes: '',
     profileId: [data["profileid"]],
     postmarkTemplateId: '33910948',
-    templateAlias: 'queueavtest'
+    templateAlias: 'queueavtest',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
 
   // App notification
@@ -2709,7 +2835,7 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
       sticky: false,
       notificationtype: "queue",
       notificationimage: null,
-      metadata: snap.data.data()
+      metadata: {...participantTokenData}
     })
     
     // await admin.firestore().collection("notifications").doc(profileUID).set({
