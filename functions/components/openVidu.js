@@ -655,7 +655,6 @@ exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 	});
 });
 
-
 exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
 	cors(req, res, async () => {
 		if (req.method !== "POST") {
@@ -708,6 +707,11 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 		// 1. Check current master state
 		const masterRunning = await isMasterNodeRunning();
 		console.log(`Master node is currently: ${masterRunning ? 'RUNNING' : 'STOPPED'}`);
+
+    // 2. ✅ NEW: Check and close inactive rooms
+    if (masterRunning) {
+      await checkAndCloseInactiveRooms();
+    }
 
 		// 2. Check for upcoming meetings (for auto-start)
 		const now = admin.firestore.Timestamp.now();
@@ -811,6 +815,99 @@ async function isMasterNodeRunning() {
       return false;
     }
 }
+
+/**
+ * Check for inactive rooms and close them
+ * - Rooms with no live participants (excluding ghost) for >10 minutes
+ */
+async function checkAndCloseInactiveRooms() {
+  try {
+    console.log('Checking for inactive rooms...');
+    
+    const tenMinutesAgo = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 10 * 60 * 1000
+    );
+
+    // Get all active rooms
+    const roomsSnapshot = await admin.firestore()
+      .collection('openviduroom')
+      .where('active', '==', true)
+      .get();
+
+    if (roomsSnapshot.empty) {
+      console.log('No active rooms found');
+      return 0;
+    }
+
+    let closedCount = 0;
+
+    for (const roomDoc of roomsSnapshot.docs) {
+      const roomData = roomDoc.data();
+      const roomId = roomDoc.id;
+      
+      // Get participant data
+      const participantLive = roomData.participantlive || [];
+      const ghostId = roomData.participantghost;
+      
+      // Filter out ghost participant
+      const realParticipants = participantLive.filter(id => id !== ghostId);
+      
+      console.log(`Room ${roomId}:`, {
+        totalLive: participantLive.length,
+        afterFilteringGhost: realParticipants.length,
+        ghostId: ghostId
+      });
+
+      // Check if room is empty (no real participants)
+      if (realParticipants.length === 0) {
+        // Get last update time
+        const updateTime = roomData.egressInfo.updatedAt || roomData.createddate;
+        
+        if (!updateTime) {
+          console.log(`⚠️ Room ${roomId} has no update timestamp, skipping`);
+          continue;
+        }
+
+        // Check if it's been empty for more than 10 minutes
+        if (updateTime.toMillis() < tenMinutesAgo.toMillis()) {
+          console.log(`🔴 Closing inactive room ${roomId} (empty for >10 mins)`);
+          
+          try {
+            // Update room to inactive
+            await admin.firestore()
+              .collection('openviduroom')
+              .doc(roomId)
+              .update({
+                active: false,
+                roomstatus: 'finished',
+                closedAt: admin.firestore.FieldValue.serverTimestamp(),
+                closedReason: 'auto-closed-inactive'
+              });
+
+           
+
+            closedCount++;
+          } catch (error) {
+            console.error(`Failed to close room ${roomId}:`, error);
+          }
+        } else {
+          const emptyDuration = Math.round((Date.now() - updateTime.toMillis()) / 1000 / 60);
+          console.log(`⏳ Room ${roomId} is empty but only for ${emptyDuration} minutes`);
+        }
+      } else {
+        console.log(`✅ Room ${roomId} has ${realParticipants.length} active participant(s)`);
+      }
+    }
+
+    console.log(`Closed ${closedCount} inactive room(s)`);
+    return closedCount;
+    
+  } catch (error) {
+    console.error('Error checking inactive rooms:', error);
+    throw error;
+  }
+}
+
 
 
 

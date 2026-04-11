@@ -907,6 +907,13 @@ async function sendSlotConfirmationToSlackChannel(value, status, profile) {
 					"text": `*Slot End Date* : ${slotdata['enddate']?.toDate ? slotdata['enddate'].toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : new Date(slotdata['enddate']).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}`,
 				}
 			},
+			...(slotdata['title'] ? [{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": `*Title* : ${slotdata['title']}`
+				}
+			}] : []),
 		]
 	}
 
@@ -1032,6 +1039,7 @@ async function createEmailArchiveDocument({
 				createdby: 'automated',
 				datamodel: datamodel,
 				attachments: attachments,
+				postmarkAttachments: attachments,
 				date: new Date(),
 				emailid: emailTo,
 				emailmap: emailMap,
@@ -1042,6 +1050,7 @@ async function createEmailArchiveDocument({
 				profileid: profileId,
 				sent: [],
 				status:'send',
+				servername: templateData['servername'] || null,
 				subject: templateData['subject'],
 				templatedocid:templateData['docid'],
 				templateid:templateData['templateid'] || templateAlias || null,

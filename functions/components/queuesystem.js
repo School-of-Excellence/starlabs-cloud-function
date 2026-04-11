@@ -80,21 +80,24 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         // const phoneNumber = `${countrycode}${profiledata['number']}`;
         const phoneNumber = `${profiledata['number']}`;
 
+        const isPrepStage = afterData['currentstage'] === 'Evolution Prep Orientation';
+
         const waticontent = {
           phonenumber: phoneNumber,
           body: {
-            parameters: [
+            parameters: isPrepStage ? [
+              { name: 'name', value: profiledata['name'] },
+              { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
+            ] : [
               { name: 'name', value: profiledata['name'] },
               { name: 'date_time_slot', value: formattedDate },
               { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
-            ],
-            broadcast_name: 'app_slot_confirmation_automate_app_to_wati_v1',
-            template_name: 'app_slot_confirmation_automate_app_to_wati_v1'
+            ]
           }
         };
 
         // await commonService.sendToWhatsappViaWati(waticontent);
-
+        
         const parameterConfig = waticontent['body']['parameters'].map(param => ({
           excelColumn: null,
           fillType: 'static',
@@ -103,8 +106,10 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           staticValue: param.value
         }));
         console.log('Triggered Wati Archive Creation');
-        
-        const response = await commonService.createWatiArchiveDocument({
+
+        const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
+
+        var map = {
           numbers: [parseInt(waticontent['phonenumber'])],
           numbermap : {[`${waticontent['phonenumber']}`] : profileid},
           broadcastname : 'Individual',
@@ -113,10 +118,13 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           params: [],
           profileid: [profileid],
           templateid: null,
-          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
+          watitemplateid: templateId,
           type: 'queue',
           metadata: {...afterData}
-        });
+        }
+        
+        console.log("Added Slot", map);
+        const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
@@ -152,9 +160,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             parameters: [
               { name: 'name', value: profiledata['name'] },
               { name: 'date_time_slot', value: formattedDate },
-            ],
-            broadcast_name: 'app_slot_revert_automate_app_to_wati_v1',
-            template_name: 'app_slot_revert_automate_app_to_wati_v1'
+            ]
           }
         };
 
@@ -169,7 +175,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         }));
         console.log('Triggered Wati Archive Creation');
 
-        const response = await commonService.createWatiArchiveDocument({
+        map = {
           numbers: [parseInt(waticontent['phonenumber'])],
           numbermap: { [`${waticontent['phonenumber']}`]: profileid },
           broadcastname: 'Individual',
@@ -181,7 +187,10 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
           watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
           type: 'queue',
           metadata: {...afterData}
-        });
+        }
+
+        console.log("Reverted Slot", map);
+        const response = await commonService.createWatiArchiveDocument(map);
         console.log('WATI ARCHIVE RESPONSE', response);
 
         console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
@@ -1652,23 +1661,73 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+
+      // Sort queuedList by selectedstageslots[currentstage].startdate ascending
+      queuedList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1   // no slot → pushed to end
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // Sort waitingList by selectedstageslots[currentstage].startdate ascending
+      waitingList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // queued: position based on startdate slot; skip if no slot data
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
@@ -1702,23 +1761,47 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           })
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
+      let queuedPositionCounter = 1
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, {
+          queueposition: queuedPositionCounter++
         })
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
+
+      // waiting: position continues from where queued left off; skip if no slot data
+      let waitingPositionCounter = queuedPositionCounter
+      waitingList.forEach((waiting) => {
+        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        batch.update(waiting.ref, {
+          queueposition: waitingPositionCounter++
         })
       })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+      // waitingList.forEach((waiting, i)=>{
+      //   batch.update(waiting.ref,{ 
+      //     queueposition: i + 1
+      //   })
+      // })
+      // queuedList.forEach((queued, i)=>{
+      //   batch.update(queued.ref,{ 
+      //     queueposition: i + 1+ waitingList.length
+      //   })
+      // })
+      // Object.keys(preassignedMap).forEach(studio=>{
+      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
+      //     batch.update(assignedtoken.ref,{ 
+      //       queueposition: i + 1
+      //     })
+      //   })
+      // })
       await batch.commit().then(() => {
         console.log("batch updated")
       })
@@ -1985,9 +2068,9 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
     // Fetch Queue Token Data
     var participantTokenData = {}
     await inviteData['tokenref'].get().then(token => {
-      token.forEach(doc => {
-        participantTokenData = doc.data()
-      })
+      if (token.exists) {
+        participantTokenData = token.data();
+      }
     })
     await commonService.saveNotificationRecord({
       title: `${inviteData["stage"]} invitation received.`,
