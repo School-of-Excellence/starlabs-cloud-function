@@ -222,6 +222,8 @@ exports.awsEventWebhook = openViduSystem.awsEventWebhook
 exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
 exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
+exports.muteParticipant = openViduSystem.muteParticipant
+exports.kickParticipant = openViduSystem.kickParticipant
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS

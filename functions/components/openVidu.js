@@ -613,8 +613,85 @@ exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SE
 	});
 });
 
+exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
+	cors(req, res, async () => {
+		if (req.method !== "POST") {
+			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
+		}
+
+		const { roomName, participantIdentity } = req.body;
+
+		if (!roomName || !participantIdentity) {
+			return res.status(400).json({error: "roomName and participantIdentity are required"});
+		}
+
+		try {
+			const roomService = new livekitServer.RoomServiceClient(
+				LIVEKIT_URL.value(),
+				LIVEKIT_API_KEY.value(),
+				LIVEKIT_API_SECRET.value()
+			);
+
+			// Get participant to find their audio track SID
+			const participant = await roomService.getParticipant(roomName, participantIdentity);
+			if (!participant) {
+				return res.status(404).json({error: "Participant not found in room"});
+			}
+
+			const audioTrack = participant.tracks.find(t => t.type === 0); // 0 = AUDIO
+			if (!audioTrack) {
+				return res.status(404).json({error: "No audio track found for participant"});
+			}
+
+			// Always mute — host can only mute, not unmute
+			await roomService.mutePublishedTrack(roomName, participantIdentity, audioTrack.sid, true);
+
+			console.log(`[${roomName}] muted participant ${participantIdentity}`);
+			return res.status(200).json({success: true, message: `${participantIdentity} has been muted`});
+		} catch (err) {
+			console.error(`[${roomName}] Mute error:`, err);
+			return res.status(500).json({error: err.message || err.toString()});
+		}
+	});
+});
 
 
+exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
+	cors(req, res, async () => {
+		if (req.method !== "POST") {
+			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
+		}
+
+		const { roomName, participantIdentity } = req.body;
+
+		if (!roomName || !participantIdentity) {
+			return res.status(400).json({error: "roomName and participantIdentity are required"});
+		}
+
+		try {
+			// Verify requester is a host
+			const roomDoc = await admin.firestore().collection("openviduroom").doc(roomName).get();
+			if (!roomDoc.exists) {
+				return res.status(404).json({error: "Room not found"});
+			}
+
+			const roomService = new livekitServer.RoomServiceClient(
+				LIVEKIT_URL.value(),
+				LIVEKIT_API_KEY.value(),
+				LIVEKIT_API_SECRET.value()
+			);
+
+			await roomService.removeParticipant(roomName, participantIdentity);
+
+			console.log(`[${roomName}] removed participant ${participantIdentity}`);
+			return res.status(200).json({success: true, message: `${participantIdentity} has been removed from the room`});
+
+		} catch (err) {
+			console.error(`[${roomName}] Kick error:`, err);
+			return res.status(500).json({error: err.message || err.toString()});
+		}
+	});
+});
 
 exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", secrets: [masterInstanceId, mediaASGName, AWS_SECRET, AWS_ACCESS_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET ]}, async (event) => {
 	ec2 = getEC2();
