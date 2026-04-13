@@ -481,7 +481,7 @@ exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SEC
 						if(participantId.trim().endsWith(ghostID)){
 							// Extract Original Participant ID
 							const originalId = participantId.slice(0, - ghostID.length).trim() // Remove "- Ghost"
-							roomParticipantData["participantghost"]	= originalId
+							roomParticipantData["participantghost"]	= admin.firestore.FieldValue.arrayUnion(originalId)
 						}
 						else{
 							roomParticipantData["participantjoined"] = admin.firestore.FieldValue.arrayUnion(participantId)
