@@ -383,5 +383,5 @@ try {
   main();
 } catch (error) {
   console.error('\n❌ Error:', error.message);
-  process.exit(1);
+  // process.exit(1);
 }

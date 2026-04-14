@@ -2411,15 +2411,181 @@ async function sendWatiTemplateMsg(body, broadcastData) {
 }
 
 // ── Cloud Function trigger (unchanged entry point) ────────────────────────────
-
-exports.sendWhatsAppBroadcastCreated = onDocumentCreated({ document: 'wati archive/{docid}', region: 'us-central1', cors: true },async (change, context) => {
+exports.sendWhatsAppBroadcastCreated = onDocumentCreated(
+  { document: 'wati archive/{docid}', region: 'us-central1', cors: true },
+  async (change, context) => {
     const broadcastData = change.data?.data();
-    console.log("BROADCASTDATA", broadcastData);
-    if (broadcastData['validated'] == true && broadcastData['status'] != 'queued') {
+    console.log("BROADCASTDATA status:", broadcastData['status']);
+
+    if (broadcastData['status'] === 'scheduled') {
+      // ── Schedule via WATI API instead of sending immediately ──
+      console.log("Scheduled broadcast detected — calling WATI schedule API");
+      await sendWatiScheduledBroadcast(broadcastData['docid']);
+    } else if (broadcastData['validated'] == true && broadcastData['status'] !== 'queued') {
+      // ── Normal immediate send ──
       await sendWatiBroadCast(broadcastData['docid']);
+    } else {
+      console.log(`Skipping: status="${broadcastData['status']}", validated=${broadcastData['validated']}`);
     }
   }
 );
+
+async function sendWatiScheduledBroadcast(watiarchiveid) {
+
+  let broadCastData = {};
+  let mapProfile = {};
+  let mapMetadata = {};
+  let excelParameterMap = {};
+
+  // ── 1. Fetch archive document ──────────────────────────────────────
+  const archiveSnap = await admin.firestore().collection('wati archive').doc(watiarchiveid).get();
+  broadCastData = archiveSnap.data();
+
+  const templatename  = broadCastData['watitemplateid'];
+  const broadcastname = broadCastData['broadcastname'];
+  const scheduledISO  = broadCastData['scheduledDateISO'];
+
+  console.log("=== SCHEDULE BROADCAST START ===");
+  console.log("Archive ID:", watiarchiveid);
+  console.log("Template:", templatename);
+  console.log("Scheduled for:", scheduledISO);
+
+  // ── 2. Process Excel file if needed ────────────────────────────────
+  const hasExcelParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'excel');
+  if (hasExcelParams && broadCastData.excelFile && broadCastData.excelFile.downloadUrl) {
+    console.log("Processing Excel:", broadCastData.excelFile.originalName);
+    excelParameterMap = await processExcelFile(
+      broadCastData.excelFile.downloadUrl,
+      broadCastData.excelFile.headers || []
+    );
+  }
+
+  // ── 3. Load profile_data ───────────────────────────────────────────
+  const profileSnap = await admin.firestore().collection("profile_data").orderBy("name", "asc").get();
+  profileSnap.docs.forEach(doc => { mapProfile[doc.id] = doc.data(); });
+
+  // ── 4. Load participant metadata if needed ─────────────────────────
+  const hasMetadataParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'metadata');
+  if (hasMetadataParams) {
+    await loadParticipantMetadata(broadCastData['profileid'] || [], mapMetadata);
+  }
+
+  // ── 5. Get WATI API key ────────────────────────────────────────────
+  const watiDoc = await admin.firestore().collection('classify').doc('wati').get();
+  if (!watiDoc.exists) throw new Error('WATI configuration not found');
+
+  const watiConfig   = watiDoc.data();
+  const serverConfig = watiConfig[broadCastData['serverid']];
+  if (!serverConfig) throw new Error(`No config for server: ${broadCastData['serverid']}`);
+
+  const apiKey = serverConfig['watitoken'];
+  if (!apiKey) throw new Error(`No API key for server: ${broadCastData['serverid']}`);
+
+  // ── 6. Build receivers array ───────────────────────────────────────
+  const receivers = [];
+
+  for (let i = 0; i < broadCastData['numbers'].length; i++) {
+    const number    = broadCastData['numbers'][i];
+    const profileId = broadCastData['numbermap'][number];
+    const profile   = mapProfile[profileId] || {};
+    const metadata  = mapMetadata[profileId] || {};
+
+    const customParams = buildCustomParams(
+      broadCastData['parameterConfig'] || [],
+      profile, metadata, number,
+      excelParameterMap,
+      broadCastData['excelFile'] || null
+    );
+
+    // WATI v1 expects: { whatsappNumber, customParams: [{name, value}] }
+    receivers.push({
+      whatsappNumber: number,
+      customParams: customParams,
+    });
+  }
+
+  console.log("Total receivers:", receivers.length);
+  console.log("First receiver sample:", JSON.stringify(receivers[0]));
+
+  // ── 7. Build schedule payload (WATI v1 scheduleBroadcast format) ───
+  const schedulePayload = {
+    broadcastName: broadcastname + generateRandomId(),
+    templateName: templatename,
+    scheduledAt: new Date(scheduledISO).toISOString(),
+    receivers: receivers,
+  };
+
+  console.log("Payload broadcastName:", schedulePayload.broadcastName);
+  console.log("Payload templateName:", schedulePayload.templateName);
+  console.log("Payload scheduledAt:", schedulePayload.scheduledAt);
+  console.log("Payload receivers count:", schedulePayload.receivers.length);
+
+  const SCHEDULE_URL = `${serverConfig['endpoint']}/api/v1/broadcast/scheduleBroadcast`;
+
+  console.log("SCHEDULE_URL:", SCHEDULE_URL);
+  console.log("Final URL:", SCHEDULE_URL);
+
+  try {
+    const response = await axios.request({
+      method: 'POST',
+      url: SCHEDULE_URL,
+      headers: {
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'Content-Type': 'application/json',
+        'accept': 'application/json',
+      },
+      data: schedulePayload,
+      timeout: 60000,
+    });
+
+    console.log("WATI Schedule response:", JSON.stringify(response.data));
+
+    // ── 9. Update archive → sent ───────────────────────────────────
+    await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+      status: 'sent',
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      scheduleApiResponse: response.data || null,
+      scheduleSentViaApi: true,
+      scheduleUrl: SCHEDULE_URL,
+      scheduledBroadcastName: schedulePayload.broadcastName,
+      totalSent: broadCastData['numbers'].length,
+      totalFailed: 0,
+    });
+
+    console.log("=== SCHEDULE SUCCESS ===");
+    return {
+      success: true,
+      scheduled: true,
+      scheduledTime: scheduledISO,
+      broadcastName: schedulePayload.broadcastName,
+      totalRecipients: broadCastData['numbers'].length,
+    };
+
+  } catch (error) {
+    const errData   = error.response?.data;
+    const errStatus = error.response?.status;
+    const errMsg    = errData?.message || errData?.result || error.message || 'Unknown error';
+
+    console.error("=== SCHEDULE FAILED ===");
+    console.error("Status:", errStatus);
+    console.error("Response:", JSON.stringify(errData));
+    console.error("URL:", SCHEDULE_URL);
+    console.error("Payload sent:", JSON.stringify(schedulePayload));
+
+    await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+      status: 'schedule_failed',
+      scheduleError: {
+        status: errStatus,
+        message: errMsg,
+        data: errData || null,
+        url: SCHEDULE_URL,
+      },
+      scheduleFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    throw new Error(`WATI Schedule API failed (${errStatus}): ${errMsg}`);
+  }
+}
 
 exports.sendWhatsAppBroadcast = onRequest({region: "us-central1", cors:true},async (req, res) => {
   console.log("Function triggered");
