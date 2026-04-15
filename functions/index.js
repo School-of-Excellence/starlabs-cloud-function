@@ -109,6 +109,7 @@ if(commonService.production){
   exports.scheduledFirestoreExport = exportsAndAlerts.scheduledFirestoreExport // schedule "every 12 hours"
 }
 exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublished "Launch-Your-Legacy-budget-alert-slack"
+exports.dailyFirestoreAuditAnalysis = exportsAndAlerts.dailyFirestoreAuditAnalysis // Everyday firestore read & write count
 // 
 //interim report
 exports.slackInterimCrossOver = interimReportSystem.slackInterimCrossOver // c - "/interim crossover/{docid}"
@@ -224,6 +225,8 @@ exports.awsEventWebhook = openViduSystem.awsEventWebhook
 exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
 exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
+exports.muteParticipant = openViduSystem.muteParticipant
+exports.kickParticipant = openViduSystem.kickParticipant
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
