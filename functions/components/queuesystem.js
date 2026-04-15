@@ -68,6 +68,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         console.error(`Slack notification failed for key ${key}:`, slackError.message);
       }
 
+      const isScopeEnhancement = afterData['currentstage'] === 'Scope Enhancement';
       try {
         const startDate = addedValue['startdate'];
         const formattedDate = startDate._seconds
@@ -107,28 +108,31 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         }));
         console.log('Triggered Wati Archive Creation');
 
-        const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
+        if (!isScopeEnhancement) {
+          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
 
-        var map = {
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap : {[`${waticontent['phonenumber']}`] : profileid},
-          broadcastname : 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: templateId,
-          type: 'queue',
-          metadata: {...afterData}
+          var map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: templateId,
+            type: 'queue',
+            metadata: { ...afterData }
+          }
+
+          console.log("Added Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
+        } else {
+          console.log(`Skipping WATI for Scope Enhancement stage | key ${key}`);
         }
-        
-        console.log("Added Slot", map);
-        const response = await commonService.createWatiArchiveDocument(map);
-        console.log('WATI ARCHIVE RESPONSE', response);
-
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-
       } catch (watiError) {
         console.error(`WATI failed for key ${key}:`, watiError.message);
       }
