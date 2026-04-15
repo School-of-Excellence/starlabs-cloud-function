@@ -275,6 +275,10 @@ exports.updateAuthorUIDInAtcAlpha = onDocumentWritten("atc_alpha/{atcalphaid}",a
   let oldAuthorIds = oldData ? oldData['author'] ? oldData['author'].map(e => e.id) : [] : []
   let newAuthorIds = newData['author'] ? newData['author'].map(e => e.id) : []
 
+  if (JSON.stringify(oldAuthorIds) === JSON.stringify(newAuthorIds)) {
+    return null;
+  }
+
   if(JSON.stringify(oldAuthorIds) != JSON.stringify(newAuthorIds)){
     let authorUid = []
     for (let i = 0; i < newData['author'].length; i++) {

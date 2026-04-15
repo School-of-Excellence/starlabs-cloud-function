@@ -8,6 +8,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
   var change = snap.data
   var currentDate = new Date()
   var nextmodeDate
+
   await admin.firestore().doc("/Atestdate/date").get().then(data=>{
     if(data.exists){
       var docdata = data.data()
@@ -17,6 +18,10 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
 
   var beforeData = change.before.exists ? change.before.data() : {}
   var afterData = change.after.exists ? change.after.data() : {}
+
+  if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
+    return null;
+  }
 
   var productData = (await admin.firestore().doc(afterData["productref"].path).get()).data()
 
