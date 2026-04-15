@@ -28,7 +28,10 @@ const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
 
-exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change) =>{
+exports.onQueueStageChange = onDocumentWritten( {
+    document: "queue_token/{id}",
+    secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
+  }, async (change) =>{
   var beforeData = change.data.before.exists ? change.data.before.data() : {};
   var afterData = change.data.after.exists ? change.data.after.data() : {};
   const queueTokenId = change.params.id;
