@@ -3611,9 +3611,9 @@ async function buildUpLifeAspirationReport(data, formname) {
 
 async function getTranscript(meetingId) {
   if (!meetingId) throw new Error("meetingId is required");
-  const accountId = process.env.ZOOM_ACCOUNT_ID || zoomAccountId.value();
-  const clientId = process.env.ZOOM_CLIENT_ID || zoomClientId.value();
-  const clientSecret = process.env.ZOOM_CLIENT_SECRET || zoomClientSecret.value();
+  const accountId =  zoomAccountId.value();
+  const clientId = zoomClientId.value();
+  const clientSecret = zoomClientSecret.value();
 
   const tokenResponse = await fetch(
     `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}&client_id=${clientId}&client_secret=${clientSecret}`,
