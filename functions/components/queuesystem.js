@@ -31,6 +31,7 @@ const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change) =>{
   var beforeData = change.data.before.exists ? change.data.before.data() : {};
   var afterData = change.data.after.exists ? change.data.after.data() : {};
+  const queueTokenId = change.params.id;
 
   var profileid = afterData["profile_id"];
   var queue = afterData["variationid"] != null ? admin.firestore().collection("queue variation").doc(afterData["variationid"]).path : afterData["queueref"]?.path;
