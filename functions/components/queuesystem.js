@@ -2982,6 +2982,11 @@ exports.CreateQueueActivityLogV2 = onDocumentUpdated("live assignment/{docid}",a
   let change = snap.data
   var beforeData = change.before.data()
   var afterData = change.after.data()
+
+  if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
+    return null;
+  }
+
   if(beforeData['isactivitydone'] != afterData['isactivitydone'] && afterData['isactivitydone'] == true && afterData['status'] == 'completed'){
     let getAtcModel = null
     await admin.firestore().collection("queue stage log").where("liveassignmentid","==",afterData['docid']).where("profile_id","==",afterData['participantid']).get().then( async queueLogSnap => {
