@@ -23,6 +23,8 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
+const runpodLLMRunning = require("./components/runpod_ai")
+const queue_atc_generation = require("./components/queue_atc_generation")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -107,6 +109,7 @@ if(commonService.production){
   exports.scheduledFirestoreExport = exportsAndAlerts.scheduledFirestoreExport // schedule "every 12 hours"
 }
 exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublished "Launch-Your-Legacy-budget-alert-slack"
+exports.dailyFirestoreAuditAnalysis = exportsAndAlerts.dailyFirestoreAuditAnalysis // Everyday firestore read & write count
 // 
 //interim report
 exports.slackInterimCrossOver = interimReportSystem.slackInterimCrossOver // c - "/interim crossover/{docid}"
@@ -222,10 +225,21 @@ exports.awsEventWebhook = openViduSystem.awsEventWebhook
 exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
 exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
+exports.muteParticipant = openViduSystem.muteParticipant
+exports.kickParticipant = openViduSystem.kickParticipant
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
+
+//runpod ai job processing
+exports.run_jobrequest = runpodLLMRunning.run_jobrequest
+exports.getJobRequest = runpodLLMRunning.getJobRequest
+exports.submitJobResult = runpodLLMRunning.submitJobResult
+exports.terminatePod = runpodLLMRunning.terminatePod
+
+//queue_atc_generation
+exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
 
