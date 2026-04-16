@@ -227,6 +227,7 @@ exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
+exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS

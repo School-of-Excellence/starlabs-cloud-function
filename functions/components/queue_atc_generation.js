@@ -17,6 +17,7 @@ exports.onQueueAtcGenerationCreate = onDocumentCreated(
     await processAtcGenerationDoc(snap.id, snap.data());
   }
 );
+
 // ---------- Shared processor ----------
 async function processAtcGenerationDoc(docid, docData) {
   if (!docData.generateatc) return console.log(`generateatc=false, skipping ${docid}`);
@@ -30,8 +31,8 @@ async function processAtcGenerationDoc(docid, docData) {
   const promptCfg = promptSnap.data();
 
   // 2. Find sibling docs for the same participant/token/queue and pick the
-  //    pairing-stage docs whose stage is in this doc's pariringstages.
-  const pariringstages = docData.pariringstages || [];
+  //    pairing-stage docs whose stage is in this doc's pairingstages.
+  const pairingstages = docData.pairingstages || [];
   const siblingsSnap = await admin.firestore().collection("queue_atc_generation")
     .where("profileid", "==", docData.profileid)
     .where("queue_token_id", "==", docData.queue_token_id)
@@ -41,20 +42,22 @@ async function processAtcGenerationDoc(docid, docData) {
   const pairingDocsByStage = {};
   for (const d of siblingsSnap.docs) {
     const dd = d.data();
-    if (pariringstages.includes(dd.stage)) pairingDocsByStage[dd.stage] = dd;
+    if (pairingstages.includes(dd.stage)) pairingDocsByStage[dd.stage] = dd;
   }
 
-  // 3. Compose the per-stage data block in the order declared in pariringstages.
-  const pairingBlocks = [];
-  for (const stage of pariringstages) {
+  // 3. Compose the per-stage data block: start with the triggered doc's own
+  //    transcript, then append each pairing stage in declared order.
+  const ownBody = typeof docData.data === "object" ? docData.data.transcript_text : docData.data;
+  const pairingBlocks = [`${docData.stage}:\n${ownBody}`];
+  const missing = [];
+  for (const stage of pairingstages) {
+    if (stage === docData.stage) continue;
     const pd = pairingDocsByStage[stage];
-    if (!pd) {
-      console.log(`pairing stage ${stage} not yet available — aborting`);
-      return;
-    }
-    const body = typeof pd.data === "string" ? pd.data : JSON.stringify(pd.data);
+    if (!pd) { missing.push(stage); continue; }
+    const body = typeof pd.data === "object" ? pd.data.transcript_text : pd.data;
     pairingBlocks.push(`${stage}:\n${body}`);
   }
+  if (missing.length) console.log(`${docid} missing pairing stages ${JSON.stringify(missing)} — proceeding with own data only`);
 
   // 4. Construct the full prompt.
   const prompt = [
