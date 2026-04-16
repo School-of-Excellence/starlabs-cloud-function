@@ -28,7 +28,10 @@ const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
 
-exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change) =>{
+exports.onQueueStageChange = onDocumentWritten( {
+    document: "queue_token/{id}",
+    secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
+  }, async (change) =>{
   var beforeData = change.data.before.exists ? change.data.before.data() : {};
   var afterData = change.data.after.exists ? change.data.after.data() : {};
   const queueTokenId = change.params.id;
@@ -3004,6 +3007,11 @@ exports.CreateQueueActivityLogV2 = onDocumentUpdated("live assignment/{docid}",a
   let change = snap.data
   var beforeData = change.before.data()
   var afterData = change.after.data()
+
+  if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
+    return null;
+  }
+
   if(beforeData['isactivitydone'] != afterData['isactivitydone'] && afterData['isactivitydone'] == true && afterData['status'] == 'completed'){
     let getAtcModel = null
     await admin.firestore().collection("queue stage log").where("liveassignmentid","==",afterData['docid']).where("profile_id","==",afterData['participantid']).get().then( async queueLogSnap => {
@@ -3609,9 +3617,9 @@ async function buildUpLifeAspirationReport(data, formname) {
 
 async function getTranscript(meetingId) {
   if (!meetingId) throw new Error("meetingId is required");
-  const accountId = process.env.ZOOM_ACCOUNT_ID || zoomAccountId.value();
-  const clientId = process.env.ZOOM_CLIENT_ID || zoomClientId.value();
-  const clientSecret = process.env.ZOOM_CLIENT_SECRET || zoomClientSecret.value();
+  const accountId =  zoomAccountId.value();
+  const clientId = zoomClientId.value();
+  const clientSecret = zoomClientSecret.value();
 
   const tokenResponse = await fetch(
     `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}&client_id=${clientId}&client_secret=${clientSecret}`,

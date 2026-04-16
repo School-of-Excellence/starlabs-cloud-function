@@ -2,6 +2,9 @@
   "functions": [
     {
       "source": "functions",
+      "predeploy": [
+        "node \"$RESOURCE_DIR/loopDetector.js\" \"$RESOURCE_DIR/index.js\""
+      ],
       "codebase": "default",
       "ignore": [
         "node_modules",
