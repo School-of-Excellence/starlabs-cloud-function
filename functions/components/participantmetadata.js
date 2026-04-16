@@ -831,6 +831,11 @@ exports.participantsely_to_pmd = onDocumentWritten("/participants ely/{docid}",a
   let newDoc = change.data.after.data()
   let docid = change.data.after.id
   console.log("docid as profileid",docid);
+
+  if (JSON.stringify(oldDoc) === JSON.stringify(newDoc)) {
+    return null;
+  }
+
   let noChanges = true
   if([null,undefined].includes(oldDoc)){
     noChanges = false

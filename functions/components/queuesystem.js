@@ -27,9 +27,14 @@ const zoomSDkClientId = defineSecret("ZOOM_SDK_CLIENTID");
 const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
-exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change) =>{
+
+exports.onQueueStageChange = onDocumentWritten( {
+    document: "queue_token/{id}",
+    secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
+  }, async (change) =>{
   var beforeData = change.data.before.exists ? change.data.before.data() : {};
   var afterData = change.data.after.exists ? change.data.after.data() : {};
+  const queueTokenId = change.params.id;
 
   var profileid = afterData["profile_id"];
   var queue = afterData["variationid"] != null ? admin.firestore().collection("queue variation").doc(afterData["variationid"]).path : afterData["queueref"]?.path;
@@ -41,7 +46,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
   })
 
   var queueData = {};
-  if (afterData["queueref"]) {
+  const queueDocSnap = await admin.firestore().doc(afterData["queueref"].path).get();
+  if(afterData["queueref"]) {
     await admin.firestore().doc(afterData["queueref"].path).get().then(queueDoc => {
       if (queueDoc.exists) {
         queueData = queueDoc.data();
@@ -68,6 +74,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         console.error(`Slack notification failed for key ${key}:`, slackError.message);
       }
 
+      const isScopeEnhancement = afterData['currentstage'] === 'Scope Enhancement';
       try {
         const startDate = addedValue['startdate'];
         const formattedDate = startDate._seconds
@@ -107,28 +114,31 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         }));
         console.log('Triggered Wati Archive Creation');
 
-        const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
+        if (!isScopeEnhancement) {
+          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
 
-        var map = {
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap : {[`${waticontent['phonenumber']}`] : profileid},
-          broadcastname : 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: templateId,
-          type: 'queue',
-          metadata: {...afterData}
+          var map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: templateId,
+            type: 'queue',
+            metadata: { ...afterData }
+          }
+
+          console.log("Added Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
+        } else {
+          console.log(`Skipping WATI for Scope Enhancement stage | key ${key}`);
         }
-        
-        console.log("Added Slot", map);
-        const response = await commonService.createWatiArchiveDocument(map);
-        console.log('WATI ARCHIVE RESPONSE', response);
-
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-
       } catch (watiError) {
         console.error(`WATI failed for key ${key}:`, watiError.message);
       }
@@ -337,6 +347,27 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
       })
     } catch (error) {
       console.log("Touch Point Error - Stage Moved", error.toString())
+    }
+
+    // creating queue_atc_generation document where atc is created from ai
+    try{
+      const previousStage = await resolvePreviousStage({
+        queueData,
+        tokenData: afterData,
+        currentStage: afterData["currentstage"],
+      });
+      if (!previousStage){console.log("no previous stage resolved")}
+      else{
+        await processStage({
+          queueData,
+          queueRef: queueDocSnap.ref,
+          tokenData: afterData,
+          queueTokenId,
+          currentStage: previousStage,
+        });
+      }
+    }catch (error){
+      console.log("queue_atc_genration collection creation error",error.toString())
     }
   }
 
@@ -2982,6 +3013,11 @@ exports.CreateQueueActivityLogV2 = onDocumentUpdated("live assignment/{docid}",a
   let change = snap.data
   var beforeData = change.before.data()
   var afterData = change.after.data()
+
+  if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
+    return null;
+  }
+
   if(beforeData['isactivitydone'] != afterData['isactivitydone'] && afterData['isactivitydone'] == true && afterData['status'] == 'completed'){
     let getAtcModel = null
     await admin.firestore().collection("queue stage log").where("liveassignmentid","==",afterData['docid']).where("profile_id","==",afterData['participantid']).get().then( async queueLogSnap => {
@@ -3451,4 +3487,210 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   await batch.commit()
   console.log("shifting product done");
 })
+
+// Previous stage = the one that just completed. Use queue variation stages
+// when the token has variationid, else fall back to queue generation stages.
+async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
+  let stages = queueData["stages"] || [];
+  if (tokenData["variationid"]) {
+    const variationSnap = await admin.firestore().collection("queue variation")
+      .doc(tokenData["variationid"]).get();
+    if (variationSnap.exists) {
+      stages = variationSnap.data()["stages"] || stages;
+    }
+  }
+  const idx = stages.findIndex((s) => s === currentStage);
+  if (idx <= 0) return null;
+  return stages[idx - 1];
+}
+
+// ---------- Shared stage processor ----------
+async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
+  const atcrequiredstages = queueData["atcrequiredstages"] || [];
+  const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
+  if (!stageCfg) return;
+
+  const profileid = tokenData["profile_id"];
+  let sourceref = null;
+  let data = null;
+
+  if (stageCfg.type === "form") {
+    const formref = queueData["stageproperty"][currentStage]["actionresource"];
+    if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
+    const snap = await admin.firestore().collection("formsByClient")
+      .where("profileid", "==", profileid)
+      .where("formid", "==", formref.id)
+      .where("queueref", "==", queueRef)
+      .orderBy("date", "desc")
+      .get();
+
+    if (snap.docs.length === 0) return console.log(`no form doc for stage ${currentStage}`);
+    const formDoc = snap.docs[0];
+    sourceref = formDoc.ref;
+
+    const element = formDoc.data();
+    const formData = [];
+    for (const formelement of element["formarray"] || []) {
+      if (["label", "video", "audio"].includes(formelement["type"])) continue;
+      if (!formelement["value"]) continue;
+      formData.push({
+        questions: formelement["fieldname"],
+        answer: formelement["type"] === "date"
+          ? new Date(formelement["value"].toDate()).toISOString().substring(0, 10)
+          : formelement["value"],
+      });
+    }
+    data = await buildUpLifeAspirationReport(formData, element["formname"]);
+  } else if (stageCfg.type === "zoom") {
+    const logSnap = await admin.firestore().collection("queue stage log")
+      .where("currentstage", "==", currentStage)
+      .where("status", "==", "instudio")
+      .where("profile_id", "==", profileid)
+      .where("queueref", "==", queueRef)
+      .orderBy("logdate", "desc")
+      .get();
+
+    if (logSnap.docs.length === 0) return console.log(`no queue stage log for ${currentStage}`);
+    const logDoc = logSnap.docs[0];
+    const logData = logDoc.data();
+    if (!logData["liveassignmentid"]) return console.log("no live assignment id");
+
+    const liveSnap = await admin.firestore().collection("live assignment")
+      .doc(logData["liveassignmentid"]).get();
+    const liveData = liveSnap.data();
+    if (!liveData || !liveData["zoomdata"]?.["id"]) return console.log("no zoom meeting id");
+
+    sourceref = liveSnap.ref;
+    const transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    data = {
+      transcript_text: transcript.transcript_text,
+      transcript_raw: transcript.transcript_raw,
+      zoom_topic: transcript.topic,
+      zoom_start_time: transcript.start_time,
+      zoom_duration: transcript.duration,
+    };
+  } else {
+    return console.log(`unknown stage type ${stageCfg.type}`);
+  }
+
+  const existingSnap = await admin.firestore().collection("queue_atc_generation")
+    .where("queueref", "==", queueRef)
+    .where("profileid", "==", profileid)
+    .where("queue_token_id", "==", queueTokenId)
+    .where("stage", "==", currentStage)
+    .get();
+
+  if (!existingSnap.empty) {
+    const existingDoc = existingSnap.docs[0];
+    const existingSourceRef = existingDoc.data()["sourceref"];
+    if (existingSourceRef && sourceref && existingSourceRef.path === sourceref.path) {
+      return console.log(`queue_atc_generation already exists for ${currentStage}`);
+    }
+  }
+
+  const docid = admin.firestore().collection("queue_atc_generation").doc().id;
+  const payload = {
+    docid: docid,
+    queueref: queueRef,
+    profileid: profileid,
+    queue_token_id: queueTokenId,
+    stage: currentStage,
+    generateatc: stageCfg.generateatc,
+    type: stageCfg.type,
+    pairingstages: stageCfg.pairingstages || [],
+    sourceref: sourceref,
+    data: data,
+    createdAt: new Date(),
+  };
+  await admin.firestore().collection("queue_atc_generation").doc(docid).set(payload);
+  console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
+}
+
+// ---------- Helpers ----------
+async function buildUpLifeAspirationReport(data, formname) {
+  const formdata = [];
+  data.forEach((item) => {
+    const q = item.questions.trim();
+    if (typeof item.answer === "string") {
+      formdata.push(`${q}: ${item.answer.trim()}`);
+    }
+    if (Array.isArray(item.answer) && item.answer.length > 0) {
+      formdata.push(`${q}: ${JSON.stringify(item.answer)}`);
+    }
+  });
+  return `What did the person come for in the ${formname}? : \n\n${JSON.stringify(formdata)}`;
+}
+
+async function getTranscript(meetingId) {
+  if (!meetingId) throw new Error("meetingId is required");
+  const accountId =  zoomAccountId.value();
+  const clientId = zoomClientId.value();
+  const clientSecret = zoomClientSecret.value();
+
+  const tokenResponse = await fetch(
+    `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}&client_id=${clientId}&client_secret=${clientSecret}`,
+    { method: "POST" }
+  );
+  const tokenData = await tokenResponse.json();
+  if (!tokenData.access_token) throw new Error("Failed to get Zoom access token");
+
+  const accessToken = tokenData.access_token;
+  const recordingResponse = await fetch(
+    `https://api.zoom.us/v2/meetings/${meetingId}/recordings`,
+    { headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" } }
+  );
+  if (!recordingResponse.ok) {
+    const err = await recordingResponse.json();
+    throw new Error(err.message || "Recording not found");
+  }
+  const recordingData = await recordingResponse.json();
+  const transcriptFile = recordingData.recording_files?.find((f) => f.file_type === "TRANSCRIPT");
+  if (!transcriptFile) throw new Error("No transcript found. Enable Audio Transcript in Zoom settings.");
+
+  const transcriptResponse = await fetch(`${transcriptFile.download_url}?access_token=${accessToken}`);
+  if (!transcriptResponse.ok) throw new Error("Failed to download transcript file");
+  const vttContent = await transcriptResponse.text();
+
+  return {
+    meetingId,
+    topic: recordingData.topic,
+    start_time: recordingData.start_time,
+    duration: recordingData.duration,
+    transcript_raw: vttContent,
+    transcript_text: convertVttToLLM(vttContent),
+    download_url: transcriptFile.download_url,
+  };
+}
+
+function convertVttToLLM(vttText) {
+  const lines = vttText.trim().split("\n");
+  const entries = [];
+  let currentSpeaker = null;
+  let currentText = "";
+
+  for (let line of lines) {
+    line = line.trim();
+    if (
+      !line ||
+      line === "WEBVTT" ||
+      /^\d+$/.test(line) ||
+      /^\d{2}:\d{2}:\d{2}/.test(line)
+    ) continue;
+
+    const match = line.match(/^(.+?):\s+(.+)$/);
+    if (match) {
+      const speaker = match[1].trim();
+      const text = match[2].trim();
+      if (speaker === currentSpeaker) {
+        currentText += " " + text;
+      } else {
+        if (currentSpeaker) entries.push(`${currentSpeaker}: ${currentText}`);
+        currentSpeaker = speaker;
+        currentText = text;
+      }
+    }
+  }
+  if (currentSpeaker) entries.push(`${currentSpeaker}: ${currentText}`);
+  return entries.join("\n");
+}
 
