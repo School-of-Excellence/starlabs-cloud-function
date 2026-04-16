@@ -71,7 +71,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
         console.error(`Slack notification failed for key ${key}:`, slackError.message);
       }
 
-      const isScopeEnhancement = afterData['currentstage'] === 'Scope Enhancement';
+      const isScopeEnhancement = key === 'Scope Enhancement';
       try {
         const startDate = addedValue['startdate'];
         const formattedDate = startDate._seconds
@@ -732,6 +732,8 @@ exports.studioZoomLink = onDocumentCreated({
     console.log("liveassignment.id",liveassignment.id);
     
     let participantTokenData = {}
+    
+    console.log("Fetching... queue token");
     await admin.firestore().collection("queue_token").where("liveassignmentid", "==", liveassignment.id).get().then(token=>{
       token.forEach(doc=>{
         participantTokenData = doc.data()
@@ -739,6 +741,8 @@ exports.studioZoomLink = onDocumentCreated({
       })
     })
 
+    console.log("Fetched queue token", participantTokenData);
+    
     let queueData = {}
     if(participantTokenData['currentstage']){
       await admin.firestore().collection("queue generation").doc(participantTokenData['queueref'].id).get().then(snap=>{
@@ -750,178 +754,55 @@ exports.studioZoomLink = onDocumentCreated({
       
       //old structure liveassignmentData["zoomlinkrequired"] != false now zoom enabling not for queue now zoom enabling per stage
       const stageKey = participantTokenData['currentstage'];
+      console.log("Stage Key", stageKey)
       const enableZoom = queueData['stageproperty'][stageKey]['enablezoom']
-      
+      console.log("Enable Zoom", enableZoom)
+
       if(enableZoom){
-      const studioid = liveassignmentData["studioid"]
-      var openViduEnabled = false
-      // Check Studio Type
-      await admin.firestore().collection("queue studio pairing").doc(studioid).get().then(studioDoc =>{
-        if(studioDoc.exists){
-          openViduEnabled = studioDoc.data()["openvidu"] || false
+        const studioid = liveassignmentData["studioid"]
+        var openViduEnabled = false
+        // Check Studio Type
+        await admin.firestore().collection("queue studio pairing").doc(studioid).get().then(studioDoc =>{
+          if(studioDoc.exists){
+            openViduEnabled = studioDoc.data()["openvidu"] || false
+          }
+        })
+
+        // Map profile data
+        var mapProfile = {}
+        let profileArray = []
+        if(liveassignmentData['participantid']) profileArray.push(liveassignmentData['participantid'])
+        if(liveassignmentData['participantsactivity'] && Object.keys(liveassignmentData['participantsactivity']).length > 0){ 
+          let participantActivityProfileIds = Object.keys(liveassignmentData['participantsactivity'])
+          profileArray = [...profileArray,...participantActivityProfileIds]
         }
-      })
-
-      // Map profile data
-      var mapProfile = {}
-      let profileArray = []
-      if(liveassignmentData['participantid']) profileArray.push(liveassignmentData['participantid'])
-      if(liveassignmentData['participantsactivity'] && Object.keys(liveassignmentData['participantsactivity']).length > 0){ 
-        let participantActivityProfileIds = Object.keys(liveassignmentData['participantsactivity'])
-        profileArray = [...profileArray,...participantActivityProfileIds]
-      }
-      if(liveassignmentData['bonusactivity'] && Object.keys(liveassignmentData['bonusactivity']).length > 0){ 
-        let participantActivityProfileIds = Object.keys(liveassignmentData['bonusactivity'])
-        profileArray = [...profileArray,...participantActivityProfileIds]
-      }
-      profileArray = Array.from(new Set(profileArray));
-      for (let i = 0; i < profileArray.length; i = i+30) {
-        const slicedProfileArray =  profileArray.slice(i,i+30)
-        await admin.firestore().collection("profile_data").where("profileid","in",slicedProfileArray).get().then(profile=>{
-          profile.docs.forEach(p=>{
-            mapProfile[p.id] = p.data()
+        if(liveassignmentData['bonusactivity'] && Object.keys(liveassignmentData['bonusactivity']).length > 0){ 
+          let participantActivityProfileIds = Object.keys(liveassignmentData['bonusactivity'])
+          profileArray = [...profileArray,...participantActivityProfileIds]
+        }
+        profileArray = Array.from(new Set(profileArray));
+        for (let i = 0; i < profileArray.length; i = i+30) {
+          const slicedProfileArray =  profileArray.slice(i,i+30)
+          await admin.firestore().collection("profile_data").where("profileid","in",slicedProfileArray).get().then(profile=>{
+            profile.docs.forEach(p=>{
+              mapProfile[p.id] = p.data()
+            })
           })
-        })
-      }
-      console.log("profileArray",profileArray.length);
-      console.log("mapProfile",Object.keys(mapProfile).length);
+        }
+        console.log("profileArray",profileArray.length);
+        console.log("mapProfile",Object.keys(mapProfile).length);
 
-      // Setup Participant Link
-      var zoomRequestResult = null
-      var participantStudioLink
-      if(commonService.production){
-        participantStudioLink = "https://breakthroughs.app/participantstudio"
-      }
-      else{
-        participantStudioLink = "https://breakthroughs-test.web.app/participantstudio"
-      }
-
-      if(openViduEnabled){
-        await liveassignment.ref.update({
-          zoomdata: {
-            host_email: "soe1@soexcellence.com",
-            start_url: "Link Broken"
-          }
-        })
-      }
-      else {
-        // Generate Zoom Link
-        let getZoomAccountEmail = await commonService.getUnusedZoomAccount()
-        console.log("getZoomAccountEmail",getZoomAccountEmail);
-        if(![null,undefined].includes(getZoomAccountEmail)){
-          var zoomaccountData = {email : getZoomAccountEmail}
-          console.log("zoomaccountData['email']",zoomaccountData['email']);
-
-          // Get Participant Activity
-          const keys = Object.keys(liveassignmentData['participantsactivity']);
-          let objectKeys = keys;
-          let participantactivity = [];
-          for (let j = 0; j < objectKeys.length; j++) {
-            const element = objectKeys[j];
-            participantactivity.push(mapProfile[element]['name'])
-          }
-
-          var flatternarray = '';    
-          // Get Bons Participant
-          if(liveassignmentData['bonusactivityparticipant'] != undefined && liveassignmentData['bonusactivityparticipant'] != null ){
-            var names = [];
-            for (let i = 0; i < liveassignmentData['bonusactivityparticipant'].length; i++) {
-              const element = liveassignmentData['bonusactivityparticipant'][i];
-              names.push(mapProfile[element]['name'])
-            }
-            flatternarray = names.join(", ")
-          }
-
-          // Zoom Topic ID
-          var time = new Date();
-          const finaltime = time.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
-          var zoomTopic = `${mapProfile[liveassignmentData['participantid']]['name']} with ${participantactivity.join(", ")}`;
-          // Append Bonus Activity Specialist with zoom topic
-          if(flatternarray.trim().length != 0){
-            zoomTopic = zoomTopic + ` (${flatternarray})`
-          }
-          // Append Stagename & Time
-          zoomTopic = zoomTopic + ` - ${liveassignmentData['stagename']} Studio - ${finaltime}`
-          console.log("Zoom Topic", zoomTopic)
-
-          // Server To Server
-          var accountid = zoomAccountId.value()
-          var clientid = zoomClientId.value()
-          var clientsecret = zoomClientSecret.value()
-          const tokenResponse = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountid}&client_id=${clientid}&client_secret=${clientsecret}`, {
-            method: 'POST'
-          });
-          const tokenData = await tokenResponse.json();
-
-          try {
-            const email = zoomaccountData["email"]; //host email id;
-            const zoomresult = await axios.post("https://api.zoom.us/v2/users/" + email + "/meetings", {
-              "topic": zoomTopic,
-              "type": 1,
-              "start_time": new Date(),
-              "timezone": "India",
-              "host_email": zoomaccountData["email"],
-              "settings": {
-                "host_video": true,
-                "participant_video": true,
-                "cn_meeting": false,
-                "in_meeting": true,
-                "join_before_host": true,
-                "mute_upon_entry": false,
-                "watermark": false,
-                "use_pmi": false,
-                "approval_type": 1,
-                "audio": "both",
-                // "auto_recording": "local",
-                "enforce_login": false,
-                "registrants_email_notification": false,
-                "waiting_room": true,
-                "allow_multiple_devices": true,
-              }
-            }, {
-              headers: {
-                'Authorization': 'Bearer ' + tokenData.access_token,
-                'content-type': 'application/json'
-              }
-            });
-            let sdkclientid = zoomSDkClientId.value()
-            let sdkclientsecret = zoomSDKClientSecret.value()
-            // let signature  = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
-            var hostSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
-            var participantSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 0)
-
-            // Mark Zoom Email inuse: true,
-            await admin.firestore().collection("zoomaccount").where("email", "==", getZoomAccountEmail).get().then(emailaccount=>{
-              emailaccount.docs.forEach(doc=>{
-                doc.ref.update({
-                  inuse: true,
-                  hostid: zoomresult.data["host_id"],
-                  useby: snapshot.data.ref.path
-                })
-              })
-            })
-            // Ensure Host Email is updated
-            if(zoomresult.data["host_email"] == null || zoomresult.data["host_email"] == undefined){
-              zoomresult.data["host_email"] = zoomaccountData["email"]
-            }
-            console.log("zoom created ", zoomresult.data['join_url']);
-            zoomRequestResult = zoomresult.data
-
-            // Update Live Assignment
-            await liveassignment.ref.update({
-              // signature: hostSignature,
-              hostsignature: hostSignature,
-              participantsignature: participantSignature,
-              zoomdata: zoomresult.data
-            })
-          } catch (zoomError) {
-            console.log("Zoom Link Not Generated", zoomError.message);
-            console.log("Error 1", JSON.stringify(zoomError.message));
-            console.log("Error 2", JSON.stringify(zoomError))
-          }
-
+        // Setup Participant Link
+        var zoomRequestResult = null
+        var participantStudioLink
+        if(commonService.production){
+          participantStudioLink = "https://breakthroughs.app/participantstudio"
         }
         else{
+          participantStudioLink = "https://breakthroughs-test.web.app/participantstudio"
+        }
+
+        if(openViduEnabled){
           await liveassignment.ref.update({
             zoomdata: {
               host_email: "soe1@soexcellence.com",
@@ -929,177 +810,302 @@ exports.studioZoomLink = onDocumentCreated({
             }
           })
         }
-      }
+        else {
+          // Generate Zoom Link
+          let getZoomAccountEmail = await commonService.getUnusedZoomAccount()
+          console.log("getZoomAccountEmail",getZoomAccountEmail);
+          if(![null,undefined].includes(getZoomAccountEmail)){
+            var zoomaccountData = {email : getZoomAccountEmail}
+            console.log("zoomaccountData['email']",zoomaccountData['email']);
 
-      // Send Slack
-      let slackMessage = {
-        "blocks": [
-          {
+            // Get Participant Activity
+            const keys = Object.keys(liveassignmentData['participantsactivity']);
+            let objectKeys = keys;
+            let participantactivity = [];
+            for (let j = 0; j < objectKeys.length; j++) {
+              const element = objectKeys[j];
+              participantactivity.push(mapProfile[element]['name'])
+            }
+
+            var flatternarray = '';    
+            // Get Bons Participant
+            if(liveassignmentData['bonusactivityparticipant'] != undefined && liveassignmentData['bonusactivityparticipant'] != null ){
+              var names = [];
+              for (let i = 0; i < liveassignmentData['bonusactivityparticipant'].length; i++) {
+                const element = liveassignmentData['bonusactivityparticipant'][i];
+                names.push(mapProfile[element]['name'])
+              }
+              flatternarray = names.join(", ")
+            }
+
+            // Zoom Topic ID
+            var time = new Date();
+            const finaltime = time.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+            var zoomTopic = `${mapProfile[liveassignmentData['participantid']]['name']} with ${participantactivity.join(", ")}`;
+            // Append Bonus Activity Specialist with zoom topic
+            if(flatternarray.trim().length != 0){
+              zoomTopic = zoomTopic + ` (${flatternarray})`
+            }
+            // Append Stagename & Time
+            zoomTopic = zoomTopic + ` - ${liveassignmentData['stagename']} Studio - ${finaltime}`
+            console.log("Zoom Topic", zoomTopic)
+
+            // Server To Server
+            var accountid = zoomAccountId.value()
+            var clientid = zoomClientId.value()
+            var clientsecret = zoomClientSecret.value()
+            const tokenResponse = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountid}&client_id=${clientid}&client_secret=${clientsecret}`, {
+              method: 'POST'
+            });
+            const tokenData = await tokenResponse.json();
+
+            try {
+              const email = zoomaccountData["email"]; //host email id;
+              const zoomresult = await axios.post("https://api.zoom.us/v2/users/" + email + "/meetings", {
+                "topic": zoomTopic,
+                "type": 1,
+                "start_time": new Date(),
+                "timezone": "India",
+                "host_email": zoomaccountData["email"],
+                "settings": {
+                  "host_video": true,
+                  "participant_video": true,
+                  "cn_meeting": false,
+                  "in_meeting": true,
+                  "join_before_host": true,
+                  "mute_upon_entry": false,
+                  "watermark": false,
+                  "use_pmi": false,
+                  "approval_type": 1,
+                  "audio": "both",
+                  // "auto_recording": "local",
+                  "enforce_login": false,
+                  "registrants_email_notification": false,
+                  "waiting_room": true,
+                  "allow_multiple_devices": true,
+                }
+              }, {
+                headers: {
+                  'Authorization': 'Bearer ' + tokenData.access_token,
+                  'content-type': 'application/json'
+                }
+              });
+              let sdkclientid = zoomSDkClientId.value()
+              let sdkclientsecret = zoomSDKClientSecret.value()
+              // let signature  = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
+              var hostSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
+              var participantSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 0)
+
+              // Mark Zoom Email inuse: true,
+              await admin.firestore().collection("zoomaccount").where("email", "==", getZoomAccountEmail).get().then(emailaccount=>{
+                emailaccount.docs.forEach(doc=>{
+                  doc.ref.update({
+                    inuse: true,
+                    hostid: zoomresult.data["host_id"],
+                    useby: snapshot.data.ref.path
+                  })
+                })
+              })
+              // Ensure Host Email is updated
+              if(zoomresult.data["host_email"] == null || zoomresult.data["host_email"] == undefined){
+                zoomresult.data["host_email"] = zoomaccountData["email"]
+              }
+              console.log("zoom created ", zoomresult.data['join_url']);
+              zoomRequestResult = zoomresult.data
+
+              // Update Live Assignment
+              await liveassignment.ref.update({
+                // signature: hostSignature,
+                hostsignature: hostSignature,
+                participantsignature: participantSignature,
+                zoomdata: zoomresult.data
+              })
+            } catch (zoomError) {
+              console.log("Zoom Link Not Generated", zoomError.message);
+              console.log("Error 1", JSON.stringify(zoomError.message));
+              console.log("Error 2", JSON.stringify(zoomError))
+            }
+
+          }
+          else{
+            await liveassignment.ref.update({
+              zoomdata: {
+                host_email: "soe1@soexcellence.com",
+                start_url: "Link Broken"
+              }
+            })
+          }
+        }
+
+        // Send Slack
+        let slackMessage = {
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Participant Name*: ${mapProfile[liveassignmentData["participantid"]]["name"]}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Specialist Name*: ${liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Stage*: ${liveassignmentData["stagename"]}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Participant Studio Link*: ${participantStudioLink}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Meeting Created In*: ${openViduEnabled ? "OpenVidu" : "Zoom"}`
+              }
+            },
+          ]
+        }
+        if(openViduEnabled){
+          let participantMeetingLink
+          if(commonService.production){
+            participantMeetingLink = `https://breakthroughs.app/joinroom/${liveassignmentData["docid"]}`
+          }
+          else{
+            participantMeetingLink = `https://breakthroughs-test.web.app/joinroom/${liveassignmentData["docid"]}`
+          }
+          slackMessage.blocks.push({
             "type": "section",
             "text": {
               "type": "mrkdwn",
-              "text": `*Participant Name*: ${mapProfile[liveassignmentData["participantid"]]["name"]}`
+              "text": `*OpenVidu Meeting ID*: ${participantMeetingLink}`
             }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Specialist Name*: ${liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Stage*: ${liveassignmentData["stagename"]}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Participant Studio Link*: ${participantStudioLink}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Meeting Created In*: ${openViduEnabled ? "OpenVidu" : "Zoom"}`
-            }
-          },
-        ]
-      }
-      if(openViduEnabled){
-        let participantMeetingLink
-        if(commonService.production){
-          participantMeetingLink = `https://breakthroughs.app/joinroom/${liveassignmentData["docid"]}`
+          })
         }
         else{
-          participantMeetingLink = `https://breakthroughs-test.web.app/joinroom/${liveassignmentData["docid"]}`
+          if(zoomRequestResult == null){
+            zoomRequestResult = {
+              start_url: "No Link Generated",
+              join_url: "No Link Generated"
+            }
+          }
+          slackMessage.blocks.push({
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `*Zoom Host URL*: ${zoomRequestResult["start_url"]}`
+            }
+          })
+          slackMessage.blocks.push({
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `*Zoom Join URL*: ${zoomRequestResult["join_url"]}`
+            }
+          })
         }
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*OpenVidu Meeting ID*: ${participantMeetingLink}`
-          }
+        await slackQueueZoomLink(slackMessage).catch(err =>{
+          console.log("Slack Failed")
+          console.log(err)
         })
-      }
-      else{
-        if(zoomRequestResult == null){
-          zoomRequestResult = {
-            start_url: "No Link Generated",
-            join_url: "No Link Generated"
+
+        // Send Email
+        var clientModel = {
+          company_name: "Antano & Harini",
+          product_name: "StarLabs",
+          stagename: liveassignmentData["stagename"],
+          clientname: mapProfile[liveassignmentData["participantid"]]["name"],
+          specialistname: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", "),
+          joinurl: participantStudioLink
+        }
+        var receiverList = [liveassignmentData["participantid"]]
+        for (let i = 0; i < receiverList.length; i++) {
+          const receiver = receiverList[i];
+
+          // await commonService.postmarkClient.sendEmailWithTemplate({
+          //   From: "starlabs@excellenceinstallation.com",
+          //   To: mapProfile[receiver]["email"],
+          //   TemplateAlias: "queuestudioinvitation",
+          //   TemplateModel: clientModel,
+          // }).catch(err=>{
+          //   console.log(err)
+          // }); 
+
+          await commonService.createEmailArchiveDocument({
+            emailData : clientModel,
+            datamodel : clientModel,
+            attachments : [],
+            emailTo : [mapProfile[receiver]["email"]],
+            emailMap : {[mapProfile[receiver]["email"]] : receiver},
+            fileURL : '',
+            from:'starlabs@excellenceinstallation.com',
+            notes : '',
+            profileId : [receiver],
+            postmarkTemplateId: '42760699',
+            templateAlias:'queuestudioinvitation',
+            type: 'queue',
+            metadata: {...participantTokenData}
+          });
+
+        }
+
+        // Send Watti
+        let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
+        let waticontent = {
+          phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
+          body : {
+            parameters: [
+              {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
+              {name: 'stage', value: liveassignmentData["stagename"]},
+              {name: 'url', value: participantStudioLink},
+              {name: 'eis', value: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")},
+              {name: 'product', value:participantTokenData['productname']},
+            ],
+            broadcast_name: 'queue_link_generationv2',
+            template_name: 'queue_link_generationv2'
           }
         }
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Zoom Host URL*: ${zoomRequestResult["start_url"]}`
-          }
-        })
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Zoom Join URL*: ${zoomRequestResult["join_url"]}`
-          }
-        })
-      }
-      await slackQueueZoomLink(slackMessage).catch(err =>{
-        console.log("Slack Failed")
-        console.log(err)
-      })
 
-      // Send Email
-      var clientModel = {
-        company_name: "Antano & Harini",
-        product_name: "StarLabs",
-        stagename: liveassignmentData["stagename"],
-        clientname: mapProfile[liveassignmentData["participantid"]]["name"],
-        specialistname: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", "),
-        joinurl: participantStudioLink
-      }
-      var receiverList = [liveassignmentData["participantid"]]
-      for (let i = 0; i < receiverList.length; i++) {
-        const receiver = receiverList[i];
+        const parameterConfig = waticontent['body']['parameters'].map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+        console.log('Triggered Wati Archive Creation');
 
-        // await commonService.postmarkClient.sendEmailWithTemplate({
-        //   From: "starlabs@excellenceinstallation.com",
-        //   To: mapProfile[receiver]["email"],
-        //   TemplateAlias: "queuestudioinvitation",
-        //   TemplateModel: clientModel,
-        // }).catch(err=>{
-        //   console.log(err)
-        // }); 
-
-        await commonService.createEmailArchiveDocument({
-          emailData : clientModel,
-          datamodel : clientModel,
-          attachments : [],
-          emailTo : [mapProfile[receiver]["email"]],
-          emailMap : {[mapProfile[receiver]["email"]] : receiver},
-          fileURL : '',
-          from:'starlabs@excellenceinstallation.com',
-          notes : '',
-          profileId : [receiver],
-          postmarkTemplateId: '42760699',
-          templateAlias:'queuestudioinvitation',
+        const response = await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [liveassignmentData['participantid']],
+          templateid: null,
+          watitemplateid: 'queue_link_generationv2',
           type: 'queue',
           metadata: {...participantTokenData}
         });
+        console.log('WATI ARCHIVE RESPONSE', response);
 
+        // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+        //   console.log("Watti Message Failed")
+        //   console.log(err)
+        // })
       }
-
-      // Send Watti
-      let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
-      let waticontent = {
-        phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
-        body : {
-          parameters: [
-            {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
-            {name: 'stage', value: liveassignmentData["stagename"]},
-            {name: 'url', value: participantStudioLink},
-            {name: 'eis', value: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")},
-            {name: 'product', value:participantTokenData['productname']},
-          ],
-          broadcast_name: 'queue_link_generationv2',
-          template_name: 'queue_link_generationv2'
-        }
-      }
-
-      const parameterConfig = waticontent['body']['parameters'].map(param => ({
-        excelColumn: null,
-        fillType: 'static',
-        metadataField: null,
-        name: param.name,
-        staticValue: param.value
-      }));
-      console.log('Triggered Wati Archive Creation');
-
-      const response = await commonService.createWatiArchiveDocument({
-        numbers: [parseInt(waticontent['phonenumber'])],
-        numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
-        broadcastname: 'Individual',
-        paramFillMode: 'static',
-        parameterConfig: parameterConfig,
-        params: [],
-        profileid: [liveassignmentData['participantid']],
-        templateid: null,
-        watitemplateid: 'queue_link_generationv2',
-        type: 'queue',
-        metadata: {...participantTokenData}
-      });
-      console.log('WATI ARCHIVE RESPONSE', response);
-
-      // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-      //   console.log("Watti Message Failed")
-      //   console.log(err)
-      // })
-    }
     
     // Activity Log
     let atcModel = null
@@ -1655,57 +1661,46 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
   let docData = snapshot.data()
   let queueref = docData['queueref']
   let queueGenerationDoc = {}
-  console.log("queueref",queueref.path);
-  await admin.firestore().doc(queueref.path).get().then( queueGenerationDocSnap => {
+  console.log("queueref", queueref.path);
+  await admin.firestore().doc(queueref.path).get().then(queueGenerationDocSnap => {
     queueGenerationDoc = queueGenerationDocSnap.data()
   })
-  console.log("queueGenerationDoc",queueGenerationDoc['queuename']);
+  console.log("queueGenerationDoc", queueGenerationDoc['queuename']);
 
   var stageProperty = queueGenerationDoc["stageproperty"]
-  if(stageProperty[docData["currentstage"]]["compulsoryactivity"].length != 0){
+  if (stageProperty[docData["currentstage"]]["compulsoryactivity"].length != 0) {
     let batch = admin.firestore().batch()
-    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage","==", docData["currentstage"]).orderBy("logdate","asc").get().then(async queueTokenSnap => {
+    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage", "==", docData["currentstage"]).where('tokenstatus', '==', 'Active').orderBy("logdate", "asc").get().then(async queueTokenSnap => {
       console.log("Current Stage length", docData["currentstage"], queueTokenSnap.docs.length);
       var preassignedMap = {}
       var waitingList = []
       var queuedList = []
-      for(let i = 0; i < queueTokenSnap.size; i++){
+      for (let i = 0; i < queueTokenSnap.size; i++) {
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
         var stagePreassigned = preassigned[docData["currentstage"]] != null && preassigned[docData["currentstage"]] != undefined ? preassigned[docData["currentstage"]] : []
-        if(stagePreassigned.length == 0){
-          if(tokenData["status"] == "ready"){
+        if (stagePreassigned.length == 0) {
+          if (tokenData["status"] == "ready") {
             waitingList.push(tokenDoc)
           }
-          else if(tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited"){
+          else if (tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited") {
             queuedList.push(tokenDoc)
           }
         }
-        else{
-          stagePreassigned.forEach(studio=>{
+        else {
+          batch.update(tokenDoc.ref, { queueposition: null })
+          stagePreassigned.forEach(studio => {
             preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
             preassignedMap[studio].push(tokenDoc)
           })
         }
       }
 
-      // Sort queuedList by selectedstageslots[currentstage].startdate ascending
-      queuedList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
-        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
-        const aTime = aSlot?.startdate?.toMillis?.() ?? null
-        const bTime = bSlot?.startdate?.toMillis?.() ?? null
-        if (aTime == null && bTime == null) return 0
-        if (aTime == null) return 1   // no slot → pushed to end
-        if (bTime == null) return -1
-        return aTime - bTime
-      })
-
-      // Sort waitingList by selectedstageslots[currentstage].startdate ascending
+      // Sort waitingList by selectedstageslot[currentstage].startdate ascending
       waitingList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslots"]?.[docData["currentstage"]]
-        const bSlot = b.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const aSlot = a.data()["selectedstageslot"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslot"]?.[docData["currentstage"]]
         const aTime = aSlot?.startdate?.toMillis?.() ?? null
         const bTime = bSlot?.startdate?.toMillis?.() ?? null
         if (aTime == null && bTime == null) return 0
@@ -1714,122 +1709,121 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         return aTime - bTime
       })
 
-      // queued: position based on startdate slot; skip if no slot data
-      let queuedPositionCounter = 1
-      queuedList.forEach((queued) => {
-        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        batch.update(queued.ref, {
-          queueposition: queuedPositionCounter++
-        })
+      // Sort queuedList by selectedstageslot[currentstage].startdate ascending
+      queuedList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslot"]?.[docData["currentstage"]]
+        const bSlot = b.data()["selectedstageslot"]?.[docData["currentstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
       })
 
-      // waiting: position continues from where queued left off; skip if no slot data
-      let waitingPositionCounter = queuedPositionCounter
+      // waiting fills positions first
+      let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
-        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const slotData = waiting.data()["selectedstageslot"]?.[docData["currentstage"]]
         if (slotData == null || slotData == undefined) {
           batch.update(waiting.ref, { queueposition: null })
           return
         }
-        batch.update(waiting.ref, {
-          queueposition: waitingPositionCounter++
-        })
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
       })
-      // waitingList.forEach((waiting, i)=>{
-      //   batch.update(waiting.ref,{ 
-      //     queueposition: i + 1
-      //   })
-      // })
-      // queuedList.forEach((queued, i)=>{
-      //   batch.update(queued.ref,{ 
-      //     queueposition: i + 1+ waitingList.length
-      //   })
-      // })
-      // Object.keys(preassignedMap).forEach(studio=>{
-      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
-      //     batch.update(assignedtoken.ref,{ 
-      //       queueposition: i + 1
-      //     })
-      //   })
-      // })
+
+      // queued continues from where waiting left off
+      let queuedPositionCounter = waitingPositionCounter
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslot"]?.[docData["currentstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, { queueposition: queuedPositionCounter++ })
+      })
+
       await batch.commit().then(() => {
         console.log("batch updated")
       })
     })
   }
 
-  if(docData["currentstage"] != docData["previousstage"] && stageProperty[docData["previousstage"]]["compulsoryactivity"].length != 0){
+  if (docData["currentstage"] != docData["previousstage"] && stageProperty[docData["previousstage"]]["compulsoryactivity"].length != 0) {
     let batch = admin.firestore().batch()
-    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage","==", docData["previousstage"]).orderBy("logdate","asc").get().then(async queueTokenSnap => {
+    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage", "==", docData["previousstage"]).where('tokenstatus', '==', 'Active').orderBy("logdate", "asc").get().then(async queueTokenSnap => {
       console.log("Previous Stage length", docData["previousstage"], queueTokenSnap.docs.length);
       var preassignedMap = {}
       var waitingList = []
       var queuedList = []
-      for(let i = 0; i < queueTokenSnap.size; i++){
+      for (let i = 0; i < queueTokenSnap.size; i++) {
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
         var stagePreassigned = preassigned[docData["previousstage"]] != null && preassigned[docData["previousstage"]] != undefined ? preassigned[docData["previousstage"]] : []
-        if(stagePreassigned.length == 0){
-          if(tokenData["status"] == "ready"){
+        if (stagePreassigned.length == 0) {
+          if (tokenData["status"] == "ready") {
             waitingList.push(tokenDoc)
           }
-          else if(tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited"){
+          else if (tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["st.where('tokenstatus', '==', 'Active')atus"] == "invited") {
             queuedList.push(tokenDoc)
           }
         }
-        else{
-          stagePreassigned.forEach(studio=>{
+        else {
+          batch.update(tokenDoc.ref, { queueposition: null })
+          stagePreassigned.forEach(studio => {
             preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
             preassignedMap[studio].push(tokenDoc)
           })
         }
       }
-      let queuedPositionCounter = 1
-      queuedList.forEach((queued) => {
-        const slotData = queued.data()["selectedstageslots"]?.[docData["currentstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        batch.update(queued.ref, {
-          queueposition: queuedPositionCounter++
-        })
+
+      // Sort waitingList by selectedstageslot[previousstage].startdate ascending
+      waitingList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslot"]?.[docData["previousstage"]]
+        const bSlot = b.data()["selectedstageslot"]?.[docData["previousstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
       })
 
-      // waiting: position continues from where queued left off; skip if no slot data
-      let waitingPositionCounter = queuedPositionCounter
+      // Sort queuedList by selectedstageslot[previousstage].startdate ascending
+      queuedList.sort((a, b) => {
+        const aSlot = a.data()["selectedstageslot"]?.[docData["previousstage"]]
+        const bSlot = b.data()["selectedstageslot"]?.[docData["previousstage"]]
+        const aTime = aSlot?.startdate?.toMillis?.() ?? null
+        const bTime = bSlot?.startdate?.toMillis?.() ?? null
+        if (aTime == null && bTime == null) return 0
+        if (aTime == null) return 1
+        if (bTime == null) return -1
+        return aTime - bTime
+      })
+
+      // waiting fills positions first
+      let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
-        const slotData = waiting.data()["selectedstageslots"]?.[docData["currentstage"]]
+        const slotData = waiting.data()["selectedstageslot"]?.[docData["previousstage"]]
         if (slotData == null || slotData == undefined) {
           batch.update(waiting.ref, { queueposition: null })
           return
         }
-        batch.update(waiting.ref, {
-          queueposition: waitingPositionCounter++
-        })
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
       })
-      // waitingList.forEach((waiting, i)=>{
-      //   batch.update(waiting.ref,{ 
-      //     queueposition: i + 1
-      //   })
-      // })
-      // queuedList.forEach((queued, i)=>{
-      //   batch.update(queued.ref,{ 
-      //     queueposition: i + 1+ waitingList.length
-      //   })
-      // })
-      // Object.keys(preassignedMap).forEach(studio=>{
-      //   preassignedMap[studio].forEach((assignedtoken, i)=>{
-      //     batch.update(assignedtoken.ref,{ 
-      //       queueposition: i + 1
-      //     })
-      //   })
-      // })
+
+      // queued continues from where waiting left off
+      let queuedPositionCounter = waitingPositionCounter
+      queuedList.forEach((queued) => {
+        const slotData = queued.data()["selectedstageslot"]?.[docData["previousstage"]]
+        if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        batch.update(queued.ref, { queueposition: queuedPositionCounter++ })
+      })
+
       await batch.commit().then(() => {
         console.log("batch updated")
       })
