@@ -1724,11 +1724,18 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         return aTime - bTime
       })
 
+      const nowMs = Date.now()
+
       // waiting fills positions first
       let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
         const slotData = waiting.data()["selectedstageslot"]?.[docData["currentstage"]]
         if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
+        if (slotStartMs != null && slotStartMs > nowMs) {
           batch.update(waiting.ref, { queueposition: null })
           return
         }
@@ -1740,6 +1747,11 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
       queuedList.forEach((queued) => {
         const slotData = queued.data()["selectedstageslot"]?.[docData["currentstage"]]
         if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
+        if (slotStartMs != null && slotStartMs > nowMs) {
           batch.update(queued.ref, { queueposition: null })
           return
         }
@@ -1805,11 +1817,18 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         return aTime - bTime
       })
 
+      const nowMs = Date.now()
+
       // waiting fills positions first
       let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
         const slotData = waiting.data()["selectedstageslot"]?.[docData["previousstage"]]
         if (slotData == null || slotData == undefined) {
+          batch.update(waiting.ref, { queueposition: null })
+          return
+        }
+        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
+        if (slotStartMs != null && slotStartMs > nowMs) {
           batch.update(waiting.ref, { queueposition: null })
           return
         }
@@ -1821,6 +1840,11 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
       queuedList.forEach((queued) => {
         const slotData = queued.data()["selectedstageslot"]?.[docData["previousstage"]]
         if (slotData == null || slotData == undefined) {
+          batch.update(queued.ref, { queueposition: null })
+          return
+        }
+        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
+        if (slotStartMs != null && slotStartMs > nowMs) {
           batch.update(queued.ref, { queueposition: null })
           return
         }
