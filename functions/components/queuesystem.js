@@ -97,6 +97,7 @@ exports.onQueueStageChange = onDocumentWritten( {
               { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
             ] : [
               { name: 'name', value: profiledata['name'] },
+              { name: 'stage', value: key },
               { name: 'date_time_slot', value: formattedDate },
               { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
             ]
@@ -115,7 +116,7 @@ exports.onQueueStageChange = onDocumentWritten( {
         console.log('Triggered Wati Archive Creation');
 
         if (!isScopeEnhancement) {
-          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v1';
+          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v2';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
