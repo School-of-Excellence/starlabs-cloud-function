@@ -1690,3 +1690,29 @@ exports.scaleMediaNodes = onRequest({
     });
   }
 });
+
+exports.flushOpenviduCallQuality = functions.https.onRequest({cors: true}, async (req, res) => {
+  try {
+    const { documentId, snapshots, exitReason } = req.body;
+
+    if (!documentId || !Array.isArray(snapshots)) {
+      res.status(400).send('Missing documentId or snapshots');
+      return;
+    }
+
+    const ref = admin.firestore().doc(`openviduCallQuality/${documentId}`);
+
+    await ref.update({
+      snapshots: admin.firestore.FieldValue.arrayUnion(...snapshots),
+      exitReason: exitReason ?? 'tab_closed',
+      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`✅ Beacon flush: ${snapshots.length} snapshots → ${documentId}`);
+    res.status(200).send('ok');
+
+  } catch (err) {
+    console.error('❌ flushCallQuality error:', err);
+    res.status(500).send('Internal error');
+  }
+});
