@@ -309,7 +309,7 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
   console.log(`checkpoint doc created ${newDocId} for source ${triggeredDocId} (stage="${checkpointStage}")`);
 
   // 6. Kick off the pod via run_jobrequest.
-  await callRunJobRequest({ docid: newDocId, promptCfg });
+  // await callRunJobRequest({ docid: newDocId, promptCfg });
 }
 
 // ---------- Extract overall_verdict from rubrics scoring output and save ----------
