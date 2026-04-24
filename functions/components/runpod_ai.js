@@ -212,172 +212,402 @@ const TRIGGER_TIMEOUT_MS = 10000;
 // ─────────────────────────────────────────────────────────────────────────────
 // 1) run_jobrequest  (DEBUG build)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
-  (req, res) => {
-    corsHandler(req, res, async () => {
-      if (handleOptions(req, res)) return;
-      const auth = await requireAuth(req, res);
-      if (!auth) return;
+// exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
+//   (req, res) => {
+//     corsHandler(req, res, async () => {
+//       if (handleOptions(req, res)) return;
+//       const auth = await requireAuth(req, res);
+//       if (!auth) return;
 
-      const payload = req.body || {};
-      const slackUrl = payload.SLACK_WEBHOOK_URL || "";
-      const dbg = (step, extra = {}) => console.log(`DEBUG run_jobrequest :: ${step}`, JSON.stringify(extra));
+//       const payload = req.body || {};
+//       const slackUrl = payload.SLACK_WEBHOOK_URL || "";
+//       const dbg = (step, extra = {}) => console.log(`DEBUG run_jobrequest :: ${step}`, JSON.stringify(extra));
 
 
-      dbg("ENTER", {payload});
+//       dbg("ENTER", {payload});
 
-      try {
-        const required = [
-          "TEMPLATEID",
-          "SLACK_WEBHOOK_URL",
-          "FIREBASE_FETCH_URL",
-          "FIREBASE_SUBMIT_URL",
-          "FIREBASE_COLLECTION_NAME",
-        ];
-        for (const k of required) {
-          if (!payload[k]) {
-            dbg("MISSING_FIELD", {field: k});
-            return res.status(400).json({success: false, error: `payload field '${k}' is required`});
-          }
-        }
-        dbg("REQUIRED_FIELDS_OK");
+//       try {
+//         const required = [
+//           "TEMPLATEID",
+//           "SLACK_WEBHOOK_URL",
+//           "FIREBASE_FETCH_URL",
+//           "FIREBASE_SUBMIT_URL",
+//           "FIREBASE_COLLECTION_NAME",
+//         ];
+//         for (const k of required) {
+//           if (!payload[k]) {
+//             dbg("MISSING_FIELD", {field: k});
+//             return res.status(400).json({success: false, error: `payload field '${k}' is required`});
+//           }
+//         }
+//         dbg("REQUIRED_FIELDS_OK");
 
-        const apiKey = runpodApiKey.value();
-        if (!apiKey) {
-          dbg("NO_API_KEY");
-          return res.status(500).json({success: false, error: "RunPod API key not configured"});
-        }
-        dbg("API_KEY_LOADED", {len: apiKey.length});
+//         const apiKey = runpodApiKey.value();
+//         if (!apiKey) {
+//           dbg("NO_API_KEY");
+//           return res.status(500).json({success: false, error: "RunPod API key not configured"});
+//         }
+//         dbg("API_KEY_LOADED", {len: apiKey.length});
 
-        const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
-        const templateSnap = await templateRef.get();
-        if (!templateSnap.exists) {
-          dbg("TEMPLATE_NOT_FOUND", {TEMPLATEID: payload.TEMPLATEID});
-          return res.status(404).json({success: false, error: "Template not found"});
-        }
-        const docData = templateSnap.data();
-        const runpodTemplateId = docData.templateid;
-        dbg("TEMPLATE_LOADED", {runpodTemplateId, name: docData.name, gpupriority: docData.gpupriority, podidField: docData.podid});
+//         const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
+//         const templateSnap = await templateRef.get();
+//         if (!templateSnap.exists) {
+//           dbg("TEMPLATE_NOT_FOUND", {TEMPLATEID: payload.TEMPLATEID});
+//           return res.status(404).json({success: false, error: "Template not found"});
+//         }
+//         const docData = templateSnap.data();
+//         const runpodTemplateId = docData.templateid;
+//         dbg("TEMPLATE_LOADED", {runpodTemplateId, name: docData.name, gpupriority: docData.gpupriority, podidField: docData.podid});
 
-        // ── (a) Reuse path ──
-        dbg("LIST_PODS_START");
-        const listResp = await fetch("https://rest.runpod.io/v1/pods", {
-          method: "GET",
-          headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-          signal: AbortSignal.timeout(30000),
-        });
-        dbg("LIST_PODS_STATUS", {status: listResp.status, ok: listResp.ok});
-        if (!listResp.ok) {
-          const errorData = await listResp.json().catch(() => ({}));
-          dbg("LIST_PODS_ERROR_BODY", {errorData});
-          return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
-        }
-        const listData = await listResp.json();
-        const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
-        dbg("LIST_PODS_COUNT", {count: pods.length});
-        const existing = pods.find((p) => p.templateId === runpodTemplateId);
+//         // ── (a) Reuse path ──
+//         dbg("LIST_PODS_START");
+//         const listResp = await fetch("https://rest.runpod.io/v1/pods", {
+//           method: "GET",
+//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+//           signal: AbortSignal.timeout(30000),
+//         });
+//         dbg("LIST_PODS_STATUS", {status: listResp.status, ok: listResp.ok});
+//         if (!listResp.ok) {
+//           const errorData = await listResp.json().catch(() => ({}));
+//           dbg("LIST_PODS_ERROR_BODY", {errorData});
+//           return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
+//         }
+//         const listData = await listResp.json();
+//         const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
+//         dbg("LIST_PODS_COUNT", {count: pods.length});
+//         const existing = pods.find((p) => p.templateId === runpodTemplateId);
 
-        if (existing) {
-          dbg("REUSE_EXISTING_POD", {podId: existing.id});
-          await triggerProcess(existing.id).catch((e) =>
-            logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
-          return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
-        }
+//         if (existing) {
+//           dbg("REUSE_EXISTING_POD", {podId: existing.id});
+//           await triggerProcess(existing.id).catch((e) =>
+//             logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
+//           return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
+//         }
 
-        // ── (b) Race guard ──
-        dbg("RACE_GUARD_TX_START");
-        const reserved = await db.runTransaction(async (tx) => {
-          const s = await tx.get(templateRef);
-          const d = s.data() || {};
-          if (d.podid) return {raceLost: true, podid: d.podid};
-          tx.update(templateRef, {podid: "__creating__"});
-          return {raceLost: false};
-        });
-        dbg("RACE_GUARD_RESULT", reserved);
-        if (reserved.raceLost) {
-          return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
-        }
+//         // ── (b) Race guard ──
+//         dbg("RACE_GUARD_TX_START");
+//         const reserved = await db.runTransaction(async (tx) => {
+//           const s = await tx.get(templateRef);
+//           const d = s.data() || {};
+//           if (d.podid) return {raceLost: true, podid: d.podid};
+//           tx.update(templateRef, {podid: "__creating__"});
+//           return {raceLost: false};
+//         });
+//         dbg("RACE_GUARD_RESULT", reserved);
+//         if (reserved.raceLost) {
+//           return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
+//         }
 
-        // ── (c) Build env ──
-        const env = {
-          MODEL_PATH: docData.path,
-          MODEL_NAME: docData.name,
-          TEMPLATE_ID: runpodTemplateId,
-          GIT_REPO: docData.git_repo,
-          REPO_ID: docData.repo_id,
-          D_TYPE: docData.dtype,
-          SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
-          FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
-          FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
-          FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
-          DOC_ID: payload.DOC_ID || "",
-          FUNCTIONS_API_KEY: sharedSecret.value(),
-        };
-        dbg("ENV_BUILT", {envKeys: Object.keys(env)});
+//         // ── (c) Build env ──
+//         const env = {
+//           MODEL_PATH: docData.path,
+//           MODEL_NAME: docData.name,
+//           TEMPLATE_ID: runpodTemplateId,
+//           GIT_REPO: docData.git_repo,
+//           REPO_ID: docData.repo_id,
+//           D_TYPE: docData.dtype,
+//           SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
+//           FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
+//           FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
+//           FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
+//           DOC_ID: payload.DOC_ID || "",
+//           FUNCTIONS_API_KEY: sharedSecret.value(),
+//         };
+//         dbg("ENV_BUILT", {envKeys: Object.keys(env)});
 
-        const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
-        if (gpupriority.length === 0) {
-          dbg("GPU_PRIORITY_EMPTY");
-          await templateRef.update({podid: ""});
-          return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
-        }
-        dbg("GPU_PRIORITY_LIST", {gpupriority});
+//         const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
+//         if (gpupriority.length === 0) {
+//           dbg("GPU_PRIORITY_EMPTY");
+//           await templateRef.update({podid: ""});
+//           return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
+//         }
+//         dbg("GPU_PRIORITY_LIST", {gpupriority});
 
-        // ── (d) Try each GPU ──
-        const attempts = [];
-        let created = null;
-        for (const choice of gpupriority) {
-          const runpodPayload = {
-            name: `${docData.name}_${new Date().toISOString()}`,
-            cloudType: "SECURE",
-            computeType: "GPU",
-            containerDiskInGb: docData.tempvolumesize,
-            gpuCount: choice.count,
-            gpuTypeIds: [choice.gpu],
-            gpuTypePriority: "availability",
-            templateId: runpodTemplateId,
-            volumeInGb: 0,
-            env: {...env, GPU_COUNT: String(choice.count)},
-          };
-          dbg("CREATE_POD_ATTEMPT", {gpu: choice.gpu, count: choice.count, runpodPayload});
-          const createResp = await fetch("https://rest.runpod.io/v1/pods", {
-            method: "POST",
-            headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-            body: JSON.stringify(runpodPayload),
-            signal: AbortSignal.timeout(45000),
-          });
-          dbg("CREATE_POD_STATUS", {gpu: choice.gpu, status: createResp.status, ok: createResp.ok});
-          if (createResp.ok) {
-            created = await createResp.json();
-            dbg("CREATE_POD_OK", {gpu: choice.gpu, created});
-            break;
-          }
-          const errorData = await createResp.json().catch(() => ({}));
-          dbg("CREATE_POD_FAIL_BODY", {gpu: choice.gpu, status: createResp.status, errorData});
-          attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
-        }
+//         // ── (d) Try each GPU ──
+//         const attempts = [];
+//         let created = null;
+//         for (const choice of gpupriority) {
+//           const runpodPayload = {
+//             name: `${docData.name}_${new Date().toISOString()}`,
+//             cloudType: "SECURE",
+//             computeType: "GPU",
+//             containerDiskInGb: docData.tempvolumesize,
+//             gpuCount: choice.count,
+//             gpuTypeIds: [choice.gpu],
+//             gpuTypePriority: "availability",
+//             templateId: runpodTemplateId,
+//             volumeInGb: 0,
+//             env: {...env, GPU_COUNT: String(choice.count)},
+//           };
+//           dbg("CREATE_POD_ATTEMPT", {gpu: choice.gpu, count: choice.count, runpodPayload});
+//           const createResp = await fetch("https://rest.runpod.io/v1/pods", {
+//             method: "POST",
+//             headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+//             body: JSON.stringify(runpodPayload),
+//             signal: AbortSignal.timeout(45000),
+//           });
+//           dbg("CREATE_POD_STATUS", {gpu: choice.gpu, status: createResp.status, ok: createResp.ok});
+//           if (createResp.ok) {
+//             created = await createResp.json();
+//             dbg("CREATE_POD_OK", {gpu: choice.gpu, created});
+//             break;
+//           }
+//           const errorData = await createResp.json().catch(() => ({}));
+//           dbg("CREATE_POD_FAIL_BODY", {gpu: choice.gpu, status: createResp.status, errorData});
+//           attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
+//         }
 
-        if (!created) {
-          dbg("ALL_GPU_FAILED", {attempts});
-          await templateRef.update({podid: ""});
-          await notifySlack(slackUrl, {
-            text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
-            attempts,
-          });
-          return res.status(502).json({success: false, error: "All GPU options failed", attempts});
-        }
+//         if (!created) {
+//           dbg("ALL_GPU_FAILED", {attempts});
+//           await templateRef.update({podid: ""});
+//           await notifySlack(slackUrl, {
+//             text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
+//             attempts,
+//           });
+//           return res.status(502).json({success: false, error: "All GPU options failed", attempts});
+//         }
 
-        await templateRef.update({podid: created.id});
-        dbg("PODID_PERSISTED", {podId: created.id});
-        return res.status(200).json({success: true, created: true, podid: created.id, data: created});
-      } catch (err) {
-        logger.error("DEBUG run_jobrequest :: CRASH", {error: err.message, stack: err.stack});
-        await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
-        return res.status(500).json({success: false, error: err.message, stack: err.stack});
-      }
-    });
-  },
-);
+//         await templateRef.update({podid: created.id});
+//         dbg("PODID_PERSISTED", {podId: created.id});
+//         return res.status(200).json({success: true, created: true, podid: created.id, data: created});
+//       } catch (err) {
+//         logger.error("DEBUG run_jobrequest :: CRASH", {error: err.message, stack: err.stack});
+//         await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
+//         return res.status(500).json({success: false, error: err.message, stack: err.stack});
+//       }
+//     });
+//   },
+// );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1) run_jobrequest  (DEBUG build)
+// ─────────────────────────────────────────────────────────────────────────────
+// exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
+//   (req, res) => {
+//     corsHandler(req, res, async () => {
+//       if (handleOptions(req, res)) return;
+//       const auth = await requireAuth(req, res);
+//       if (!auth) return;
+
+//       const payload = req.body || {};
+//       const slackUrl = payload.SLACK_WEBHOOK_URL || "";
+//       const dbg = (step, extra = {}) => console.log(`DEBUG run_jobrequest :: ${step}`, JSON.stringify(extra));
+
+
+//       dbg("ENTER", {payload});
+
+//       try {
+//         const required = [
+//           "TEMPLATEID",
+//           "SLACK_WEBHOOK_URL",
+//           "FIREBASE_FETCH_URL",
+//           "FIREBASE_SUBMIT_URL",
+//           "FIREBASE_COLLECTION_NAME",
+//         ];
+//         for (const k of required) {
+//           if (!payload[k]) {
+//             dbg("MISSING_FIELD", {field: k});
+//             return res.status(400).json({success: false, error: `payload field '${k}' is required`});
+//           }
+//         }
+//         dbg("REQUIRED_FIELDS_OK");
+
+//         const apiKey = runpodApiKey.value();
+//         if (!apiKey) {
+//           dbg("NO_API_KEY");
+//           return res.status(500).json({success: false, error: "RunPod API key not configured"});
+//         }
+//         dbg("API_KEY_LOADED", {len: apiKey.length});
+
+//         const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
+//         const templateSnap = await templateRef.get();
+//         if (!templateSnap.exists) {
+//           dbg("TEMPLATE_NOT_FOUND", {TEMPLATEID: payload.TEMPLATEID});
+//           return res.status(404).json({success: false, error: "Template not found"});
+//         }
+//         const docData = templateSnap.data();
+//         const runpodTemplateId = docData.templateid;
+//         dbg("TEMPLATE_LOADED", {runpodTemplateId, name: docData.name, gpupriority: docData.gpupriority, podidField: docData.podid});
+
+//         // ── (a) Reuse path ──
+//         dbg("LIST_PODS_START");
+//         const listResp = await fetch("https://rest.runpod.io/v1/pods", {
+//           method: "GET",
+//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+//           signal: AbortSignal.timeout(30000),
+//         });
+//         dbg("LIST_PODS_STATUS", {status: listResp.status, ok: listResp.ok});
+//         if (!listResp.ok) {
+//           const errorData = await listResp.json().catch(() => ({}));
+//           dbg("LIST_PODS_ERROR_BODY", {errorData});
+//           return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
+//         }
+//         const listData = await listResp.json();
+//         const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
+//         dbg("LIST_PODS_COUNT", {count: pods.length});
+//         const existing = pods.find((p) => p.templateId === runpodTemplateId);
+
+//         if (existing) {
+//           dbg("REUSE_EXISTING_POD", {podId: existing.id});
+//           // Heal Firestore if it drifted from the live pod
+//           if (docData.podid !== existing.id) {
+//             dbg("HEALING_PODID_DRIFT", {from: docData.podid, to: existing.id});
+//             await templateRef.update({podid: existing.id});
+//           }
+//           await triggerProcess(existing.id).catch((e) =>
+//             logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
+//           return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
+//         }
+
+//         // No matching live pod — clear stale podid before the race guard so we don't
+//         // block on a ghost. "__creating__" is left alone (another invocation may be mid-create).
+//         if (docData.podid && docData.podid !== "__creating__") {
+//           dbg("CLEARING_STALE_PODID", {stale: docData.podid});
+//           await templateRef.update({podid: ""});
+//         }
+
+//         // ── (b) Race guard ──
+//         // Serializes concurrent invocations so only one proceeds to CREATE.
+//         // Losers bail with a clear "another invocation is creating" response
+//         // (without leaking the "__creating__" sentinel as a real podid).
+//         dbg("RACE_GUARD_TX_START");
+//         const reserved = await db.runTransaction(async (tx) => {
+//           const s = await tx.get(templateRef);
+//           const d = s.data() || {};
+//           if (d.podid === "__creating__") return {raceLost: true, reason: "creating"};
+//           if (d.podid) return {raceLost: true, reason: "exists", podid: d.podid};
+//           tx.update(templateRef, {podid: "__creating__"});
+//           return {raceLost: false};
+//         });
+//         dbg("RACE_GUARD_RESULT", reserved);
+//         if (reserved.raceLost) {
+//           if (reserved.reason === "creating") {
+//             return res.status(200).json({success: true, alreadyRunning: true, creating: true});
+//           }
+//           return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
+//         }
+
+//         // ── (b.1) Re-check RunPod after acquiring the lock ──
+//         // Another invocation may have finished creating between our first list and now.
+//         dbg("RECHECK_PODS_START");
+//         const recheckResp = await fetch("https://rest.runpod.io/v1/pods", {
+//           method: "GET",
+//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+//           signal: AbortSignal.timeout(30000),
+//         });
+//         if (recheckResp.ok) {
+//           const recheckData = await recheckResp.json();
+//           const recheckPods = Array.isArray(recheckData) ? recheckData : (recheckData.pods || recheckData.data || []);
+//           const raced = recheckPods.find((p) => p.templateId === runpodTemplateId);
+//           if (raced) {
+//             dbg("RECHECK_FOUND_POD", {podId: raced.id});
+//             // Release our lock by persisting the real podid
+//             await templateRef.update({podid: raced.id});
+//             await triggerProcess(raced.id).catch((e) =>
+//               logger.warn("trigger /process failed (pod may still be booting)", {podId: raced.id, error: e.message}));
+//             return res.status(200).json({success: true, alreadyRunning: true, podid: raced.id});
+//           }
+//           dbg("RECHECK_NO_POD");
+//         } else {
+//           dbg("RECHECK_FAILED", {status: recheckResp.status});
+//           // Non-fatal: proceed to create. Worst case is a rare duplicate, which is better
+//           // than bailing on a recoverable list failure.
+//         }
+
+//         // ── (c) Build env ──
+//         const env = {
+//           MODEL_PATH: docData.path,
+//           MODEL_NAME: docData.name,
+//           TEMPLATE_ID: runpodTemplateId,
+//           GIT_REPO: docData.git_repo,
+//           REPO_ID: docData.repo_id,
+//           D_TYPE: docData.dtype,
+//           SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
+//           FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
+//           FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
+//           FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
+//           DOC_ID: payload.DOC_ID || "",
+//           FUNCTIONS_API_KEY: sharedSecret.value(),
+//         };
+//         dbg("ENV_BUILT", {envKeys: Object.keys(env)});
+
+//         const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
+//         if (gpupriority.length === 0) {
+//           dbg("GPU_PRIORITY_EMPTY");
+//           await templateRef.update({podid: ""});
+//           return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
+//         }
+//         dbg("GPU_PRIORITY_LIST", {gpupriority});
+
+//         // ── (d) Try each GPU ──
+//         const attempts = [];
+//         let created = null;
+//         for (const choice of gpupriority) {
+//           const runpodPayload = {
+//             name: `${docData.name}_${new Date().toISOString()}`,
+//             cloudType: "SECURE",
+//             computeType: "GPU",
+//             containerDiskInGb: docData.tempvolumesize,
+//             gpuCount: choice.count,
+//             gpuTypeIds: [choice.gpu],
+//             gpuTypePriority: "availability",
+//             templateId: runpodTemplateId,
+//             volumeInGb: 0,
+//             env: {...env, GPU_COUNT: String(choice.count)},
+//           };
+//           dbg("CREATE_POD_ATTEMPT", {gpu: choice.gpu, count: choice.count, runpodPayload});
+//           const createResp = await fetch("https://rest.runpod.io/v1/pods", {
+//             method: "POST",
+//             headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+//             body: JSON.stringify(runpodPayload),
+//             signal: AbortSignal.timeout(45000),
+//           });
+//           dbg("CREATE_POD_STATUS", {gpu: choice.gpu, status: createResp.status, ok: createResp.ok});
+//           if (createResp.ok) {
+//             created = await createResp.json();
+//             dbg("CREATE_POD_OK", {gpu: choice.gpu, created});
+//             break;
+//           }
+//           const errorData = await createResp.json().catch(() => ({}));
+//           dbg("CREATE_POD_FAIL_BODY", {gpu: choice.gpu, status: createResp.status, errorData});
+//           attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
+//         }
+
+//         if (!created) {
+//           dbg("ALL_GPU_FAILED", {attempts});
+//           await templateRef.update({podid: ""});
+//           await notifySlack(slackUrl, {
+//             text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
+//             attempts,
+//           });
+//           return res.status(502).json({success: false, error: "All GPU options failed", attempts});
+//         }
+
+//         await templateRef.update({podid: created.id});
+//         dbg("PODID_PERSISTED", {podId: created.id});
+//         return res.status(200).json({success: true, created: true, podid: created.id, data: created});
+//       } catch (err) {
+//         logger.error("DEBUG run_jobrequest :: CRASH", {error: err.message, stack: err.stack});
+//         // Release the __creating__ lock if we're holding it, so we don't wedge future invocations.
+//         // Use a transaction to only clear if it's still "__creating__" (don't overwrite a real podid
+//         // that a parallel invocation may have just written).
+//         try {
+//           await db.runTransaction(async (tx) => {
+//             const s = await tx.get(templateRef);
+//             const d = s.data() || {};
+//             if (d.podid === "__creating__") {
+//               tx.update(templateRef, {podid: ""});
+//             }
+//           });
+//         } catch (cleanupErr) {
+//           logger.warn("run_jobrequest :: cleanup failed", {error: cleanupErr.message});
+//         }
+//         await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
+//         return res.status(500).json({success: false, error: err.message, stack: err.stack});
+//       }
+//     });
+//   },
+// );
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,7 +623,7 @@ exports.getJobRequest = onRequest({secrets: [sharedSecret]}, (req, res) => {
       const {collectionName, podId} = req.body || {};
       if (!collectionName) return res.status(400).json({error: "collectionName is required"});
 
-      const snapshot = await db.collection(collectionName).where("status", "==", "pending").get();
+      const snapshot = await db.collection(collectionName).where("status", "==", "pending").limit(100).get();
       if (snapshot.empty) return res.status(200).json({jobs: []});
 
       const jobs = [];
