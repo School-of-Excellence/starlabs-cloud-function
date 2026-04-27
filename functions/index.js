@@ -55,6 +55,7 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
+exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -243,4 +244,5 @@ exports.terminatePod = runpodLLMRunning.terminatePod
 
 //queue_atc_generation
 exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
+exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
 
