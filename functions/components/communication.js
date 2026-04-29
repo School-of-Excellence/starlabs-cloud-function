@@ -297,6 +297,8 @@ exports.notifyMobileApp = onDocumentCreated({
               type: notificationType,
               click_action: "FLUTTER_NOTIFICATION_CLICK",
               recordid: snapshot.data.id,
+              landingpage: notificationData["landingpage"] || "",
+              sticky: String(notificationData["sticky"] || false),
               ...sanitizeDataPayload(metaData),
               // ...sanitizeDataPayload(notificationData),
             },
