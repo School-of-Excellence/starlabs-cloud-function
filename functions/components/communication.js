@@ -3516,9 +3516,10 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
+    let activeworkshop = (await data["workshopref"].get()).data()["active"];
     var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
     // var url =  commonService.slackDevTest;
-    if (url != null) {
+    if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
       var formUrl = commonService.production 
       ? `https://breakthroughs.app/formtemplate?id=${formid}&type=form&patchdata=formsByClient%2F${docid}`
