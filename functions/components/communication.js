@@ -4217,7 +4217,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
       const profile = await getProfileData(newData.profileid);
       if (!profile) return;
       // if (!newData['profileid']) {
-      //   console.log("profileid not found");
+      //   console.log("profileid not found"); 
       //   return;
       // }
       // const profileSnap = await admin.firestore()
