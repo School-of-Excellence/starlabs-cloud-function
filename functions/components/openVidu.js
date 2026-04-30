@@ -481,7 +481,7 @@ exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SEC
 						if(participantId.trim().endsWith(ghostID)){
 							// Extract Original Participant ID
 							const originalId = participantId.slice(0, - ghostID.length).trim() // Remove "- Ghost"
-							roomParticipantData["participantghost"]	= originalId
+							roomParticipantData["participantghost"]	= admin.firestore.FieldValue.arrayUnion(originalId)
 						}
 						else{
 							roomParticipantData["participantjoined"] = admin.firestore.FieldValue.arrayUnion(participantId)
@@ -1688,5 +1688,31 @@ exports.scaleMediaNodes = onRequest({
     res.status(500).json({
       error: error.message || 'Failed to scale media nodes'
     });
+  }
+});
+
+exports.flushOpenviduCallQuality = functions.https.onRequest({cors: true}, async (req, res) => {
+  try {
+    const { documentId, snapshots, exitReason } = req.body;
+
+    if (!documentId || !Array.isArray(snapshots)) {
+      res.status(400).send('Missing documentId or snapshots');
+      return;
+    }
+
+    const ref = admin.firestore().doc(`openviduCallQuality/${documentId}`);
+
+    await ref.update({
+      snapshots: admin.firestore.FieldValue.arrayUnion(...snapshots),
+      exitReason: exitReason ?? 'tab_closed',
+      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log(`✅ Beacon flush: ${snapshots.length} snapshots → ${documentId}`);
+    res.status(200).send('ok');
+
+  } catch (err) {
+    console.error('❌ flushCallQuality error:', err);
+    res.status(500).send('Internal error');
   }
 });

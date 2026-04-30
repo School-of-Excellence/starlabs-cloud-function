@@ -23,6 +23,8 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
+const runpodLLMRunning = require("./components/runpod_ai")
+const queue_atc_generation = require("./components/queue_atc_generation")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -53,6 +55,7 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
+exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -226,10 +229,21 @@ exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
+exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
+
+//runpod ai job processing
+exports.run_jobrequest = runpodLLMRunning.run_jobrequest
+exports.getJobRequest = runpodLLMRunning.getJobRequest
+exports.submitJobResult = runpodLLMRunning.submitJobResult
+exports.terminatePod = runpodLLMRunning.terminatePod
+
+//queue_atc_generation
+exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
+exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
 

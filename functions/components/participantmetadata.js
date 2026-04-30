@@ -353,6 +353,23 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
 
     try {
       await admin.firestore().collection("participant metadata").doc(profileid).set(newData, { merge: true });
+
+      let webhookUrl = "";
+      if (commonService.production) {
+        webhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+      } else {
+        webhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+      }
+
+      try {
+        await axios.post(webhookUrl, {
+          profileid: profileid,
+          ...newData
+        });
+        console.log("Webhook sent successfully");
+      } catch (webhookError) {
+        console.error("Webhook failed:", webhookError.message);
+      }
     } catch (err) {
       await throwParticipantMetaDataException({
         profileid: profileid,
@@ -831,6 +848,11 @@ exports.participantsely_to_pmd = onDocumentWritten("/participants ely/{docid}",a
   let newDoc = change.data.after.data()
   let docid = change.data.after.id
   console.log("docid as profileid",docid);
+
+  if (JSON.stringify(oldDoc) === JSON.stringify(newDoc)) {
+    return null;
+  }
+
   let noChanges = true
   if([null,undefined].includes(oldDoc)){
     noChanges = false
