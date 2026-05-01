@@ -297,6 +297,8 @@ exports.notifyMobileApp = onDocumentCreated({
               type: notificationType,
               click_action: "FLUTTER_NOTIFICATION_CLICK",
               recordid: snapshot.data.id,
+              landingpage: notificationData["landingpage"] || "",
+              sticky: String(notificationData["sticky"] || false),
               ...sanitizeDataPayload(metaData),
               // ...sanitizeDataPayload(notificationData),
             },
@@ -3682,9 +3684,10 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
+    let activeworkshop = (await data["workshopref"].get()).data()["active"];
     var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
     // var url =  commonService.slackDevTest;
-    if (url != null) {
+    if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
       var formUrl = commonService.production 
       ? `https://breakthroughs.app/formtemplate?id=${formid}&type=form&patchdata=formsByClient%2F${docid}`
@@ -4383,7 +4386,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
       const profile = await getProfileData(newData.profileid);
       if (!profile) return;
       // if (!newData['profileid']) {
-      //   console.log("profileid not found");
+      //   console.log("profileid not found"); 
       //   return;
       // }
       // const profileSnap = await admin.firestore()

@@ -1,7 +1,9 @@
 const commonService = require('./service');
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require('firebase-admin');
 const { Buffer } = require('buffer');
+const axios = require('axios');
 
 exports.workshopconfiguration = onDocumentUpdated(
   {
@@ -94,3 +96,146 @@ exports.workshopconfiguration = onDocumentUpdated(
     console.error("Error:", error);
   }
 });
+async function getProfileData(profileId) {
+  if (!profileId) {
+    console.log("No profileId provided");
+    return null;
+  }
+  const db = admin.firestore();
+  let profileSnap = await db.collection("profile_data").doc(profileId).get();
+  if (profileSnap.exists) {
+    return profileSnap.data();
+  }
+  let newUserSnap = await db.collection("new_user_data").doc(profileId).get();
+  if (newUserSnap.exists) {
+    console.log("newUserSnap console",newUserSnap);
+    // const data = newUserSnap.data()
+    // data['number'] = data['phonenumber']
+    return newUserSnap.data();
+  }
+
+  console.log("loggg", profileId);
+  return null;
+}
+async function sendWatiWorkshopMessage({ profileID, profileName, workshopName, workshopId, message }) {
+  var apikey = null;
+  var serverid = null;
+
+  await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    if (wati.exists) {
+      const watiData = wati.data();
+      apikey = watiData['apikey'];
+      serverid = watiData['serverid'];
+    }
+  });
+
+  const WATI_BASE_URL = `https://live-mt-server.wati.io/${serverid}`;
+  const WATI_API_TOKEN = apikey;
+
+  const workshopurl = commonService.production
+    ? `https://eiflix.com/workshop/${workshopId}`
+    : `https://eiflix-workshop.web.app/workshop/${workshopId}`;
+
+  const profileData = (await admin.firestore().collection("profile_data").doc(profileID).get()).data();
+  const phonenumber = profileData['number'] ?? profileData['phonenumber'];
+
+  const endpoint = `${WATI_BASE_URL}/api/v1/sendTemplateMessage?whatsappNumber=${phonenumber}`;
+  const headers = {
+    'Authorization': `Bearer ${WATI_API_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+  const data = {
+    template_name: 'vantage__poin_confirmation_message',
+    broadcast_name: 'Workshop Evergreen',
+    parameters: [
+      { name: 'name', value: profileName || '' },
+      { name: 'message', value: workshopName },
+      { name: '1', value: message },
+      { name: '2', value: workshopurl },
+      { name: '3', value: 'https://breakthroughs.app/home' },
+    ]
+  };
+
+  console.log("endpoint", endpoint);
+  console.log("data", data);
+
+  const response = await axios.post(endpoint, data, { headers });
+  console.log('Message sent successfully:', response.data);
+  return response.data;
+}
+
+exports.workshopautocommunicationschedule = onSchedule({schedule : "00 15 * * *", region: "asia-south1", timeZone: "Asia/Kolkata"},async (context)=>{
+  try {
+    console.log('started');
+    const snapshot = await admin.firestore().collection("workshopconfiguration").where('evergreenWorkshop','==',true).get();
+    let activeWorkshops = [];
+    for (let i = 0; i < snapshot.docs.length; i++) {
+      const doc = snapshot.docs[i];
+      const data = doc.data()
+      if (data['active'] == true || data['testmode'] == true) {
+        activeWorkshops.push ({
+          id:doc.id,
+          ref:doc.ref,
+          evergreenMeta:data['evergreenWorkshopMeta'],
+          workshopName : data['detailpage']['title'],
+          ...data
+        });
+      }
+    }
+    if (activeWorkshops.length === 0) return null;
+    console.log(activeWorkshops,'activeWorkshops console');
+    for (let i = 0; i < activeWorkshops.length; i++) {
+      const workshop = activeWorkshops[i];
+      const workshopName = workshop.workshopName ?? '';
+      const workshopId = workshop.id ?? '';
+      const workshopDays = workshop.evergreenMeta?.workshopDays;
+      const dailyCommunication = workshop.evergreenMeta?.dailyCommunication;
+      if (!workshopDays || !dailyCommunication) continue;
+      const participantSnapshot = await admin.firestore().collection("participant workshop").where('workshopref','==',workshop['ref']).get();
+      for (let j = 0; j < participantSnapshot.docs.length; j++) {
+        const participantDoc = participantSnapshot.docs[j];
+        const participantData = participantDoc.data()
+        const created = participantData['created']?.toDate?.();
+        if(!created) continue;
+        const profileID = participantData['profileid'];
+        if (!profileID) continue;
+        const now = new Date()
+        const diffTime = now - created;
+        const dayNumber = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        console.log(dayNumber,'workshopDays calc console ')
+        if (dayNumber < workshopDays) {
+          // const message = dailyCommunication[dayNumber];
+          const message = dailyCommunication[String(dayNumber)];
+          if (!message) continue;
+          console.log(
+            "Workshop:", workshop.id,
+            "User:", participantDoc.id,
+            "Day:", dayNumber
+          );
+          console.log("Message:", message);
+          await commonService.saveNotificationRecord({
+            title: workshopName || "Workshop Update",
+            message: message || '',
+            subtitle: message || null,
+            date: admin.firestore.FieldValue.serverTimestamp(),
+            landingpage: null,
+            logged: false,
+            profileid: [profileID],
+            sticky: false,
+            notificationtype: "ahupdate",
+            notificationimage: null,
+            metadata: {
+              workshopId: workshop.id,
+              day: dayNumber
+            }
+          });
+          const profileData = (await admin.firestore().collection("profile_data").doc(profileID).get()).data();
+          const profileName = profileData["name"];
+          await sendWatiWorkshopMessage({ profileID, profileName, workshopName, workshopId, message });
+        }
+      }     
+    }
+  } catch (error) {
+    console.error(error,'Error')
+  }
+})
