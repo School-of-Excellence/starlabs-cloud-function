@@ -354,21 +354,35 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     try {
       await admin.firestore().collection("participant metadata").doc(profileid).set(newData, { merge: true });
 
-      let webhookUrl = "";
+      let CrmWebhookUrl = "";
+      let WatsonWebhookUrl = "";
+
       if (commonService.production) {
-        webhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+        CrmWebhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateSubscriptionStatus";
       } else {
-        webhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+        CrmWebhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateSubscriptionStatus";
       }
 
       try {
-        await axios.post(webhookUrl, {
+        await axios.post(CrmWebhookUrl, {
           profileid: profileid,
           ...newData
         });
-        console.log("Webhook sent successfully");
+        console.log("SalesCRM Webhook sent successfully");
       } catch (webhookError) {
-        console.error("Webhook failed:", webhookError.message);
+        console.error("SalesCRM Webhook failed:", webhookError.message);
+      }
+
+      try {
+        await axios.post(WatsonWebhookUrl, {
+          profileid: profileid,
+          ...newData
+        });
+        console.log("Watson Webhook sent successfully");
+      } catch (webhookError) {
+        console.error("Watson Webhook failed:", webhookError.message);
       }
     } catch (err) {
       await throwParticipantMetaDataException({
