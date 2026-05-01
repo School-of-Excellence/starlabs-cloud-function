@@ -29,6 +29,8 @@ exports.profiledata_to_participantmetadata = onDocumentWritten("profile_data/{id
       olddoc['countrycode'] != newdoc['countrycode'] || 
       olddoc['testuser'] != newdoc['testuser'] || 
       olddoc['participantmode'] != newdoc['participantmode'] || 
+      olddoc['profile'] != newdoc['profile'] || 
+      olddoc['profileimg'] != newdoc['profileimg'] || 
       olddoc['dateofbirth'] != (newdoc['dateofbirth'] != undefined && newdoc['dateofbirth'] != null ? newdoc['dateofbirth'].toDate().toISOString() : null)
     ){
       console.log("function started to update number,email,name");
@@ -51,6 +53,29 @@ exports.profiledata_to_participantmetadata = onDocumentWritten("profile_data/{id
       }).then(() => {
         console.log("updated in participant metadata",newdoc['profileid']);
       })
+
+      let WatsonWebhookUrl = "";
+
+      if (commonService.production) {
+        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateParticipantProfile";
+      } else {
+        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateParticipantProfile";
+      }
+
+      try {
+        await axios.post(WatsonWebhookUrl, {
+          profileid: data['profileid'],
+          type: 'profile',
+          profileimg: ![null, undefined].includes(data['profileimg'])
+            ? data['profileimg']
+            : ![null, undefined].includes(data['profile'])
+              ? data['profile']
+              : null,
+        });
+        console.log("Watson Webhook sent successfully");
+      } catch (webhookError) {
+        console.error("Watson Webhook failed:", webhookError.message);
+      }
 
     }else{
       console.log("this function is to update number,email,name,testuser,participantmode,dateofbirth no change in these field");
@@ -359,10 +384,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
 
       if (commonService.production) {
         CrmWebhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
-        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateSubscriptionStatus";
+        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateParticipantProfile";
       } else {
         CrmWebhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
-        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateSubscriptionStatus";
+        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateParticipantProfile";
       }
 
       try {
@@ -377,6 +402,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
 
       try {
         await axios.post(WatsonWebhookUrl, {
+          type: 'subscription',
           profileid: profileid,
           ...newData
         });
