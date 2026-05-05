@@ -300,9 +300,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const snap = await admin.firestore().collection('participantjourneyproduct').where('profileid', '==', profileid).get();
     var journeyProductProfile = snap.docs.map(e => e.data());
 
-    const activeJourneyList = journeyProductProfile.filter(e => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
-    const nullJourneyList = journeyProductProfile.filter(e => [null].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
-    const cancelledJourneyList = journeyProductProfile.filter(e => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
+    const activeJourneyList = journeyProductProfile.filter((e) => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
+    const nullJourneyList = journeyProductProfile.filter((e) => [null].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
+    const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
+    const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
 
     const newData = {
       activejourney: null,
@@ -320,10 +321,13 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     let completedjourney = [];
     const cancelledJourney = [...cancelledJourneyList];
 
-    if (['banned', 'late'].includes(participantdashboardData['customerstatus'])) {
-      newData.customerstatus = participantdashboardData['customerstatus'];
+    if (["banned", "late"].includes(participantdashboardData["customerstatus"])) {
+      newData.customerstatus = participantdashboardData["customerstatus"];
+    } else if (nullJourneyList.length > 0 || closedLastJourneyList.length > 0) {
+      newData.customerstatus = "none";
+      newData["participantmode"] = null;
     } else if (activeJourneyList.length != 0) {
-      activeJourneyList.forEach(journeyElement => {
+      activeJourneyList.forEach((journeyElement) => {
         if (["initiated", "ongoing"].includes(journeyElement["journeystatus"])) {
           ongoingJourney.push(journeyElement);
         } else if (journeyElement["journeystatus"] == "completed") {
@@ -332,10 +336,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       });
 
       if (ongoingJourney.length != 0) {
-        ongoingJourney = ongoingJourney.sort((a, b) => b["subscriptionend"]?.toDate() - a["subscriptionend"]?.toDate());
+        ongoingJourney = ongoingJourney.sort((a, b) => b["subscriptionend"]?.toDate() - a["subscriptionend"]?.toDate(),);
         const currentDate = new Date();
-        const currentOngoing = ongoingJourney.find(e => e["journeystatus"] == "ongoing");
-        const currentInitiated = ongoingJourney.find(e => e["journeystatus"] == "initiated");
+        const currentOngoing = ongoingJourney.find((e) => e["journeystatus"] == "ongoing",);
+        const currentInitiated = ongoingJourney.find((e) => e["journeystatus"] == "initiated",);
 
         const liveJourney = currentOngoing ?? currentInitiated ?? ongoingJourney[0];
         const hasSubscription = liveJourney["subscriptionend"] && liveJourney["subscriptionend"].toDate() >= currentDate;
@@ -349,31 +353,31 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
             newData.subscriptionend = liveJourney["subscriptionend"]?.toDate() ?? null;
           } else {
             newData.customerstatus = "none";
-            newData['participantmode'] = null;
+            newData["participantmode"] = null;
           }
         } else if (liveJourney && !hasSubscription) {
           newData.customerstatus = "none";
-          newData['participantmode'] = null;
+          newData["participantmode"] = null;
         }
       } else if (completedjourney.length == 1 && ongoingJourney.length == 0 && cancelledJourney.length == 0) {
         newData.customerstatus = "non active";
-        newData['participantmode'] = 'Exploration Mode';
-        newData['lastcompletedjourney'] = completedjourney[0]["journeyref"]?.id ?? null;
-        newData['lastsubscriptionstart'] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
-        newData['lastsubscriptionend'] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
+        newData["participantmode"] = "Exploration Mode";
+        newData["lastcompletedjourney"] = completedjourney[0]["journeyref"]?.id ?? null;
+        newData["lastsubscriptionstart"] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
+        newData["lastsubscriptionend"] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
       } else {
         newData.customerstatus = "none";
-        newData['participantmode'] = null;
+        newData["participantmode"] = null;
       }
-    } else if (cancelledJourney.length == 1 && ongoingJourney.length == 0 && completedjourney.length == 0 && nullJourneyList.length == 0) {
+    } else if (cancelledJourney.length == 1 && ongoingJourney.length == 0 && completedjourney.length == 0) {
       newData.customerstatus = "discontinued";
-      newData['participantmode'] = null;
-      newData['lastsubscribedjourney'] = cancelledJourney[0]["journeyref"]?.id ?? null;
-      newData['lastsubscriptionstart'] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
-      newData['lastsubscriptionend'] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
+      newData["participantmode"] = null;
+      newData["lastsubscribedjourney"] = cancelledJourney[0]["journeyref"]?.id ?? null;
+      newData["lastsubscriptionstart"] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
+      newData["lastsubscriptionend"] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
     } else {
       newData.customerstatus = "none";
-      newData['participantmode'] = null;
+      newData["participantmode"] = null;
     }
 
     try {
