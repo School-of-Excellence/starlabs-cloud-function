@@ -211,6 +211,7 @@ exports.workshopenrolledwatti = communication.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
+exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
 
 //product enquiry
 exports.productenquiryfromeiflix = communication.productenquiryfromeiflix
