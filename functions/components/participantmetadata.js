@@ -300,10 +300,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const snap = await admin.firestore().collection('participantjourneyproduct').where('profileid', '==', profileid).get();
     var journeyProductProfile = snap.docs.map(e => e.data());
 
-    const activeJourneyList = journeyProductProfile.filter((e) => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
-    const nullJourneyList = journeyProductProfile.filter((e) => [null].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
-    const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
-    const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]),);
+    const activeJourneyList = journeyProductProfile.filter((e) => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const nullJourneyList = journeyProductProfile.filter((e) => [null].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
     const newData = {
       activejourney: null,
