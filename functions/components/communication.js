@@ -1989,7 +1989,14 @@ async function sendWatiBroadCast(watiarchiveid) {
   }
 
   // ── 3. Load profile_data (always needed for numbermap lookup) ────────
-  await admin.firestore().collection("profile_data").orderBy("name", "asc").get().then((profileSnap) => {
+  var query = null;
+  if(broadCastData['profileid'].length >= 30){
+    query = admin.firestore().collection("profile_data").where('profileid','in',broadCastData['profileid'])
+  }else{
+    query = admin.firestore().collection("profile_data").orderBy("name", "asc")
+  }
+
+  await query.get().then((profileSnap) => {
     profileSnap.docs.forEach(doc => {
       mapProfile[doc.id] = doc.data();
     });
@@ -2010,12 +2017,24 @@ async function sendWatiBroadCast(watiarchiveid) {
   };
 
   let batchList = [];
+  let numbersWithMissingCountryCode = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    let rawCountryCode = profile['countrycode'];
+    if (!rawCountryCode) {
+      console.warn(`Missing country code for number ${number} (profileId: ${profileId})`);
+      numbersWithMissingCountryCode.push(number);
+      continue; // Skip this number — will be added to failedNumbers later
+    }
+
+    // Strip leading + if present, then prepend to number
+    const cleanedCountryCode = rawCountryCode.toString().replace(/^\+/, '').trim();
+    const formattedNumber = cleanedCountryCode + number.toString().trim();
 
     // Build custom params using the new parameterConfig
     const customParams = buildCustomParams(
@@ -2039,7 +2058,7 @@ async function sendWatiBroadCast(watiarchiveid) {
     }
 
     broadCast['receivers'].push({
-      whatsappNumber: number,
+      whatsappNumber: formattedNumber,
       customParams: customParams
     });
   }
@@ -2052,7 +2071,7 @@ async function sendWatiBroadCast(watiarchiveid) {
   console.log("First batch sample:", JSON.stringify(batchList[0]?.receivers?.[0]));
 
   let sentNumbers = [];
-  let failedNumbers = [];
+  let failedNumbers = [...numbersWithMissingCountryCode];
 
   // ── 6. Send all batches ───────────────────────────────────────────────
   for (let b = 0; b < batchList.length; b++) {
@@ -2116,28 +2135,6 @@ async function sendWatiBroadCast(watiarchiveid) {
   }).catch((error)=>{
     console.log('Error while updating wati Archive', error);
   });
-
-  // await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //   status: 'sent',
-  //   sentAt: admin.firestore.FieldValue.serverTimestamp(),
-  //   batchCount: batchList.length,
-  //   totalSent: sentNumbers.length,
-  //   totalFailed: failedNumbers.length,
-  //   sent: admin.firestore.FieldValue.arrayUnion(...(sentNumbers.length ? sentNumbers : ['__placeholder__'])),
-  //   failed: admin.firestore.FieldValue.arrayUnion(...(failedNumbers.length ? failedNumbers : ['__placeholder__'])),
-  // });
-
-  // // Remove placeholder if no items existed
-  // if (sentNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     sent: admin.firestore.FieldValue.delete()
-  //   });
-  // }
-  // if (failedNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     failed: admin.firestore.FieldValue.delete()
-  //   });
-  // }
 
   return {
     success: true,
@@ -2217,11 +2214,6 @@ function buildCustomParams(parameterConfig, profile, metadata, phoneNumber, exce
   return customParams;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// loadParticipantMetadata
-// Fetches participant metadata docs for all profileIds in the broadcast.
-// Populates mapMetadata[profileId] = { field: value, ... }
-// ────────────────────────────────────────────────────────────────────────────
 async function loadParticipantMetadata(profileIds, mapMetadata) {
   if (!profileIds || profileIds.length === 0) return;
 
@@ -2251,12 +2243,7 @@ async function loadParticipantMetadata(profileIds, mapMetadata) {
   console.log("Loaded metadata for", Object.keys(mapMetadata).length, "profiles");
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// processExcelFile
-// Downloads the Excel from Firebase Storage URL, parses it, and returns a
-// map of { cleanedPhoneNumber: { columnHeader: cellValue, ... } }
-// excelHeaders is passed from archive so we know the expected columns.
-// ────────────────────────────────────────────────────────────────────────────
+
 async function processExcelFile(downloadUrl, savedHeaders) {
   try {
     console.log("Fetching Excel file from:", downloadUrl);
