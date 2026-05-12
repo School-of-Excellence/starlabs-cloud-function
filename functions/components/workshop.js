@@ -247,45 +247,45 @@ exports.workshopenrolledwatti = onDocumentCreated(
           ]
         };
         try {
-          const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
-          // const postmarktemplateId = categorybased ? '43859890' : '42135513';
-          await commonService.postmarkClient.sendEmailWithTemplate({
-            From: "starlabs@excellenceinstallation.com",
-            To: profile['email'],
-            TemplateAlias: templateAlias,
-            TemplateModel: {
-              name: profile['name'],
-              email: profile['email'],
-              subject: mailsubject,
-              workshopName:workshopName,
-              maildescription : maildescription,
-              mailliveCallText : mailliveCallText,
-              workshopurl : workshopurl,
-            },
-          });
-
-          // var dataModel = {
-          // name: profile['name'],
-          // email: profile['email'],
-          // subject: mailsubject,
-          // workshopName:workshopName,
-          // maildescription : maildescription,
-          // mailliveCallText : mailliveCallText,
-          // workshopurl : workshopurl,
-          // }
-          // await commonService.createEmailArchiveDocument({
-          //   emailData : dataModel,
-          //   datamodel : dataModel,
-          //   attachments : [],
-          //   emailTo : [profile['email']],
-          //   emailMap : [{[profile['email']] : }],
-          //   fileURL : '',
-          //   from:'starlabs@excellenceinstallation.com',
-          //   notes : '',
-          //   profileId : [],
-          //   postmarkTemplateId: postmarktemplateId,
-          //   templateAlias:templateAlias
+          const templateAlias = categorybased ? "WorkshopEnrolledMessage1" : "WorkshopEnrolledMessage";
+          const postmarktemplateId = categorybased ? '43859890' : '42135513';
+          // await commonService.postmarkClient.sendEmailWithTemplate({
+          //   From: "starlabs@excellenceinstallation.com",
+          //   To: profile['email'],
+          //   TemplateAlias: templateAlias,
+          //   TemplateModel: {
+          //     name: profile['name'],
+          //     email: profile['email'],
+          //     subject: mailsubject,
+          //     workshopName:workshopName,
+          //     maildescription : maildescription,
+          //     mailliveCallText : mailliveCallText,
+          //     workshopurl : workshopurl,
+          //   },
           // });
+
+          var dataModel = {
+          name: profile['name'],
+          email: profile['email'],
+          subject: mailsubject,
+          workshopName:workshopName,
+          maildescription : maildescription,
+          mailliveCallText : mailliveCallText,
+          workshopurl : workshopurl,
+          }
+          await commonService.createEmailArchiveDocument({
+            emailData : dataModel,
+            datamodel : dataModel,
+            attachments : [],
+            emailTo : [profile['email']],
+            emailMap : [{[profile['email']] : newData.profileid}],
+            fileURL : '',
+            from:'starlabs@excellenceinstallation.com',
+            notes : '',
+            profileId : [newData.profileid],
+            postmarkTemplateId: postmarktemplateId,
+            templateAlias:templateAlias
+          });
 
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);

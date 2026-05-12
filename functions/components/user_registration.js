@@ -458,9 +458,12 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
   const email = data["email"];
   var referralcode = data["refferedby"];
   const referredProfileId = data["refferedprofile"];
+  const staticrefcode = await admin.firestore().collection("static meta data").doc('Subscriber Code').get();
+  const referralcodesubscriber = staticrefcode.exists ? staticrefcode.data()["referralcode"] : null;
   
   let referredProfileName;
-  if (referralcode === 'AH2025') {
+  // if (referralcode === 'AH2025') {
+  if (referralcode === referralcodesubscriber) {
     referredProfileName = "SUBSCRIBER";
   } else if (referredProfileId) {
     const referredDoc = await admin.firestore().collection("profile_data").doc(referredProfileId).get();
@@ -469,8 +472,18 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     referredProfileName = "Unknown";
   }
 
-  const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+  // const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+  let url;
 
+  if (referralcode === referralcodesubscriber) {
+    url = commonService.production
+      ? commonService.slackWorkshopsubscribers
+      : commonService.slackDevTest;
+  } else {
+    url = commonService.production
+      ? commonService.slackWorkshopQandA
+      : commonService.slackDevTest;
+  }
   if (url) {
     const webhook = new commonService.IncomingWebhook(url);
 
@@ -488,7 +501,8 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     // 🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
     // `;
     let message;
-    if (referralcode === 'AH2025') {
+    // if (referralcode === 'AH2025') {
+    if (referralcode === referralcodesubscriber) {
       message = `
       🚀 *${name}* just joined EiFlix as a *SUBSCRIBER*! 🌱
       `;
