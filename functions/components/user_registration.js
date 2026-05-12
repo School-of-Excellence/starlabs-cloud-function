@@ -100,7 +100,6 @@ exports.createProfile_registeredUser = onDocumentCreated({document:"user_data/{d
 		})
 	})
 });
-
 //for workshop
 exports.sendEmailOTPNewUsers = onCall(
   {
@@ -145,26 +144,26 @@ exports.sendEmailOTPNewUsers = onCall(
         email: email,
         validity: '5 minutes',
       };
-      // await commonService.postmarkClient.sendEmailWithTemplate({
-      //   From: "starlabs@excellenceinstallation.com",
-      //   To: email,
-      //   TemplateAlias: "register-otp-newuser",
-      //   TemplateModel: templateData,
-      // });
-
-      await commonService.createEmailArchiveDocument({
-        emailData: templateData,
-        datamodel: templateData,
-        attachments: [],
-        emailTo: [email],
-        emailMap: { [email]: null },
-        fileURL: '',
-        from: 'starlabs@excellenceinstallation.com',
-        notes: '',
-        profileId: [null],
-        postmarkTemplateId: '42066392',
-        templateAlias: 'register-otp-newuser'
+      await commonService.postmarkClient.sendEmailWithTemplate({
+        From: "starlabs@excellenceinstallation.com",
+        To: email,
+        TemplateAlias: "register-otp-newuser",
+        TemplateModel: templateData,
       });
+
+      // await commonService.createEmailArchiveDocument({
+      //   emailData: templateData,
+      //   datamodel: templateData,
+      //   attachments: [],
+      //   emailTo: [email],
+      //   emailMap: { [email]: null },
+      //   fileURL: '',
+      //   from: 'starlabs@excellenceinstallation.com',
+      //   notes: '',
+      //   profileId: [null],
+      //   postmarkTemplateId: '42066392',
+      //   templateAlias: 'register-otp-newuser'
+      // });
 
       console.log(`OTP sent to ${email}: ${otpDoc.id}`);
       return {
@@ -256,32 +255,32 @@ exports.verifyEmailOTPNewUsers = onCall(
           userId: userRecord.uid,
         });
         try {
-          // await commonService.postmarkClient.sendEmailWithTemplate({
-          //   From: "starlabs@excellenceinstallation.com",
-          //   To: otpData.email,
-          //   TemplateAlias: "welcome-email",
-          //   TemplateModel: {
-          //     name: otpData.name,
-          //     email: otpData.email,
-          //   },
-          // });
+          await commonService.postmarkClient.sendEmailWithTemplate({
+            From: "starlabs@excellenceinstallation.com",
+            To: otpData.email,
+            TemplateAlias: "welcome-email",
+            TemplateModel: {
+              name: otpData.name,
+              email: otpData.email,
+            },
+          });
           const templateModel = {
             name: otpData.name,
             email: otpData.email,
           }
-          await commonService.createEmailArchiveDocument({
-            emailData: templateModel,
-            datamodel: templateModel,
-            attachments: [],
-            emailTo: [otpData.email],
-            emailMap: { [otpData.email]: profileid },
-            fileURL: '',
-            from: 'starlabs@excellenceinstallation.com',
-            notes: '',
-            profileId: [profileid],
-            postmarkTemplateId: '42066826',
-            templateAlias: 'welcome-email'
-          });
+          // await commonService.createEmailArchiveDocument({
+          //   emailData: templateModel,
+          //   datamodel: templateModel,
+          //   attachments: [],
+          //   emailTo: [otpData.email],
+          //   emailMap: { [otpData.email]: profileid },
+          //   fileURL: '',
+          //   from: 'starlabs@excellenceinstallation.com',
+          //   notes: '',
+          //   profileId: [profileid],
+          //   postmarkTemplateId: '42066826',
+          //   templateAlias: 'welcome-email'
+          // });
 
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
@@ -413,26 +412,26 @@ exports.resendEmailOTPNewUsers = onCall(
         validity: '5 minutes',
       };
       
-      // await commonService.postmarkClient.sendEmailWithTemplate({
-      //   From: "starlabs@excellenceinstallation.com",
-      //   To: email,
-      //   TemplateAlias: "register-otp-newuser",
-      //   TemplateModel: templateData,
-      // });
-      
-      await commonService.createEmailArchiveDocument({
-        emailData: templateData,
-        datamodel: templateData,
-        attachments: [],
-        emailTo: [email],
-        emailMap: { [email]: null },
-        fileURL: '',
-        from: 'starlabs@excellenceinstallation.com',
-        notes: '',
-        profileId: [null],
-        postmarkTemplateId: '42066392',
-        templateAlias: 'register-otp-newuser'
+      await commonService.postmarkClient.sendEmailWithTemplate({
+        From: "starlabs@excellenceinstallation.com",
+        To: email,
+        TemplateAlias: "register-otp-newuser",
+        TemplateModel: templateData,
       });
+      
+      // await commonService.createEmailArchiveDocument({
+      //   emailData: templateData,
+      //   datamodel: templateData,
+      //   attachments: [],
+      //   emailTo: [email],
+      //   emailMap: { [email]: null },
+      //   fileURL: '',
+      //   from: 'starlabs@excellenceinstallation.com',
+      //   notes: '',
+      //   profileId: [null],
+      //   postmarkTemplateId: '42066392',
+      //   templateAlias: 'register-otp-newuser'
+      // });
 
       console.log(`OTP resent to ${email}: ${otpDoc.id}`);
       return {
@@ -459,9 +458,12 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
   const email = data["email"];
   var referralcode = data["refferedby"];
   const referredProfileId = data["refferedprofile"];
+  const staticrefcode = await admin.firestore().collection("static meta data").doc('Subscriber Code').get();
+  const referralcodesubscriber = staticrefcode.exists ? staticrefcode.data()["referralcode"] : null;
   
   let referredProfileName;
-  if (referralcode === 'AH2025') {
+  // if (referralcode === 'AH2025') {
+  if (referralcode === referralcodesubscriber) {
     referredProfileName = "SUBSCRIBER";
   } else if (referredProfileId) {
     const referredDoc = await admin.firestore().collection("profile_data").doc(referredProfileId).get();
@@ -470,8 +472,18 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     referredProfileName = "Unknown";
   }
 
-  const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+  // const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+  let url;
 
+  if (referralcode === referralcodesubscriber) {
+    url = commonService.production
+      ? commonService.slackWorkshopsubscribers
+      : commonService.slackDevTest;
+  } else {
+    url = commonService.production
+      ? commonService.slackWorkshopQandA
+      : commonService.slackDevTest;
+  }
   if (url) {
     const webhook = new commonService.IncomingWebhook(url);
 
@@ -489,7 +501,8 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     // 🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
     // `;
     let message;
-    if (referralcode === 'AH2025') {
+    // if (referralcode === 'AH2025') {
+    if (referralcode === referralcodesubscriber) {
       message = `
       🚀 *${name}* just joined EiFlix as a *SUBSCRIBER*! 🌱
       `;

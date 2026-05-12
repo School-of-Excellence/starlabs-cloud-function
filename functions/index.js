@@ -207,7 +207,7 @@ exports.workshopFormsSubmission = communication.workshopFormsSubmission
 exports.workshopAssignment = communication.workshopAssignment
 
 //workshop communication
-exports.workshopenrolledwatti = communication.workshopenrolledwatti
+exports.workshopenrolledwatti = workshop.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
