@@ -1410,12 +1410,14 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
     const mailOptions = {
       From:          archiveData['from'] || "support@intl.soexcellence.com",
       To:            emailId,
+      Cc: archiveData['cc'] || null,
+      Bcc: archiveData['bcc'] || null,
       TemplateAlias: archiveData['templateid'],
       TemplateModel: templateModel,
       Tag:           archiveData['broadcastname'],
       Attachments:   postmarkAttachments,
     };
- 
+    
     // Batch in groups of 400 (Postmark limit)
     if (i !== 0 && i % 400 === 0) {
       batchEmailList.push(emailList);
@@ -1487,8 +1489,29 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
           });
         }
       }
- 
-      await sentLogBatch.commit().catch(err => console.error("Error writing email logs:", err));
+      
+      await sentLogBatch.commit().then(async()=>{
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: true
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      }).catch(async (err) =>  {
+        console.error("Error writing email logs:", err);
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: false
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      });
  
     } catch (error) {
       console.error('Error sending email batch:', error);
