@@ -29,6 +29,8 @@ exports.profiledata_to_participantmetadata = onDocumentWritten("profile_data/{id
       olddoc['countrycode'] != newdoc['countrycode'] || 
       olddoc['testuser'] != newdoc['testuser'] || 
       olddoc['participantmode'] != newdoc['participantmode'] || 
+      olddoc['profile'] != newdoc['profile'] || 
+      olddoc['profileimg'] != newdoc['profileimg'] || 
       olddoc['dateofbirth'] != (newdoc['dateofbirth'] != undefined && newdoc['dateofbirth'] != null ? newdoc['dateofbirth'].toDate().toISOString() : null)
     ){
       console.log("function started to update number,email,name");
@@ -51,6 +53,29 @@ exports.profiledata_to_participantmetadata = onDocumentWritten("profile_data/{id
       }).then(() => {
         console.log("updated in participant metadata",newdoc['profileid']);
       })
+
+      let WatsonWebhookUrl = "";
+
+      if (commonService.production) {
+        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateParticipantProfile";
+      } else {
+        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateParticipantProfile";
+      }
+
+      try {
+        await axios.post(WatsonWebhookUrl, {
+          profileid: data['profileid'],
+          type: 'profile',
+          profileimg: ![null, undefined].includes(data['profileimg'])
+            ? data['profileimg']
+            : ![null, undefined].includes(data['profile'])
+              ? data['profile']
+              : null,
+        });
+        console.log("Watson Webhook sent successfully");
+      } catch (webhookError) {
+        console.error("Watson Webhook failed:", webhookError.message);
+      }
 
     }else{
       console.log("this function is to update number,email,name,testuser,participantmode,dateofbirth no change in these field");
@@ -275,9 +300,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const snap = await admin.firestore().collection('participantjourneyproduct').where('profileid', '==', profileid).get();
     var journeyProductProfile = snap.docs.map(e => e.data());
 
-    const activeJourneyList = journeyProductProfile.filter(e => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
-    const nullJourneyList = journeyProductProfile.filter(e => [null].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
-    const cancelledJourneyList = journeyProductProfile.filter(e => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ''].includes(e['journeyref']));
+    const activeJourneyList = journeyProductProfile.filter((e) => ["initiated", "ongoing", "completed"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const nullJourneyList = journeyProductProfile.filter((e) => [null].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
+    const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
     const newData = {
       activejourney: null,
@@ -295,10 +321,13 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     let completedjourney = [];
     const cancelledJourney = [...cancelledJourneyList];
 
-    if (['banned', 'late'].includes(participantdashboardData['customerstatus'])) {
-      newData.customerstatus = participantdashboardData['customerstatus'];
+    if (["banned", "late"].includes(participantdashboardData["customerstatus"])) {
+      newData.customerstatus = participantdashboardData["customerstatus"];
+    } else if (nullJourneyList.length > 0 || closedLastJourneyList.length > 0) {
+      newData.customerstatus = "none";
+      newData["participantmode"] = null;
     } else if (activeJourneyList.length != 0) {
-      activeJourneyList.forEach(journeyElement => {
+      activeJourneyList.forEach((journeyElement) => {
         if (["initiated", "ongoing"].includes(journeyElement["journeystatus"])) {
           ongoingJourney.push(journeyElement);
         } else if (journeyElement["journeystatus"] == "completed") {
@@ -307,10 +336,10 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       });
 
       if (ongoingJourney.length != 0) {
-        ongoingJourney = ongoingJourney.sort((a, b) => b["subscriptionend"]?.toDate() - a["subscriptionend"]?.toDate());
+        ongoingJourney = ongoingJourney.sort((a, b) => b["subscriptionend"]?.toDate() - a["subscriptionend"]?.toDate(),);
         const currentDate = new Date();
-        const currentOngoing = ongoingJourney.find(e => e["journeystatus"] == "ongoing");
-        const currentInitiated = ongoingJourney.find(e => e["journeystatus"] == "initiated");
+        const currentOngoing = ongoingJourney.find((e) => e["journeystatus"] == "ongoing",);
+        const currentInitiated = ongoingJourney.find((e) => e["journeystatus"] == "initiated",);
 
         const liveJourney = currentOngoing ?? currentInitiated ?? ongoingJourney[0];
         const hasSubscription = liveJourney["subscriptionend"] && liveJourney["subscriptionend"].toDate() >= currentDate;
@@ -324,51 +353,66 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
             newData.subscriptionend = liveJourney["subscriptionend"]?.toDate() ?? null;
           } else {
             newData.customerstatus = "none";
-            newData['participantmode'] = null;
+            newData["participantmode"] = null;
           }
         } else if (liveJourney && !hasSubscription) {
           newData.customerstatus = "none";
-          newData['participantmode'] = null;
+          newData["participantmode"] = null;
         }
       } else if (completedjourney.length == 1 && ongoingJourney.length == 0 && cancelledJourney.length == 0) {
         newData.customerstatus = "non active";
-        newData['participantmode'] = 'Exploration Mode';
-        newData['lastcompletedjourney'] = completedjourney[0]["journeyref"]?.id ?? null;
-        newData['lastsubscriptionstart'] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
-        newData['lastsubscriptionend'] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
+        newData["participantmode"] = "Exploration Mode";
+        newData["lastcompletedjourney"] = completedjourney[0]["journeyref"]?.id ?? null;
+        newData["lastsubscriptionstart"] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
+        newData["lastsubscriptionend"] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
       } else {
         newData.customerstatus = "none";
-        newData['participantmode'] = null;
+        newData["participantmode"] = null;
       }
-    } else if (cancelledJourney.length == 1 && ongoingJourney.length == 0 && completedjourney.length == 0 && nullJourneyList.length == 0) {
+    } else if (cancelledJourney.length == 1 && ongoingJourney.length == 0 && completedjourney.length == 0) {
       newData.customerstatus = "discontinued";
-      newData['participantmode'] = null;
-      newData['lastsubscribedjourney'] = cancelledJourney[0]["journeyref"]?.id ?? null;
-      newData['lastsubscriptionstart'] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
-      newData['lastsubscriptionend'] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
+      newData["participantmode"] = null;
+      newData["lastsubscribedjourney"] = cancelledJourney[0]["journeyref"]?.id ?? null;
+      newData["lastsubscriptionstart"] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
+      newData["lastsubscriptionend"] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
     } else {
       newData.customerstatus = "none";
-      newData['participantmode'] = null;
+      newData["participantmode"] = null;
     }
 
     try {
       await admin.firestore().collection("participant metadata").doc(profileid).set(newData, { merge: true });
 
-      let webhookUrl = "";
+      let CrmWebhookUrl = "";
+      let WatsonWebhookUrl = "";
+
       if (commonService.production) {
-        webhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+        CrmWebhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+        WatsonWebhookUrl = "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateParticipantProfile";
       } else {
-        webhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+        CrmWebhookUrl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+        WatsonWebhookUrl = "https://us-central1-watson-test-19.cloudfunctions.net/updateParticipantProfile";
       }
 
       try {
-        await axios.post(webhookUrl, {
+        await axios.post(CrmWebhookUrl, {
           profileid: profileid,
           ...newData
         });
-        console.log("Webhook sent successfully");
+        console.log("SalesCRM Webhook sent successfully");
       } catch (webhookError) {
-        console.error("Webhook failed:", webhookError.message);
+        console.error("SalesCRM Webhook failed:", webhookError.message);
+      }
+
+      try {
+        await axios.post(WatsonWebhookUrl, {
+          type: 'subscription',
+          profileid: profileid,
+          ...newData
+        });
+        console.log("Watson Webhook sent successfully");
+      } catch (webhookError) {
+        console.error("Watson Webhook failed:", webhookError.message);
       }
     } catch (err) {
       await throwParticipantMetaDataException({

@@ -1991,7 +1991,14 @@ async function sendWatiBroadCast(watiarchiveid) {
   }
 
   // ── 3. Load profile_data (always needed for numbermap lookup) ────────
-  await admin.firestore().collection("profile_data").orderBy("name", "asc").get().then((profileSnap) => {
+  var query = null;
+  if(broadCastData['profileid'].length >= 30){
+    query = admin.firestore().collection("profile_data").where('profileid','in',broadCastData['profileid'])
+  }else{
+    query = admin.firestore().collection("profile_data").orderBy("name", "asc")
+  }
+
+  await query.get().then((profileSnap) => {
     profileSnap.docs.forEach(doc => {
       mapProfile[doc.id] = doc.data();
     });
@@ -2012,12 +2019,24 @@ async function sendWatiBroadCast(watiarchiveid) {
   };
 
   let batchList = [];
+  let numbersWithMissingCountryCode = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    let rawCountryCode = profile['countrycode'];
+    if (!rawCountryCode) {
+      console.warn(`Missing country code for number ${number} (profileId: ${profileId})`);
+      numbersWithMissingCountryCode.push(number);
+      continue; // Skip this number — will be added to failedNumbers later
+    }
+
+    // Strip leading + if present, then prepend to number
+    const cleanedCountryCode = rawCountryCode.toString().replace(/^\+/, '').trim();
+    const formattedNumber = cleanedCountryCode + number.toString().trim();
 
     // Build custom params using the new parameterConfig
     const customParams = buildCustomParams(
@@ -2041,7 +2060,7 @@ async function sendWatiBroadCast(watiarchiveid) {
     }
 
     broadCast['receivers'].push({
-      whatsappNumber: number,
+      whatsappNumber: formattedNumber,
       customParams: customParams
     });
   }
@@ -2054,7 +2073,7 @@ async function sendWatiBroadCast(watiarchiveid) {
   console.log("First batch sample:", JSON.stringify(batchList[0]?.receivers?.[0]));
 
   let sentNumbers = [];
-  let failedNumbers = [];
+  let failedNumbers = [...numbersWithMissingCountryCode];
 
   // ── 6. Send all batches ───────────────────────────────────────────────
   for (let b = 0; b < batchList.length; b++) {
@@ -2118,28 +2137,6 @@ async function sendWatiBroadCast(watiarchiveid) {
   }).catch((error)=>{
     console.log('Error while updating wati Archive', error);
   });
-
-  // await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //   status: 'sent',
-  //   sentAt: admin.firestore.FieldValue.serverTimestamp(),
-  //   batchCount: batchList.length,
-  //   totalSent: sentNumbers.length,
-  //   totalFailed: failedNumbers.length,
-  //   sent: admin.firestore.FieldValue.arrayUnion(...(sentNumbers.length ? sentNumbers : ['__placeholder__'])),
-  //   failed: admin.firestore.FieldValue.arrayUnion(...(failedNumbers.length ? failedNumbers : ['__placeholder__'])),
-  // });
-
-  // // Remove placeholder if no items existed
-  // if (sentNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     sent: admin.firestore.FieldValue.delete()
-  //   });
-  // }
-  // if (failedNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     failed: admin.firestore.FieldValue.delete()
-  //   });
-  // }
 
   return {
     success: true,
@@ -2219,11 +2216,6 @@ function buildCustomParams(parameterConfig, profile, metadata, phoneNumber, exce
   return customParams;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// loadParticipantMetadata
-// Fetches participant metadata docs for all profileIds in the broadcast.
-// Populates mapMetadata[profileId] = { field: value, ... }
-// ────────────────────────────────────────────────────────────────────────────
 async function loadParticipantMetadata(profileIds, mapMetadata) {
   if (!profileIds || profileIds.length === 0) return;
 
@@ -2253,12 +2245,7 @@ async function loadParticipantMetadata(profileIds, mapMetadata) {
   console.log("Loaded metadata for", Object.keys(mapMetadata).length, "profiles");
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// processExcelFile
-// Downloads the Excel from Firebase Storage URL, parses it, and returns a
-// map of { cleanedPhoneNumber: { columnHeader: cellValue, ... } }
-// excelHeaders is passed from archive so we know the expected columns.
-// ────────────────────────────────────────────────────────────────────────────
+
 async function processExcelFile(downloadUrl, savedHeaders) {
   try {
     console.log("Fetching Excel file from:", downloadUrl);
@@ -3636,10 +3623,24 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profile = await getProfileData(data["profileid"]);
     if (!profile) return;
     const profilename = profile["name"];
+    const workshopDoc = await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get();
+    const workshopData = workshopDoc.data();
+    const workshopname = workshopData["detailpage"]["title"];
+    const slackChannel = workshopData["workshopactivitychannel"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
-    var workshopname = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["detailpage"]["title"];
-
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // var workshopname = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["detailpage"]["title"];
+    // var slackChannel = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["workshopactivitychannel"];
+    let url;
+    if (slackChannel === 'workshop-subscriber-activity') {
+      url = commonService.production
+        ? commonService.slackWorkshopsubscribersactivity
+        : commonService.slackDevTest;
+    } else {
+      url = commonService.production
+        ? commonService.slackWorkshopQandA
+        : commonService.slackDevTest;
+    }
+    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
 
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -3685,8 +3686,27 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
     var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
+    // let activeworkshop = (await data["workshopref"].get()).data()["active"];
+    // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // const slackChannel = (await data["workshopref"].get()).data()["workshopactivitychannel"];
+    const workshopDoc = await data["workshopref"].get();
+    const workshopData = workshopDoc.data();
+    const workshopTitle = workshopData['detailpage']['title'] || "Unknown Workshop";
+    const activeworkshop = workshopData['active'] || false;
+    const slackChannel = workshopData['workshopactivitychannel'] || null;
+    let url;
+    if (slackChannel === 'workshop-subscriber-activity') {
+      url = commonService.production
+        ? commonService.slackWorkshopsubscribersactivity
+        : commonService.slackDevTest;
+    } else {
+      url = commonService.production
+        ? commonService.slackWorkshopQandA
+        : commonService.slackDevTest;
+    }
     // var url =  commonService.slackDevTest;
-    if (url != null) {
+    if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
       var formUrl = commonService.production 
       ? `https://breakthroughs.app/formtemplate?id=${formid}&type=form&patchdata=formsByClient%2F${docid}`
@@ -4370,149 +4390,7 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
   }
 });
 
-exports.workshopenrolledwatti = onDocumentCreated(
-  "workshop participant enrolled/{docid}",
-  async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) {
-      console.log("No data, exiting.");
-      return;
-    }
 
-    const newData = snapshot.data();
-
-    try {
-      const profile = await getProfileData(newData.profileid);
-      if (!profile) return;
-      // if (!newData['profileid']) {
-      //   console.log("profileid not found");
-      //   return;
-      // }
-      // const profileSnap = await admin.firestore()
-      //   .collection("profile_data")
-      //   .doc(newData['profileid'])
-      //   .get();
-
-      // if (!profileSnap.exists) {
-      //   console.log("Profile not found for:", newData['profileid']);
-      //   return;
-      // }
-
-      // const profile = profileSnap.data();
-      console.log("Profile console for mobile number",profile);
-      if (newData?.status === 'enrolled' || newData?.status === 'enrollednotstarted') {
-
-      var apikey = null;
-      var serverid = null;
-      await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
-        if(wati.exists) {
-          const watiData = wati.data()[commonService.eventWatiServerId];
-          apikey = watiData['watitoken'];
-          serverid = commonService.eventWatiServerId;
-        }
-      })
-
-        const WATI_BASE_URL = `https://live-mt-server.wati.io/${serverid}`;
-        const WATI_API_TOKEN = apikey;
-        let workshopName = "Workshop";
-        let messageText = "";
-        let workshopurl = "";
-        let mailsubject = "";
-        let maildescription = "";
-        let mailliveCallText = "";
-        let categorybased = false;
-        if (newData['workshopref']) {
-          const workshopSnap = await newData['workshopref'].get();
-          if (workshopSnap.exists) {
-            const workshopData = workshopSnap.data();
-            workshopName = workshopData?.detailpage?.title || "Workshop";
-            messageText = workshopData?.enrollwattimessage || "";
-            mailsubject = workshopData?.mailTemplate['subject'] || "";
-            maildescription = workshopData?.mailTemplate['description'] || "";  
-            mailliveCallText = workshopData?.mailTemplate['liveCallText'] || "";  
-            categorybased = workshopData?.categorybased || false;
-            workshopurl = commonService.production
-              ? `https://eiflix.com/workshop/${workshopData?.docid}`
-              : `https://eiflix-workshop.web.app/workshop/${workshopData?.docid}`;
-          }
-        }
-        let phonenumber = profile['number'] ?? profile['phonenumber']
-        const endpoint = `${WATI_BASE_URL}/api/v1/sendTemplateMessage?whatsappNumber=${phonenumber}`;
-        const headers = {
-          'Authorization': `Bearer ${WATI_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        };
-
-        const data = {
-          template_name: 'eiflixworkshopv7',
-          broadcast_name: 'Workshop Enrolled',
-          parameters: [
-            { name: 'name', value: profile['name'] || '' },
-            { name: 'workshopname', value: workshopName },
-            { name: 'link', value: workshopurl },
-            { name: '1', value: messageText },
-          ]
-        };
-        try {
-          const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
-          // const postmarktemplateId = categorybased ? '43859890' : '42135513';
-          await commonService.postmarkClient.sendEmailWithTemplate({
-            From: "starlabs@excellenceinstallation.com",
-            To: profile['email'],
-            TemplateAlias: templateAlias,
-            TemplateModel: {
-              name: profile['name'],
-              email: profile['email'],
-              subject: mailsubject,
-              workshopName:workshopName,
-              maildescription : maildescription,
-              mailliveCallText : mailliveCallText,
-              workshopurl : workshopurl,
-            },
-          });
-
-          // var dataModel = {
-          // name: profile['name'],
-          // email: profile['email'],
-          // subject: mailsubject,
-          // workshopName:workshopName,
-          // maildescription : maildescription,
-          // mailliveCallText : mailliveCallText,
-          // workshopurl : workshopurl,
-          // }
-          // await commonService.createEmailArchiveDocument({
-          //   emailData : dataModel,
-          //   datamodel : dataModel,
-          //   attachments : [],
-          //   emailTo : [profile['email']],
-          //   emailMap : [{[profile['email']] : }],
-          //   fileURL : '',
-          //   from:'starlabs@excellenceinstallation.com',
-          //   notes : '',
-          //   profileId : [],
-          //   postmarkTemplateId: postmarktemplateId,
-          //   templateAlias:templateAlias
-          // });
-
-        } catch (emailError) {
-          console.error('Error sending welcome email:', emailError);
-        }
-        console.log("endpoint", endpoint);
-        console.log("data", data);
-
-        const response = await axios.post(endpoint, data, { headers });
-        console.log('Message sent successfully:', response.data);
-        return response.data;
-      } else {
-        console.log("Document created but not 'enrolled' status — skipping message.");
-      }
-
-    } catch (error) {
-      console.error('Error sending WhatsApp message:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-);
   exports.productenquiryfromeiflix = onDocumentCreated("productenquirylog/{docid}", async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();

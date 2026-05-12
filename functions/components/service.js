@@ -52,6 +52,8 @@ var slackAskAH = "https://hooks.slack.com/services/T1E57BR8F/B07D5PBTRSM/SQvlGwv
 var slackFirebaseBilling = "https://hooks.slack.com/services/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"
 var slackLogScheduling = "https://hooks.slack.com/services/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"
 var slackWorkshopQandA = "https://hooks.slack.com/services/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"
+var slackWorkshopsubscribers = "https://hooks.slack.com/services/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"
+var slackWorkshopsubscribersactivity = "https://hooks.slack.com/services/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"
 var hiddenSalesChannel = "https://hooks.slack.com/services/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"
 var queueSelectionLog = "https://hooks.slack.com/services/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"
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
@@ -958,7 +960,7 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 }
 
 module.exports = {
-	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,
+	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
 	postmarkClient,
 	monthName,
