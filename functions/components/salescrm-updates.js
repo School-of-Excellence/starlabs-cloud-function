@@ -211,7 +211,7 @@ exports.updatePackageDesignDataToSalesCRM = onDocumentWritten('package design/{p
 	var sendData = url + JSON.stringify(newdoc);
 	https.get(sendData, (response) => {
 		console.log(response);
-	})
+	});
 });
 
 exports.salesCaptureSlackIntegration = onRequest({region: "us-central1", cors:true},async (req,res) => {
