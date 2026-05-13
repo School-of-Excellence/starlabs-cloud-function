@@ -3594,7 +3594,6 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   }
 
   const { getFirestore } = require("firebase-admin/firestore");
-  const adminATC = getFirestore("firestore-atc");
   const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", queueRef)
     .where("profileid", "==", profileid)
