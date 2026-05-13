@@ -1859,7 +1859,7 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
   }
 })
 
-exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient/{id}" , async (snapshot) => {
+exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "formsByClient/{id}", database: "firestore-forms"} , async (snapshot) => {
   let change = snapshot.data
   let data = change.data()
   
@@ -1897,9 +1897,9 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient
   })
   if(mapform[data["formname"]] != data["formid"] && (mapform[data["formname"]] != undefined && mapform[data["formname"]] != null)){
     console.log(mapform[data["formname"]], "/", data["formid"])
-    let ref = admin.firestore().collection('formsByClient').doc(data['docid'])
+    // let ref = admin.firestore().collection('formsByClient').doc(data['docid'])
     console.log("docid",data['docid'],"formid", data['formid'], mapform[data["formname"]]);
-    await ref.update({
+    await change.ref.update({
       formid :  mapform[data["formname"]]
     })
   }
@@ -3525,6 +3525,7 @@ async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
 
 // ---------- Shared stage processor ----------
 async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
+  const adminATC = getFirestore("firestore-atc");
   const atcrequiredstages = queueData["atcrequiredstages"] || [];
   const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
   if (!stageCfg) return;
@@ -3539,7 +3540,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     const snap = await admin.firestore().collection("formsByClient")
       .where("profileid", "==", profileid)
       .where("formid", "==", formref.id)
-      .where("queueref", "==", queueRef)
+      .where("queueref", "==", adminATC.doc(queueRef.path))
       .orderBy("date", "desc")
       .get();
 
@@ -3592,7 +3593,9 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     return console.log(`unknown stage type ${stageCfg.type}`);
   }
 
-  const existingSnap = await admin.firestore().collection("queue_atc_generation")
+  const { getFirestore } = require("firebase-admin/firestore");
+  const adminATC = getFirestore("firestore-atc");
+  const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", queueRef)
     .where("profileid", "==", profileid)
     .where("queue_token_id", "==", queueTokenId)
@@ -3607,10 +3610,10 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     }
   }
 
-  const docid = admin.firestore().collection("queue_atc_generation").doc().id;
+  const docid = adminATC.collection("queue_atc_generation").doc().id;
   const payload = {
     docid: docid,
-    queueref: queueRef,
+    queueref: adminATC.doc(queueRef.path),
     profileid: profileid,
     queue_token_id: queueTokenId,
     stage: currentStage,
@@ -3621,7 +3624,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     data: data,
     createdAt: new Date(),
   };
-  await admin.firestore().collection("queue_atc_generation").doc(docid).set(payload);
+  await adminATC.collection("queue_atc_generation").doc(docid).set(payload);
   console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
 }
 

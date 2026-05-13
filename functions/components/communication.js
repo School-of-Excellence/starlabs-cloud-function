@@ -3693,7 +3693,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     }
   });
 
-  exports.workshopFormsSubmission = onDocumentCreated("formsByClient/{docid}", async (document) => {
+  exports.workshopFormsSubmission = onDocumentCreated({document: "formsByClient/{docid}", database: "firestore-forms"}, async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();
     if (data["workshopref"] == null) {
@@ -3707,6 +3707,8 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     if (!profile) return;
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
+    // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
+    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
     // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
     // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;

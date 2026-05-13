@@ -1,4 +1,10 @@
-const admin = require("firebase-admin");
+// Firestore
+const { getFirestore } = require("firebase-admin/firestore");
+const adminDefault = getFirestore();
+const adminATC = getFirestore("firestore-atc");
+
+const firestoreField = require("firebase-admin/firestore").FieldValue;
+
 const path = require('path');
 const fs = require('fs');
 const { onDocumentWritten, onDocumentUpdated } = require("firebase-functions/v2/firestore")
@@ -9,8 +15,8 @@ var IncomingWebhook = require('@slack/client').IncomingWebhook;
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 
-exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}", async (data)=>{
-  var atcBatch = admin.firestore().batch()
+exports.procedureOnWrite = onDocumentWritten({document: "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}", database: "firestore-atc"}, async (data)=>{
+  var atcBatch = adminATC.batch()
   var before = data.data.before
   var after = data.data.after
   var changeagent = []
@@ -59,7 +65,7 @@ exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{a
   var totalImplementationdoneby = []
   var specialistinvolved = []
   var procedureCompletionCountBySpecialist = {}
-  await admin.firestore().collection("atc_alpha").doc(atcid).get().then(async atc=>{
+  await adminATC.collection("atc_alpha").doc(atcid).get().then(async atc=>{
     var atcData = atc.data()
     participantId = atcData['profileid']
     atcmodel = atcData["product"]
@@ -186,7 +192,7 @@ exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{a
   console.log("procedure status", beforeData["status"], afterData["status"])
   if(beforeData["status"] != "completed" && afterData["status"] == "completed"){
     var sourceref = after.ref
-    await admin.firestore().collection("activitylog").where("sourceref", "==", sourceref).get().then(activity=>{
+    await adminDefault.collection("activitylog").where("sourceref", "==", sourceref).get().then(activity=>{
       activity.docs.forEach(doc=>{
         var data = doc.data()
         exisitingActivity.push(data)
@@ -200,9 +206,9 @@ exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{a
           const activity = activityList[i];
           var participantList = afterData["bigactivity"][activity]
           participantList.forEach(profileid=>{
-            var docid = admin.firestore().collection("activitylog").doc().id
+            var docid = adminDefault.collection("activitylog").doc().id
             newActivity.push({
-              created: admin.firestore.FieldValue.serverTimestamp(),
+              created: firestoreField.serverTimestamp(),
               activity: activity,
               activitydate: afterData["last_activity"] != null && afterData["last_activity"] != undefined ? afterData["last_activity"].toDate() : null,
               atcmodel: atcmodel,
@@ -218,17 +224,17 @@ exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{a
       }
     }
     console.log("New Acitivity", newActivity.length)
-    var batch = admin.firestore().batch()
+    var batch = adminDefault.batch()
     for (let i = 0; i < newActivity.length; i++) {
       const log = newActivity[i];
       if(exisitingActivity.filter(e => e["profileid"] == log["profileid"] && e["activity"] == log["activity"]).length == 0){
-        batch.set(admin.firestore().collection("activitylog").doc(log["docid"]), log)
+        batch.set(adminDefault.collection("activitylog").doc(log["docid"]), log)
       }
     }
     for (let i = 0; i < exisitingActivity.length; i++) {
       const log = exisitingActivity[i];
       if(newActivity.filter(e => e["profileid"] == log["profileid"] && e["activity"] == log["activity"]).length == 0){
-        batch.delete(admin.firestore().collection("activitylog").doc(log["docid"]))
+        batch.delete(adminDefault.collection("activitylog").doc(log["docid"]))
       }
     }
     if(newActivity.length != 0 || exisitingActivity.length != 0){
@@ -242,36 +248,36 @@ exports.procedureOnWrite = onDocumentWritten("/atc_alpha/{atc_id}/corrections/{a
 })
 
 // Move Validated ATC to Alpha
-exports.validateATCtoAlpha = onDocumentUpdated("atc_to_validate/{id}", async (snap) => {
-    var change = snap.data
-    var beforeData = change.before.data()
-    var afterData = change.after.data()
-    if(beforeData["status"] != "validated" && afterData["status"] == "validated"){
-      afterData["atcid"] = change.after.id
-      // afterData["prescription_date"] = afterData["prescription_date"] != null ? afterData["prescription_date"].toDate() : null
-      // afterData["visibilityexpiry"] = afterData["visibilityexpiry"] != null ? afterData["visibilityexpiry"].toDate() : null
-      await admin.firestore().collection("atc_alpha").doc(afterData["atcid"]).set(afterData)
-      await change.after.ref.collection("corrections").get().then(async adjlist=>{
-        for (let i = 0; i < adjlist.docs.length; i++) {
-          const adj = adjlist.docs[i];
-          await admin.firestore().collection("atc_alpha").doc(afterData["atcid"]).collection("corrections").doc(adj.id).set(adj.data())
-          adj.ref.collection("procedures").get().then(async procedurelist =>{
-            for (let j = 0; j < procedurelist.docs.length; j++) {
-              const pro = procedurelist.docs[j];
-              await admin.firestore().collection("atc_alpha").doc(afterData["atcid"]).collection("corrections").doc(adj.id).collection("procedures").doc(pro.id).set(pro.data())
-            }
-          })
-        }
-      })
-      if(afterData['directiveassignmentref'] != null || afterData['directiveassignmentref'] != undefined){
-        await admin.firestore().doc(afterData['directiveassignmentref'].path).update({
-          status:"validated"
+exports.validateATCtoAlpha = onDocumentUpdated({document: "atc_to_validate/{id}", database: "firestore-atc"}, async (snap) => {
+  var change = snap.data
+  var beforeData = change.before.data()
+  var afterData = change.after.data()
+  if(beforeData["status"] != "validated" && afterData["status"] == "validated"){
+    afterData["atcid"] = change.after.id
+    // afterData["prescription_date"] = afterData["prescription_date"] != null ? afterData["prescription_date"].toDate() : null
+    // afterData["visibilityexpiry"] = afterData["visibilityexpiry"] != null ? afterData["visibilityexpiry"].toDate() : null
+    await adminATC.collection("atc_alpha").doc(afterData["atcid"]).set(afterData)
+    await change.after.ref.collection("corrections").get().then(async adjlist=>{
+      for (let i = 0; i < adjlist.docs.length; i++) {
+        const adj = adjlist.docs[i];
+        await adminATC.collection("atc_alpha").doc(afterData["atcid"]).collection("corrections").doc(adj.id).set(adj.data())
+        adj.ref.collection("procedures").get().then(async procedurelist =>{
+          for (let j = 0; j < procedurelist.docs.length; j++) {
+            const pro = procedurelist.docs[j];
+            await adminATC.collection("atc_alpha").doc(afterData["atcid"]).collection("corrections").doc(adj.id).collection("procedures").doc(pro.id).set(pro.data())
+          }
         })
       }
+    })
+    if(afterData['directiveassignmentref'] != null || afterData['directiveassignmentref'] != undefined){
+      await adminDefault.doc(afterData['directiveassignmentref'].path).update({
+        status: "validated"
+      })
     }
+  }
 })
 
-exports.updateAuthorUIDInAtcAlpha = onDocumentWritten("atc_alpha/{atcalphaid}",async (snapshot) => {
+exports.updateAuthorUIDInAtcAlpha = onDocumentWritten({document: "atc_alpha/{atcalphaid}", database: "firestore-atc"} ,async (snapshot) => {
 
   let oldData = snapshot.data.before.exists ? snapshot.data.before.data() : {}
   let newData = snapshot.data.after.data()
@@ -287,9 +293,9 @@ exports.updateAuthorUIDInAtcAlpha = onDocumentWritten("atc_alpha/{atcalphaid}",a
     let authorUid = []
     for (let i = 0; i < newData['author'].length; i++) {
       const profileid = newData['author'][i].id;
-      await admin.firestore().collection("profile_data").doc(profileid).get().then(snap => {
+      await adminDefault.collection("profile_data").doc(profileid).get().then(snap => {
         if(snap.exists){
-          if(snap.data()['user_ref'])authorUid.push(snap.data()['user_ref'].id)
+          if(snap.data()['user_ref']) authorUid.push(snap.data()['user_ref'].id)
         }
       })
     }
@@ -510,7 +516,7 @@ const ANALYSIS_PROMPT = fs.readFileSync(ANALYSIS_PROMPT_PATH, "utf8");
 
 // ---------- Cloud Function: triggered on create of atc_alpha ----------
 exports.onAtcAlphaCreate = onDocumentCreated(
-  { document: "atc_alpha/{atcid}", secrets: [functionsApiKey] },
+  { document: "atc_alpha/{atcid}", secrets: [functionsApiKey], database: "firestore-atc" },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -528,7 +534,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
 
   // 1. Resolve queue generation doc + atcrequiredstages entry
   let queueSnap = null;
-  queueSnap = await admin.firestore().collection("queue generation").doc(queueid).get();
+  queueSnap = await adminDefault.collection("queue generation").doc(queueid).get();
   if (!queueSnap.exists) return console.log(`queue generation/${queueid} not found`);
   const queueData = queueSnap.data();
 
@@ -551,8 +557,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
 
   // 3. Build procedure id -> suedoname map.
   const mapProcedure = {};
-  const procedureSnap = await admin.firestore()
-    .collection("procedures").orderBy("name", "asc").get();
+  const procedureSnap = await adminDefault.collection("procedures").orderBy("name", "asc").get();
   procedureSnap.forEach((doc) => {
     mapProcedure[doc.id] = doc.data()["suedoname"];
   });
@@ -580,7 +585,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
   // 5. Locate the existing queue_atc_generation doc whose output holds the
   //    generated ATC content for this profile/queue/stage.
   const profileid = atc.profileid;
-  const genSnap = await admin.firestore().collection("queue_atc_generation")
+  const genSnap = await adminATC.collection("queue_atc_generation")
     .where("profileid", "==", profileid)
     .where("queueref", "==", queueSnap.ref)
     .where("stage", "==", stagename)
@@ -607,7 +612,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
   // 6. Rebuild PARTICIPANT_TYPE + PARTICIPANT_DATA from the sibling pairing
   //    docs (form + zoom) that fed this AI ATC generation.
   const pairingstages = sourceGenData.pairingstages || [];
-  const siblingsSnap = await admin.firestore().collection("queue_atc_generation")
+  const siblingsSnap = await adminATC.collection("queue_atc_generation")
     .where("profileid", "==", sourceGenData.profileid)
     .where("queue_token_id", "==", queueTokenId)
     .where("queueref", "==", sourceGenData.queueref)
@@ -653,7 +658,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
   // 7. Locate CHECKPOINT_REPORT — the queue_atc_generation doc whose sourceref
   //    points to sourceGenDoc and whose type is 'checkpoint report'.
   let checkpointReport = "";
-  const checkpointSnap = await admin.firestore().collection("queue_atc_generation")
+  const checkpointSnap = await adminATC.collection("queue_atc_generation")
     .where("sourceref", "==", sourceGenDoc.ref)
     .where("type", "==", "checkpoint report")
     .get();
@@ -669,8 +674,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
   }
 
   // 8. Read rubrics prompt config (for systemprompt + podtemplateid).
-  const promptSnap = await admin.firestore()
-    .collection("classify").doc(RUBRICS_PROMPT_DOCID).get();
+  const promptSnap = await adminDefault.collection("classify").doc(RUBRICS_PROMPT_DOCID).get();
   if (!promptSnap.exists) return console.log(`classify/${RUBRICS_PROMPT_DOCID} missing`);
   const promptCfg = promptSnap.data();
 
@@ -695,10 +699,10 @@ async function processAtcAlphaDoc(atcRef, atc) {
 
   // 8. Create the new queue_atc_generation doc for rubrics scoring.
   const rubricsStageName = `rubrics_scoring_${stagename}`;
-  const docid = admin.firestore().collection("queue_atc_generation").doc().id;
+  const docid = adminATC.collection("queue_atc_generation").doc().id;
   const payload = {
     docid: docid,
-    queueref: queueSnap.ref,
+    queueref: adminATC.doc(queueSnap.ref.path),
     profileid: profileid,
     queue_token_id: queueTokenId,
     stage: rubricsStageName,
@@ -713,7 +717,7 @@ async function processAtcAlphaDoc(atcRef, atc) {
     status: "pending",
     promptUpdatedAt: new Date(),
   };
-  await admin.firestore().collection("queue_atc_generation").doc(docid).set(payload);
+  await adminATC.collection("queue_atc_generation").doc(docid).set(payload);
   console.log(`queue_atc_generation rubrics doc created ${docid} for atc ${atcRef.id}`);
 
   // 9. Kick off the pod via run_jobrequest.
