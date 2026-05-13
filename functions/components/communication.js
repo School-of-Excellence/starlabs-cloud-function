@@ -3718,7 +3718,6 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const workshopTitle = workshopData['detailpage']['title'] || "Unknown Workshop";
     const activeworkshop = workshopData['active'] || false;
     const slackChannel = workshopData['workshopactivitychannel'] || null;
-    let url;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
         ? commonService.slackWorkshopsubscribersactivity
