@@ -159,12 +159,17 @@ exports.ATCevolutionProgress = onDocumentUpdated("/interimreport log/{docid}", a
 
   if(!previousReportList.includes("evolutionprogress") && currentReportList.includes("evolutionprogress")){
     console.log("Updating Evolution Progress", newData["profileid"])
+
+    const { getFirestore } = require("firebase-admin/firestore");
+    const adminATC = getFirestore("firestore-atc");
+    var atcBatch = adminATC.batch()
+
     let batch = admin.firestore().batch()
     var metaBatch = admin.firestore().batch()
     var aelBatch = admin.firestore().batch()
     var mapAelAtc = {}
     var mapProfileATCprogress = {}
-    await admin.firestore().collection("atc_alpha").where("profileid", "==", newData["profileid"]).where("isdelete", "==", false).where("product", "in", ["A&H","A&H ATC","Expanding Horizon","uP!","LYL","B!G",]).get().then(async atcList =>{
+    await adminATC.collection("atc_alpha").where("profileid", "==", newData["profileid"]).where("isdelete", "==", false).where("product", "in", ["A&H","A&H ATC","Expanding Horizon","uP!","LYL","B!G",]).get().then(async atcList =>{
       console.log("Total ATC", atcList.docs.length)
       for (let i = 0; i < atcList.docs.length; i++) {
         const alphaelement = atcList.docs[i].data();
@@ -244,7 +249,7 @@ exports.ATCevolutionProgress = onDocumentUpdated("/interimreport log/{docid}", a
 
           // Update Current ATC
           // console.log("ATC Progress", updateData)
-          batch.update(atcList.docs[i].ref, updateData)
+          atcBatch.update(atcList.docs[i].ref, updateData)
 
           // Update Specialist - Extended Life Impact
           // console.log("Participants ELY", Object.keys(extendedlifeimpact))
@@ -293,6 +298,9 @@ exports.ATCevolutionProgress = onDocumentUpdated("/interimreport log/{docid}", a
     }
 
     await batch.commit().then(res =>{
+      console.log(res.length)
+    })
+    await atcBatch.commit().then(res =>{
       console.log(res.length)
     })
     await metaBatch.commit().then(res =>{

@@ -1,4 +1,8 @@
-const admin = require('firebase-admin');
+// Firestore
+const { getFirestore } = require("firebase-admin/firestore");
+const adminDefault = getFirestore();
+const adminATC = getFirestore("firestore-atc");
+
 const path = require('path');
 const fs = require('fs');
 //components imports
@@ -16,7 +20,7 @@ const CHECKPOINT_PROMPT = fs.readFileSync(CHECKPOINT_PROMPT_PATH, "utf8");
 
 // ---------- Cloud Function: triggered on create ----------
 exports.onQueueAtcGenerationCreate = onDocumentCreated(
-  { document: "queue_atc_generation/{id}", secrets: [functionsApiKey] },
+  { document: "queue_atc_generation/{id}", secrets: [functionsApiKey], database: "firestore-atc" },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -26,7 +30,7 @@ exports.onQueueAtcGenerationCreate = onDocumentCreated(
 
 // ---------- Cloud Function: triggered on update (checkpoint gate) ----------
 exports.onQueueAtcGenerationUpdate = onDocumentUpdated(
-  { document: "queue_atc_generation/{id}", secrets: [functionsApiKey] },
+  { document: "queue_atc_generation/{id}", secrets: [functionsApiKey], database: "firestore-atc" },
   async (event) => {
     const change = event.data;
     if (!change) return;
@@ -127,18 +131,17 @@ async function processAtcGenerationDoc(docid, docData) {
     return console.log(`type=${docData.type}, handled by rubrics pipeline — skipping ${docid}`);
   }
 
-  const triggeredRef = admin.firestore().collection("queue_atc_generation").doc(docid);
+  const triggeredRef = adminATC.collection("queue_atc_generation").doc(docid);
 
   // 1. Read prompt config from classify (written by update_classify_config.js).
-  const promptSnap = await admin.firestore()
-    .collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
+  const promptSnap = await adminDefault.collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
   if (!promptSnap.exists) return console.log("classify/atcprompts missing");
   const promptCfg = promptSnap.data();
 
   // 2. Find sibling docs for the same participant/token/queue and pick the
   //    pairing-stage docs whose stage is in this doc's pairingstages.
   const pairingstages = docData.pairingstages || [];
-  const siblingsSnap = await admin.firestore().collection("queue_atc_generation")
+  const siblingsSnap = await adminATC.collection("queue_atc_generation")
     .where("profileid", "==", docData.profileid)
     .where("queue_token_id", "==", docData.queue_token_id)
     .where("queueref", "==", docData.queueref)
@@ -217,15 +220,14 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
   }
 
   // 1. Read prompt config from classify (same source as the generator).
-  const promptSnap = await admin.firestore()
-    .collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
+  const promptSnap = await adminDefault.collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
   if (!promptSnap.exists) return console.log("classify/atcprompts missing");
   const promptCfg = promptSnap.data();
 
   // 2. Find sibling docs for the same participant/token/queue and pick the
   //    pairing-stage docs whose stage is in this doc's pairingstages.
   const pairingstages = triggeredDocData.pairingstages || [];
-  const siblingsSnap = await admin.firestore().collection("queue_atc_generation")
+  const siblingsSnap = await adminATC.collection("queue_atc_generation")
     .where("profileid", "==", triggeredDocData.profileid)
     .where("queue_token_id", "==", triggeredDocData.queue_token_id)
     .where("queueref", "==", triggeredDocData.queueref)
@@ -284,18 +286,18 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
   const prompt = `${CHECKPOINT_PROMPT}\n\n${participantBlock}`;
 
   // 5. Create a new queue_atc_generation doc for the checkpoint report.
-  const newDocId = admin.firestore().collection("queue_atc_generation").doc().id;
+  const newDocId = adminATC.collection("queue_atc_generation").doc().id;
   const checkpointStage = `${triggeredDocData.stage} checkpoint report`;
   const payload = {
     docid: newDocId,
-    queueref: triggeredDocData.queueref,
+    queueref: adminATC.doc(triggeredDocData.queueref.path),
     profileid: triggeredDocData.profileid,
     queue_token_id: triggeredDocData.queue_token_id,
     stage: checkpointStage,
     generateatc: true,
     type: 'checkpoint report',
     pairingstages: pairingstages,
-    sourceref: admin.firestore().collection("queue_atc_generation").doc(triggeredDocId),
+    sourceref: adminATC.collection("queue_atc_generation").doc(triggeredDocId),
     data:atcToVerify,
     prompt: prompt,
     systemprompt: promptCfg.systemprompt,
@@ -305,7 +307,7 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
     checkpoint:false
   };
 
-  await admin.firestore().collection("queue_atc_generation").doc(newDocId).set(payload);
+  await adminATC.collection("queue_atc_generation").doc(newDocId).set(payload);
   console.log(`checkpoint doc created ${newDocId} for source ${triggeredDocId} (stage="${checkpointStage}")`);
 
   // 6. Kick off the pod via run_jobrequest.
@@ -334,7 +336,7 @@ async function extractAndSaveOverallVerdict(docId, docData) {
     return console.log(`rubrics verdict: doc ${docId} — overall_verdict already "${verdict}", skipping save`);
   }
 
-  await admin.firestore().collection("queue_atc_generation").doc(docId).set(
+  await adminATC.collection("queue_atc_generation").doc(docId).set(
     { overall_verdict: verdict },
     { merge: true }
   );
