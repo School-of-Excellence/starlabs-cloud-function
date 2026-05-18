@@ -1701,62 +1701,9 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         }
       }
 
-      // Sort waitingList by selectedstageslot[currentstage].startdate ascending
-      waitingList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslot"]?.[docData["currentstage"]]
-        const bSlot = b.data()["selectedstageslot"]?.[docData["currentstage"]]
-        const aTime = aSlot?.startdate?.toMillis?.() ?? null
-        const bTime = bSlot?.startdate?.toMillis?.() ?? null
-        if (aTime == null && bTime == null) return 0
-        if (aTime == null) return 1
-        if (bTime == null) return -1
-        return aTime - bTime
-      })
-
-      // Sort queuedList by selectedstageslot[currentstage].startdate ascending
-      queuedList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslot"]?.[docData["currentstage"]]
-        const bSlot = b.data()["selectedstageslot"]?.[docData["currentstage"]]
-        const aTime = aSlot?.startdate?.toMillis?.() ?? null
-        const bTime = bSlot?.startdate?.toMillis?.() ?? null
-        if (aTime == null && bTime == null) return 0
-        if (aTime == null) return 1
-        if (bTime == null) return -1
-        return aTime - bTime
-      })
-
-      const nowMs = Date.now()
-
-      // waiting fills positions first
       let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
-        const slotData = waiting.data()["selectedstageslot"]?.[docData["currentstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(waiting.ref, { queueposition: null })
-          return
-        }
-        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
-        if (slotStartMs != null && slotStartMs > nowMs) {
-          batch.update(waiting.ref, { queueposition: null })
-          return
-        }
         batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
-      })
-
-      // queued continues from where waiting left off
-      let queuedPositionCounter = waitingPositionCounter
-      queuedList.forEach((queued) => {
-        const slotData = queued.data()["selectedstageslot"]?.[docData["currentstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
-        if (slotStartMs != null && slotStartMs > nowMs) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        batch.update(queued.ref, { queueposition: queuedPositionCounter++ })
       })
 
       await batch.commit().then(() => {
@@ -1794,62 +1741,10 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         }
       }
 
-      // Sort waitingList by selectedstageslot[previousstage].startdate ascending
-      waitingList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslot"]?.[docData["previousstage"]]
-        const bSlot = b.data()["selectedstageslot"]?.[docData["previousstage"]]
-        const aTime = aSlot?.startdate?.toMillis?.() ?? null
-        const bTime = bSlot?.startdate?.toMillis?.() ?? null
-        if (aTime == null && bTime == null) return 0
-        if (aTime == null) return 1
-        if (bTime == null) return -1
-        return aTime - bTime
-      })
-
-      // Sort queuedList by selectedstageslot[previousstage].startdate ascending
-      queuedList.sort((a, b) => {
-        const aSlot = a.data()["selectedstageslot"]?.[docData["previousstage"]]
-        const bSlot = b.data()["selectedstageslot"]?.[docData["previousstage"]]
-        const aTime = aSlot?.startdate?.toMillis?.() ?? null
-        const bTime = bSlot?.startdate?.toMillis?.() ?? null
-        if (aTime == null && bTime == null) return 0
-        if (aTime == null) return 1
-        if (bTime == null) return -1
-        return aTime - bTime
-      })
-
       const nowMs = Date.now()
-
-      // waiting fills positions first
       let waitingPositionCounter = 1
       waitingList.forEach((waiting) => {
-        const slotData = waiting.data()["selectedstageslot"]?.[docData["previousstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(waiting.ref, { queueposition: null })
-          return
-        }
-        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
-        if (slotStartMs != null && slotStartMs > nowMs) {
-          batch.update(waiting.ref, { queueposition: null })
-          return
-        }
         batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
-      })
-
-      // queued continues from where waiting left off
-      let queuedPositionCounter = waitingPositionCounter
-      queuedList.forEach((queued) => {
-        const slotData = queued.data()["selectedstageslot"]?.[docData["previousstage"]]
-        if (slotData == null || slotData == undefined) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        const slotStartMs = slotData?.startdate?.toMillis?.() ?? null
-        if (slotStartMs != null && slotStartMs > nowMs) {
-          batch.update(queued.ref, { queueposition: null })
-          return
-        }
-        batch.update(queued.ref, { queueposition: queuedPositionCounter++ })
       })
 
       await batch.commit().then(() => {

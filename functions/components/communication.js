@@ -1410,12 +1410,14 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
     const mailOptions = {
       From:          archiveData['from'] || "support@intl.soexcellence.com",
       To:            emailId,
+      Cc: archiveData['cc'] || null,
+      Bcc: archiveData['bcc'] || null,
       TemplateAlias: archiveData['templateid'],
       TemplateModel: templateModel,
       Tag:           archiveData['broadcastname'],
       Attachments:   postmarkAttachments,
     };
- 
+    
     // Batch in groups of 400 (Postmark limit)
     if (i !== 0 && i % 400 === 0) {
       batchEmailList.push(emailList);
@@ -1487,8 +1489,29 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
           });
         }
       }
- 
-      await sentLogBatch.commit().catch(err => console.error("Error writing email logs:", err));
+      
+      await sentLogBatch.commit().then(async()=>{
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: true
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      }).catch(async (err) =>  {
+        console.error("Error writing email logs:", err);
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: false
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      });
  
     } catch (error) {
       console.error('Error sending email batch:', error);
@@ -3685,7 +3708,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
-    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
     // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
     // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
@@ -3695,7 +3718,6 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const workshopTitle = workshopData['detailpage']['title'] || "Unknown Workshop";
     const activeworkshop = workshopData['active'] || false;
     const slackChannel = workshopData['workshopactivitychannel'] || null;
-    let url;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
         ? commonService.slackWorkshopsubscribersactivity
