@@ -213,6 +213,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
         let mailsubject = "";
         let maildescription = "";
         let mailliveCallText = "";
+        let slackchannel = "";
         let categorybased = false;
         if (newData['workshopref']) {
           const workshopSnap = await newData['workshopref'].get();
@@ -224,10 +225,35 @@ exports.workshopenrolledwatti = onDocumentCreated(
             maildescription = workshopData?.mailTemplate['description'] || "";  
             mailliveCallText = workshopData?.mailTemplate['liveCallText'] || "";  
             categorybased = workshopData?.categorybased || false;
+            slackchannel = workshopData?.workshopactivitychannel || null;
             workshopurl = commonService.production
               ? `https://eiflix.com/workshop/${workshopData?.docid}`
               : `https://eiflix-workshop.web.app/workshop/${workshopData?.docid}`;
           }
+        }
+        try {
+          let url;
+          if (slackchannel === 'workshop-subscriber-activity') {
+            url = commonService.production ? commonService.slackWorkshopsubscribersactivity : commonService.slackDevTest;
+          } else if (slackchannel === 'workshop-logs') {
+            url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+          }
+          if (url) {
+            const webhook = new commonService.IncomingWebhook(url);
+            let message = `🚀 *${profile['name']}* just Enrolled *${workshopName}*! 🌱`;
+            console.log(message);
+            webhook.send(message, (err, header, statusCode, body) => {
+              if (err) {
+                console.error("Error", err);
+              } else {
+                console.log("Message sent", statusCode);
+              }
+            });
+          } else {
+            console.warn("Slack webhook URL not configured.");
+          }
+        } catch (error) {
+          console.log(error,'enrolled slack error')
         }
         let phonenumber = profile['number'] ?? profile['phonenumber']
         const endpoint = `${WATI_BASE_URL}/api/v1/sendTemplateMessage?whatsappNumber=${phonenumber}`;

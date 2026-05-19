@@ -472,6 +472,30 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     referredProfileName = "Unknown";
   }
 
+  try {
+      const customerioPayload = {
+        name: name,
+        email: email,
+        phonenumber: phone,
+      };
+
+      const customerioResponse = await fetch("https://api.customer.io/v1/webhook/a60ad03f3052e758", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(customerioPayload),
+      });
+
+      if (!customerioResponse.ok) {
+        console.error("Customer.io webhook failed:", customerioResponse.status, await customerioResponse.text());
+      } else {
+        console.log("Customer.io webhook sent successfully:", customerioResponse.status);
+      }
+    } catch (err) {
+      console.error("Error sending to Customer.io:", err);
+    }
+
   // const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
   let url;
 
