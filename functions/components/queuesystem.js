@@ -3432,7 +3432,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   if (stageCfg.type === "form") {
     const formref = queueData["stageproperty"][currentStage]["actionresource"];
     if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    const snap = await admin.firestore().collection("formsByClient")
+    const snap = await adminATC.collection("formsByClient")
       .where("profileid", "==", profileid)
       .where("formid", "==", formref.id)
       .where("queueref", "==", adminATC.doc(queueRef.path))
@@ -3490,7 +3490,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
 
   const { getFirestore } = require("firebase-admin/firestore");
   const existingSnap = await adminATC.collection("queue_atc_generation")
-    .where("queueref", "==", queueRef)
+    .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
     .where("queue_token_id", "==", queueTokenId)
     .where("stage", "==", currentStage)
