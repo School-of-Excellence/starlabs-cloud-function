@@ -750,14 +750,18 @@ exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation r
   }
 })
 
-exports.atcdata_to_pmd = onDocumentWritten("atc_apha/{docid}",async (change) => {
+exports.atcdata_to_pmd = onDocumentWritten({document: "atc_apha/{docid}", database: "firestore-atc"},async (change) => {
+
+  const { getFirestore } = require("firebase-admin/firestore");
+  const adminATC = getFirestore("firestore-atc");
+
   const olddoc = change.data.before.data()
   const newdoc = change.data.after.data()
   let profileId = newdoc['profileid'] ? newdoc['profileid'] : null
   if(!olddoc && newdoc || olddoc && newdoc){
     if(profileId != null){
       console.log("profileid",profileId);
-      admin.firestore().collection('atc_alpha').where('type','==','online').where('isdelete','==',false).where('profileid','==',profileId).get().then(async atcsnap => {
+      adminATC.collection('atc_alpha').where('type','==','online').where('isdelete','==',false).where('profileid','==',profileId).get().then(async atcsnap => {
         console.log("atc_alpha document length",atcsnap.docs.length);
         let atcData = {}
         for (let i = 0; i < atcsnap.docs.length; i++) {

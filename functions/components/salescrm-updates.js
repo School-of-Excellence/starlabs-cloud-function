@@ -211,7 +211,7 @@ exports.updatePackageDesignDataToSalesCRM = onDocumentWritten('package design/{p
 	var sendData = url + JSON.stringify(newdoc);
 	https.get(sendData, (response) => {
 		console.log(response);
-	})
+	});
 });
 
 exports.salesCaptureSlackIntegration = onRequest({region: "us-central1", cors:true},async (req,res) => {
@@ -482,6 +482,35 @@ exports.sendSlackNotificationSaleRejection = onDocumentUpdated({document:'salesl
         console.log('Received', statusCode, 'from Slack');
       }
     });
+  }
+
+  if (afterData && afterData['status'] == 'Approved') {
+    console.log("Sending Data to watson");
+
+    const watsonUrl = commonService.production
+      ? ""
+      : "https://us-central1-watson-test-19.cloudfunctions.net/updateSalesleads";
+
+    const postData = JSON.stringify(afterData);
+    const urlObj = new URL(watsonUrl);
+
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      console.log('Watson response status:', res.statusCode);
+    });
+
+    req.on('error', (err) => console.error('Watson call failed:', err));
+    req.write(postData);
+    req.end();
   }
 
   // timeline log
