@@ -269,9 +269,20 @@ exports.slackCustomerSupport = onDocumentWritten("clientissue/{id}",async (chang
     var assignedto = [];
     var status = beforeData == null ? afterData['status']['status'] : `From ${beforeData['status']['status']} To ${afterData['status']['status']}`;
     var category = beforeData != null && beforeData['category'] != afterData['category'] ? `From ${'*'+beforeData['category']+"*"} To ${"*"+afterData['category']+"*"}` : "*"+afterData['category']+"*";
-    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
-      reportedby = profile.data()["name"]
-    }).catch(e => {console.log(e)})
+    // await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
+    //   reportedby = profile.data()["name"]
+    // }).catch(e => {console.log(e)})
+    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(async profile => {
+      if (profile.exists) {
+        reportedby = profile.data()["name"];
+      } else {
+        await admin.firestore().collection("new_user_data").doc(afterData["reportedBy"]).get().then(newProfile => {
+          if (newProfile.exists) {
+            reportedby = newProfile.data()["name"];
+          }
+        }).catch(e => { console.log(e) });
+      }
+    }).catch(e => { console.log(e) });
     for (let i = 0; i < afterData["assign"].length; i++) {
       const element = afterData["assign"][i];
       await admin.firestore().collection("profile_data").doc(element).get().then(profile=>{
