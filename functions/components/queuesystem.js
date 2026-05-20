@@ -1683,31 +1683,30 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
-        var stagePreassigned = preassigned[docData["currentstage"]] != null && preassigned[docData["currentstage"]] != undefined ? preassigned[docData["currentstage"]] : []
-        if (stagePreassigned.length == 0) {
-          if (tokenData["status"] == "ready") {
-            waitingList.push(tokenDoc)
-          }
-          else if (tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited") {
-            queuedList.push(tokenDoc)
-          }
-        }
-        else {
+        var stagePreassigned = preassigned[docData["currentstage"]] != null && preassigned[docData["currentstage"]] != undefined
+          ? preassigned[docData["currentstage"]]
+          : []
+
+        if (stagePreassigned.length != 0) {
           batch.update(tokenDoc.ref, { queueposition: null })
           stagePreassigned.forEach(studio => {
-            preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
-            preassignedMap[studio].push(tokenDoc)
+            preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
+            preassignedMap[studio].push(tokenDoc);
           })
+        } else if (tokenData["status"] == "ready") {
+          waitingList.push(tokenDoc);
+        } else {
+          batch.update(tokenDoc.ref, { queueposition: null });
         }
       }
 
-      let waitingPositionCounter = 1
+      let waitingPositionCounter = 1;
       waitingList.forEach((waiting) => {
-        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ });
       })
 
       await batch.commit().then(() => {
-        console.log("batch updated")
+        console.log("batch updated");
       })
     })
   }
@@ -1723,32 +1722,30 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
-        var stagePreassigned = preassigned[docData["previousstage"]] != null && preassigned[docData["previousstage"]] != undefined ? preassigned[docData["previousstage"]] : []
-        if (stagePreassigned.length == 0) {
-          if (tokenData["status"] == "ready") {
-            waitingList.push(tokenDoc)
-          }
-          else if (tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["st.where('tokenstatus', '==', 'Active')atus"] == "invited") {
-            queuedList.push(tokenDoc)
-          }
-        }
-        else {
+        var stagePreassigned = preassigned[docData["previousstage"]] != null && preassigned[docData["previousstage"]] != undefined
+          ? preassigned[docData["previousstage"]]
+          : [];
+
+        if (stagePreassigned.length != 0) {
           batch.update(tokenDoc.ref, { queueposition: null })
           stagePreassigned.forEach(studio => {
-            preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
-            preassignedMap[studio].push(tokenDoc)
+            preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
+            preassignedMap[studio].push(tokenDoc);
           })
+        } else if (tokenData["status"] == "ready") {
+          waitingList.push(tokenDoc);
+        } else {
+          batch.update(tokenDoc.ref, { queueposition: null });
         }
       }
 
-      const nowMs = Date.now()
-      let waitingPositionCounter = 1
+      let waitingPositionCounter = 1;
       waitingList.forEach((waiting) => {
-        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ })
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ });
       })
 
       await batch.commit().then(() => {
-        console.log("batch updated")
+        console.log("batch updated");
       })
     })
   }
@@ -3432,7 +3429,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   if (stageCfg.type === "form") {
     const formref = queueData["stageproperty"][currentStage]["actionresource"];
     if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    const snap = await admin.firestore().collection("formsByClient")
+    const snap = await adminATC.collection("formsByClient")
       .where("profileid", "==", profileid)
       .where("formid", "==", formref.id)
       .where("queueref", "==", adminATC.doc(queueRef.path))
@@ -3490,7 +3487,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
 
   const { getFirestore } = require("firebase-admin/firestore");
   const existingSnap = await adminATC.collection("queue_atc_generation")
-    .where("queueref", "==", queueRef)
+    .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
     .where("queue_token_id", "==", queueTokenId)
     .where("stage", "==", currentStage)
