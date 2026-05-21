@@ -213,6 +213,10 @@ exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
 
+//workshop payment razorpay
+// exports.createRazorpayOrder = workshop.createRazorpayOrder
+// exports.verifyRazorpayPayment = workshop.verifyRazorpayPayment
+
 //product enquiry
 exports.productenquiryfromeiflix = communication.productenquiryfromeiflix
 

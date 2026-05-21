@@ -316,7 +316,7 @@ exports.verifyEmailOTPNewUsers = onCall(
               broadcast_name: 'Workshop Enrolled',
               parameters: [
                 { name: 'name', value: otpData.name || '' },
-                { name: 'link', value: eiflix },
+                { name: 'link', value: `${eiflix} ` },
                 { name: '1', value: messageText },
               ]
             };
