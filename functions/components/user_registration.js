@@ -189,7 +189,7 @@ exports.verifyEmailOTPNewUsers = onCall(
   },
   async (request) => {
     try {
-      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile } = request.data;
+      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
       if (!otpId || !otp || !password) {
         throw new HttpsError('invalid-argument', 'OTP ID, OTP, and password are required');
       }
@@ -239,12 +239,13 @@ exports.verifyEmailOTPNewUsers = onCall(
           email: otpData.email,
           phonenumber: phoneNumber || '',
           countryCode: countryCode || '+91',
-          refferedby:refferedby,
+          refferedby: refferedby || null,
           created: admin.firestore.FieldValue.serverTimestamp(),
           emailVerified: true,
           registrationMethod: 'emailotp',
           status: 'active',
-          refferedprofile:refferedprofile,
+          refferedprofile: refferedprofile || null,
+          subscriber: subscriber || false,
           enable:true,
           workshoponly:true,
         };
@@ -289,11 +290,11 @@ exports.verifyEmailOTPNewUsers = onCall(
         try {
           var apikey = null;
           var serverid = null;
-          await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
+          await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
             if(wati.exists) {
-              const watiData = wati.data()[commonService.eventWatiServerId];
-              apikey = watiData['watitoken'];
-              serverid = commonService.eventWatiServerId;
+            const watiData = wati.data();
+            apikey = watiData['apikey'];
+            serverid = watiData['serverid'];
             }
           })
 
@@ -315,7 +316,7 @@ exports.verifyEmailOTPNewUsers = onCall(
               broadcast_name: 'Workshop Enrolled',
               parameters: [
                 { name: 'name', value: otpData.name || '' },
-                { name: 'link', value: eiflix },
+                { name: 'link', value: `${eiflix} ` },
                 { name: '1', value: messageText },
               ]
             };

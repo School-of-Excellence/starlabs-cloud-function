@@ -109,6 +109,12 @@ exports.notifyMobileApp = onDocumentCreated({
           return { docs: [] };
         })
       );
+      profilePromises.push(
+        admin.firestore().collection("new_user_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+          console.error("new_user_data fetch batch failed:", err);
+          return { docs: [] };
+        })
+      );
     }
 
     const profileResults = await Promise.all(profilePromises);
@@ -120,14 +126,23 @@ exports.notifyMobileApp = onDocumentCreated({
         const profileId = profileDoc.id;
         foundProfileIds.push(profileId);
 
+        let userId = null;
         if (profileData["user_ref"]) {
-          const userId = profileData["user_ref"].id;
-          profilesWithUserRef.push(profileId);
+          userId = profileData["user_ref"].id;
+        } else if (profileData["uid"]) {
+          userId = profileData["uid"];
+        }
+
+        if (userId) {
+          if (!profilesWithUserRef.includes(profileId)) {
+            profilesWithUserRef.push(profileId);
+          }
           if (!allUsersForLogs.includes(userId)) {
             allUsersForLogs.push(userId);
           }
-        } else {
-          failedlist[profileId] = "No user_ref found in profile";
+          delete failedlist[profileId];
+        } else if (!profilesWithUserRef.includes(profileId)) {
+          failedlist[profileId] = "No user_ref/uid found in profile";
         }
       }
     }
@@ -3713,7 +3728,12 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
     // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
     // const slackChannel = (await data["workshopref"].get()).data()["workshopactivitychannel"];
-    const workshopDoc = await data["workshopref"].get();
+    // const workshopDoc = await data["workshopref"].get();
+    const workshopDoc = await admin.firestore().doc(data["workshopref"].path).get();
+    if (!workshopDoc.exists) {
+      console.log(`Workshop document not found at path: ${data["workshopref"].path}, skipping.`);
+      return;
+    }
     const workshopData = workshopDoc.data();
     const workshopTitle = workshopData['detailpage']['title'] || "Unknown Workshop";
     const activeworkshop = workshopData['active'] || false;
@@ -3728,7 +3748,8 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         : commonService.slackDevTest;
     }
     // var url =  commonService.slackDevTest;
-    if (url != null && activeworkshop == true) {
+    if (url != null) {
+    // if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
       var formUrl = commonService.production 
       ? `https://breakthroughs.app/formtemplate?id=${formid}&type=form&patchdata=formsByClient%2F${docid}`
