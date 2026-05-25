@@ -251,6 +251,9 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
           if(hosts[i].role.includes("collaborator")){
             dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
           }
+          else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("wish")){
+            dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
+          }
           else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("implementation")){
             dataModel["implementationshadow"] = dataModel["implementationshadow"] == undefined ? ""+hostName : dataModel["implementationshadow"] + ", " + hostName
           }
@@ -594,6 +597,9 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       const hostName = hosts[i].name;
       names.push(hostName)
       if(hosts[i].role.includes("collaborator")){
+        dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
+      }
+      else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("wish")){
         dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
       }
       else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("implementation")){
