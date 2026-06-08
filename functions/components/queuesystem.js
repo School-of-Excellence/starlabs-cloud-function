@@ -74,7 +74,15 @@ exports.onQueueStageChange = onDocumentWritten( {
         console.error(`Slack notification failed for key ${key}:`, slackError.message);
       }
 
+      // Only Scope Enhancement and Evolution Prep Orientation slots send a WATI
+      // confirmation — decided by the added slot's stage (key).
+      const isPrepStage = key === 'Evolution Prep Orientation';
       const isScopeEnhancement = key === 'Scope Enhancement';
+      if (!isPrepStage && !isScopeEnhancement) {
+        console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
+        continue;
+      }
+
       try {
         const startDate = addedValue['startdate'];
         const formattedDate = startDate._seconds
@@ -87,19 +95,12 @@ exports.onQueueStageChange = onDocumentWritten( {
         // const phoneNumber = `${countrycode}${profiledata['number']}`;
         const phoneNumber = `${profiledata['number']}`;
 
-        const isPrepStage = afterData['currentstage'] === 'Evolution Prep Orientation';
-
         const waticontent = {
           phonenumber: phoneNumber,
           body: {
-            parameters: isPrepStage ? [
+            parameters: [
               { name: 'name', value: profiledata['name'] },
-              { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
-            ] : [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'stage', value: key },
               { name: 'date_time_slot', value: formattedDate },
-              { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
             ]
           }
         };
@@ -115,31 +116,27 @@ exports.onQueueStageChange = onDocumentWritten( {
         }));
         console.log('Triggered Wati Archive Creation');
 
-        if (!isScopeEnhancement) {
-          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v2';
+        const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : 'se_slot_cofirmation_june_2026';
 
-          var map = {
-            numbers: [parseInt(waticontent['phonenumber'])],
-            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-            broadcastname: 'Individual',
-            paramFillMode: 'static',
-            parameterConfig: parameterConfig,
-            params: [],
-            profileid: [profileid],
-            templateid: null,
-            watitemplateid: templateId,
-            type: 'queue',
-            metadata: { ...afterData }
-          }
-
-          console.log("Added Slot", map);
-          const response = await commonService.createWatiArchiveDocument(map);
-          console.log('WATI ARCHIVE RESPONSE', response);
-
-          console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-        } else {
-          console.log(`Skipping WATI for Scope Enhancement stage | key ${key}`);
+        var map = {
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [profileid],
+          templateid: null,
+          watitemplateid: templateId,
+          type: 'queue',
+          metadata: { ...afterData }
         }
+
+        console.log("Added Slot", map);
+        const response = await commonService.createWatiArchiveDocument(map);
+        console.log('WATI ARCHIVE RESPONSE', response);
+
+        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
       } catch (watiError) {
         console.error(`WATI failed for key ${key}:`, watiError.message);
       }
@@ -1303,7 +1300,7 @@ exports.studioZoomLinkDeactivate = onDocumentUpdated("live assignment/{id}", asy
     }
 })
 
-exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret]},async (req, res)=>{
+exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret],cors: true, },async (req, res)=>{
   console.log(req.query.zoomdata, 'zoomdata');
   var liveassignmentData
   var oldZoomData = JSON.parse(req.query.zoomdata)

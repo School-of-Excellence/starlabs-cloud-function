@@ -14,6 +14,7 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
     var currentemi = req.query.currentemi
     const mapDataParam = req.query.mapdata;
     let mapData = null;
+    console.log("query", req.query);
     console.log(lastpaymentdate);
     console.log("email", email, "paymentplan", paymentplan);
     if (profileid) {
@@ -51,6 +52,7 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
                 res.status(200).send("Document updated successfully.");
 
                 let webhookUrl = "";
+                console.log("Updates", updates);
                 if (commonService.production) {
                  webhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
                 } else {
