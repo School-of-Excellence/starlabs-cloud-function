@@ -25,6 +25,8 @@ const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
 const runpodLLMRunning = require("./components/runpod_ai")
 const queue_atc_generation = require("./components/queue_atc_generation")
+const podWorker = require("./components/pod_worker")
+const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -246,13 +248,23 @@ exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
 
-//runpod ai job processing
-exports.run_jobrequest = runpodLLMRunning.run_jobrequest
-exports.getJobRequest = runpodLLMRunning.getJobRequest
-exports.submitJobResult = runpodLLMRunning.submitJobResult
-exports.terminatePod = runpodLLMRunning.terminatePod
+//runpod ai — ATC batch pipeline (external vLLM controller path)
+exports.atcJobWatchdog = runpodLLMRunning.atcJobWatchdog // schedule "every 10 minutes" — requeue stuck jobs
+exports.atcPodLifecycle = podWorker.atcPodLifecycle // schedule "every 2 minutes" — launch gate + LOADING→READY→drain
+exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drained" + ready/unhealthy pushes
+// LEGACY — the external controller path (launchPod/getPodBearer/terminatePod + Cloud Run drain Job)
+// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/runpod_ai.js
+// for rollback only; NOT deployed. Re-enable to fall back to the self-loop pod worker.
+// exports.run_jobrequest = runpodLLMRunning.run_jobrequest
+// exports.getJobRequest = runpodLLMRunning.getJobRequest
+// exports.submitJobResult = runpodLLMRunning.submitJobResult
+// exports.terminatePod = runpodLLMRunning.terminatePod
+// exports.atcPodScheduler = runpodLLMRunning.atcPodScheduler
 
 //queue_atc_generation
 exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
 exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
+
+//scope-enhancement-atc-pipeline — usage dashboard rollup
+exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup
 

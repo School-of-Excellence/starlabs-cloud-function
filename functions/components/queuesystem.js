@@ -1,6 +1,9 @@
 const admin = require('firebase-admin');
+const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
+const { alertAtc } = require('./atc_alerts');
+const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -366,6 +369,9 @@ exports.onQueueStageChange = onDocumentWritten( {
       }
     }catch (error){
       console.log("queue_atc_genration collection creation error",error.toString())
+      await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+        stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+      }).catch(() => {});
     }
   }
 
@@ -3407,14 +3413,13 @@ async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
       stages = variationSnap.data()["stages"] || stages;
     }
   }
-  const idx = stages.findIndex((s) => s === currentStage);
-  if (idx <= 0) return null;
-  return stages[idx - 1];
+  return pickPreviousStage(stages, currentStage);
 }
 
 // ---------- Shared stage processor ----------
 async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
   const adminATC = getFirestore("firestore-atc");
+  const adminForms = getFirestore("firestore-forms");
   const atcrequiredstages = queueData["atcrequiredstages"] || [];
   const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
   if (!stageCfg) return;
@@ -3426,14 +3431,21 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   if (stageCfg.type === "form") {
     const formref = queueData["stageproperty"][currentStage]["actionresource"];
     if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    const snap = await adminATC.collection("formsByClient")
+    // formsByClient lives in the firestore-forms database (its queueref is stored
+    // as a firestore-forms ref), so query + match there — not firestore-atc.
+    const snap = await adminForms.collection("formsByClient")
       .where("profileid", "==", profileid)
       .where("formid", "==", formref.id)
-      .where("queueref", "==", adminATC.doc(queueRef.path))
+      .where("queueref", "==", adminForms.doc(queueRef.path))
       .orderBy("date", "desc")
       .get();
 
-    if (snap.docs.length === 0) return console.log(`no form doc for stage ${currentStage}`);
+    if (snap.docs.length === 0) {
+      await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
+      });
+      return console.log(`no form doc for stage ${currentStage}`);
+    }
     const formDoc = snap.docs[0];
     sourceref = formDoc.ref;
 
@@ -3459,18 +3471,47 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       .orderBy("logdate", "desc")
       .get();
 
-    if (logSnap.docs.length === 0) return console.log(`no queue stage log for ${currentStage}`);
+    if (logSnap.docs.length === 0) {
+      await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      return console.log(`no queue stage log for ${currentStage}`);
+    }
     const logDoc = logSnap.docs[0];
     const logData = logDoc.data();
-    if (!logData["liveassignmentid"]) return console.log("no live assignment id");
+    if (!logData["liveassignmentid"]) {
+      await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      return console.log("no live assignment id");
+    }
 
     const liveSnap = await admin.firestore().collection("live assignment")
       .doc(logData["liveassignmentid"]).get();
     const liveData = liveSnap.data();
-    if (!liveData || !liveData["zoomdata"]?.["id"]) return console.log("no zoom meeting id");
+    if (!liveData || !liveData["zoomdata"]?.["id"]) {
+      await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
+      });
+      return console.log("no zoom meeting id");
+    }
 
     sourceref = liveSnap.ref;
-    const transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    let transcript;
+    try {
+      transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    } catch (err) {
+      await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
+    }
+    if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
+      await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      return console.log(`empty transcript for ${currentStage}`);
+    }
     data = {
       transcript_text: transcript.transcript_text,
       transcript_raw: transcript.transcript_raw,
@@ -3482,7 +3523,6 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     return console.log(`unknown stage type ${stageCfg.type}`);
   }
 
-  const { getFirestore } = require("firebase-admin/firestore");
   const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
@@ -3516,21 +3556,13 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
 }
 
-// ---------- Helpers ----------
-async function buildUpLifeAspirationReport(data, formname) {
-  const formdata = [];
-  data.forEach((item) => {
-    const q = item.questions.trim();
-    if (typeof item.answer === "string") {
-      formdata.push(`${q}: ${item.answer.trim()}`);
-    }
-    if (Array.isArray(item.answer) && item.answer.length > 0) {
-      formdata.push(`${q}: ${JSON.stringify(item.answer)}`);
-    }
-  });
-  return `What did the person come for in the ${formname}? : \n\n${JSON.stringify(formdata)}`;
-}
+// Exposed for integration tests (not deployed functions). onQueueStageChange
+// drives these internally; tests call them directly to exercise the Stage-0
+// ATC logic without the surrounding WATI/Zoom/Slack side effects.
+exports.processStage = processStage;
+exports.resolvePreviousStage = resolvePreviousStage;
 
+// ---------- Helpers ----------
 async function getTranscript(meetingId) {
   if (!meetingId) throw new Error("meetingId is required");
   const accountId =  zoomAccountId.value();
