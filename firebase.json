@@ -14,5 +14,24 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "firestore": [
+    {
+      "database": "firestore-atc",
+      "indexes": "firestore-atc.indexes.json"
+    },
+    {
+      "database": "firestore-forms",
+      "indexes": "firestore-forms.indexes.json"
+    }
+  ],
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
 }

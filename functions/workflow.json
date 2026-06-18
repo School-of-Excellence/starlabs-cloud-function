@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "name": "atc-pipeline",
+    "description": "Firebase CF v2 pipeline: form/zoom -> AI coaching artifacts across 3 Firestore DBs; LLM on on-demand RunPod pod; downstream triggers chain checkpoint + rubrics. SINGLE SOURCE OF TRUTH — keep current.",
+    "updated": "2026-06-18"
+  },
+  "databases": {
+    "DEF": "(default): queue generation, queue_token, classify, llmmodels, procedures, queue stage log, live assignment",
+    "ATC": "firestore-atc: queue_atc_generation (ALL jobs), atc_alpha",
+    "FORM": "firestore-forms: formsByClient",
+    "rule": "queueref on an [ATC] doc is a same-DB match key (never .get); read gen doc via adminDefault.doc(queueref.path).get()"
+  },
+  "status": {
+    "tests": { "unit": 16, "integration": 41, "invariants": 6, "green": true },
+    "summary": "stages + pod claim/guard/requeue + pod_worker scaffold DONE; external endpoints stubbed; scheduler not wired to pod_worker; configs not merged; prod config absent"
+  },
+  "workflow": {
+    "nodes": [
+      { "id": "queue_token", "label": "queue_token", "db": "DEF", "kind": "store" },
+      { "id": "onQueueStageChange", "label": "onQueueStageChange", "kind": "trigger", "file": "components/queuesystem.js", "event": "onDocumentWritten queue_token", "status": "done" },
+      { "id": "stage0", "label": "Stage 0 processStage", "kind": "stage", "file": "components/queuesystem.js", "fn": "processStage", "status": "done", "note": "form:[FORM] formsByClient; zoom:[DEF] stage log+live assignment; dedup queueref+profileid+token+stage+sourceref" },
+      { "id": "gen_doc", "label": "queue_atc_generation (gen)", "db": "ATC", "kind": "store" },
+      { "id": "onGenCreate", "label": "onQueueAtcGenerationCreate", "kind": "trigger", "file": "components/queue_atc_generation.js", "status": "done" },
+      { "id": "stage1", "label": "Stage 1 processAtcGenerationDoc", "kind": "stage", "file": "components/queue_atc_generation.js", "fn": "processAtcGenerationDoc", "status": "done", "note": "classify/atcprompts -> prompt_1; sets status:pending, checkpoint:true" },
+      { "id": "scheduler", "label": "atcPodScheduler", "kind": "scheduled", "file": "components/runpod_ai.js", "event": "every 1 hours", "status": "done", "note": "shouldStartPod: pending>=minJobsToStartPod(20) || oldest>=flushWaitMinutes(120)" },
+      { "id": "ensurePod", "label": "ensurePod", "kind": "pod", "file": "components/runpod_ai.js", "status": "done", "note": "current: RunPod REST; sets llmmodels.podid" },
+      { "id": "createEndpoint", "label": "CREATE endpoint (external)", "kind": "external", "status": "next", "note": "returns {podid,apiUrl,bearerToken}; should set pod_worker state=LOADING" },
+      { "id": "podWorkerUpdate", "label": "podWorkerUpdate", "kind": "endpoint", "file": "components/pod_worker.js", "status": "wip", "note": "push: ready|unhealthy|info; X-Api-Key" },
+      { "id": "markReady", "label": "markReady", "kind": "fn", "file": "components/pod_worker.js", "status": "done", "note": "no pending->terminate; workerRunning->skip; else->start drain job" },
+      { "id": "drainJob", "label": "drain worker (Cloud Run JOB)", "kind": "job", "file": "worker/drain.js", "status": "wip", "note": "runs >1h; loop claim->infer->write until empty, then terminate" },
+      { "id": "podJobs", "label": "claimNextJob/writeJobResult/requeueJob", "kind": "fn", "file": "components/pod_jobs.js", "status": "done", "note": "FIFO txn claim; ownership-guarded write; requeue attempts cap 3 -> error (no infinite loop)" },
+      { "id": "infer", "label": "pod /infer (external, bearer)", "kind": "external", "status": "next", "note": "callInfer contract + INFER_TIMEOUT_MS pending" },
+      { "id": "terminate", "label": "TERMINATE endpoint (external)", "kind": "external", "status": "next", "note": "terminateAndReset / doTerminatePod" },
+      { "id": "watchdog", "label": "atcJobWatchdog", "kind": "scheduled", "file": "components/runpod_ai.js", "event": "every 10 minutes", "status": "done", "note": "stuck processing>30m -> requeue (attempts-capped); backlog & no podid -> critical" },
+      { "id": "legacyHttp", "label": "getJobRequest/submitJobResult", "kind": "endpoint", "file": "components/runpod_ai.js", "status": "legacy", "note": "redundant: drain job uses pod_jobs directly; retire" },
+      { "id": "onGenUpdate", "label": "onQueueAtcGenerationUpdate", "kind": "trigger", "file": "components/queue_atc_generation.js", "status": "done", "note": "A: completed&checkpoint&generateatc->Stage2; B: rubrics completed&verdict->extract; C: checkpoint completed->vice-versa" },
+      { "id": "stage2", "label": "Stage 2 processCheckpointVerificationDoc", "kind": "stage", "file": "components/queue_atc_generation.js", "fn": "processCheckpointVerificationDoc", "status": "done", "note": "prompt_2; dedup sourceref+type" },
+      { "id": "checkpoint_doc", "label": "checkpoint report", "db": "ATC", "kind": "store" },
+      { "id": "onAtcAlphaCreate", "label": "onAtcAlphaCreate", "kind": "trigger", "file": "components/ATC.js", "status": "done" },
+      { "id": "stage3", "label": "Stage 3 processAtcAlphaDoc", "kind": "stage", "file": "components/ATC.js", "fn": "processAtcAlphaDoc", "status": "done", "note": "filters; find AI output+checkpoint; classify/rubrics_prompt; dedup queueref+profileid+token+stage+type" },
+      { "id": "viceVersa", "label": "maybeTriggerRubricsFromGeneration", "kind": "fn", "file": "components/queue_atc_generation.js", "status": "done", "note": "branch C entry into Stage 3" },
+      { "id": "rubrics_doc", "label": "rubrics scoring", "db": "ATC", "kind": "store" },
+      { "id": "verdict", "label": "extractAndSaveOverallVerdict", "kind": "fn", "file": "components/queue_atc_generation.js", "status": "done" }
+    ],
+    "edges": [
+      { "from": "queue_token", "to": "onQueueStageChange", "kind": "trigger" },
+      { "from": "onQueueStageChange", "to": "stage0", "kind": "call" },
+      { "from": "stage0", "to": "gen_doc", "kind": "write" },
+      { "from": "gen_doc", "to": "onGenCreate", "kind": "trigger" },
+      { "from": "onGenCreate", "to": "stage1", "kind": "call" },
+      { "from": "stage1", "to": "gen_doc", "kind": "write", "label": "status:pending" },
+      { "from": "scheduler", "to": "ensurePod", "kind": "call" },
+      { "from": "ensurePod", "to": "createEndpoint", "kind": "call", "label": "next" },
+      { "from": "createEndpoint", "to": "podWorkerUpdate", "kind": "data", "label": "pod loads 10-20m then pushes ready" },
+      { "from": "podWorkerUpdate", "to": "markReady", "kind": "call" },
+      { "from": "markReady", "to": "drainJob", "kind": "call", "label": "start-worker" },
+      { "from": "drainJob", "to": "podJobs", "kind": "call" },
+      { "from": "drainJob", "to": "infer", "kind": "call" },
+      { "from": "podJobs", "to": "gen_doc", "kind": "write", "label": "claim/result" },
+      { "from": "drainJob", "to": "terminate", "kind": "call", "label": "on drain" },
+      { "from": "podWorkerUpdate", "to": "terminate", "kind": "call", "label": "unhealthy -> HALTED" },
+      { "from": "watchdog", "to": "gen_doc", "kind": "write", "label": "requeue stuck (capped)" },
+      { "from": "gen_doc", "to": "onGenUpdate", "kind": "trigger", "label": "completed" },
+      { "from": "onGenUpdate", "to": "stage2", "kind": "call", "label": "branch A" },
+      { "from": "stage2", "to": "checkpoint_doc", "kind": "write" },
+      { "from": "checkpoint_doc", "to": "onGenUpdate", "kind": "trigger", "label": "completed" },
+      { "from": "onGenUpdate", "to": "viceVersa", "kind": "call", "label": "branch C" },
+      { "from": "onAtcAlphaCreate", "to": "stage3", "kind": "call" },
+      { "from": "viceVersa", "to": "stage3", "kind": "call" },
+      { "from": "stage3", "to": "rubrics_doc", "kind": "write" },
+      { "from": "rubrics_doc", "to": "onGenUpdate", "kind": "trigger", "label": "completed" },
+      { "from": "onGenUpdate", "to": "verdict", "kind": "call", "label": "branch B" },
+      { "from": "verdict", "to": "rubrics_doc", "kind": "write", "label": "overall_verdict" }
+    ]
+  },
+  "files": {
+    "nodes": [
+      { "id": "index.js", "role": "entry — re-exports deployed functions" },
+      { "id": "components/service.js", "role": "admin.initializeApp (load first)" },
+      { "id": "components/queuesystem.js", "role": "Stage 0" },
+      { "id": "components/queue_atc_generation.js", "role": "Stage 1+2 + onUpdate routing (A/B/C)" },
+      { "id": "components/ATC.js", "role": "Stage 3" },
+      { "id": "components/runpod_ai.js", "role": "scheduler, watchdog, ensurePod, doTerminatePod, job HTTP" },
+      { "id": "components/pod_jobs.js", "role": "SHARED claim/write/requeue" },
+      { "id": "components/pod_worker.js", "role": "state machine + podWorkerUpdate" },
+      { "id": "components/atc_alerts.js", "role": "Slack alertAtc/notifySlack" },
+      { "id": "components/atc_helpers.js", "role": "pure: shouldStartPod, extractAssistantFinalJson, buildUpLifeAspirationReport, pickPreviousStage" },
+      { "id": "worker/drain.js", "role": "Cloud Run JOB drain loop (not a function)" },
+      { "id": "prompts/", "role": "prompt_1/2/3 templates" },
+      { "id": "test/", "role": "unit + integration (stage0-3,podloop,podworker,e2e) + invariants.js" }
+    ],
+    "edges": [
+      { "from": "index.js", "to": "*", "kind": "import", "label": "re-export deployed" },
+      { "from": "components/queuesystem.js", "to": "components/atc_helpers.js", "kind": "import" },
+      { "from": "components/queue_atc_generation.js", "to": "components/atc_alerts.js", "kind": "import" },
+      { "from": "components/queue_atc_generation.js", "to": "components/atc_helpers.js", "kind": "import" },
+      { "from": "components/queue_atc_generation.js", "to": "components/ATC.js", "kind": "call", "label": "processAtcAlphaDoc (branch C, lazy)" },
+      { "from": "components/runpod_ai.js", "to": "components/atc_alerts.js", "kind": "import" },
+      { "from": "components/runpod_ai.js", "to": "components/atc_helpers.js", "kind": "import" },
+      { "from": "components/runpod_ai.js", "to": "components/pod_jobs.js", "kind": "import" },
+      { "from": "components/pod_worker.js", "to": "components/atc_alerts.js", "kind": "import" },
+      { "from": "components/pod_worker.js", "to": "components/pod_jobs.js", "kind": "import" },
+      { "from": "worker/drain.js", "to": "components/pod_jobs.js", "kind": "import" }
+    ]
+  },
+  "entryPoints": [
+    "onQueueStageChange", "onQueueAtcGenerationCreate", "onQueueAtcGenerationUpdate",
+    "onAtcAlphaCreate", "atcPodScheduler", "atcJobWatchdog", "podWorkerUpdate",
+    "run_jobrequest", "getJobRequest", "submitJobResult", "terminatePod",
+    "worker/drain.js (Cloud Run JOB — separate deploy, not via index.js)"
+  ],
+  "configDocs": {
+    "classify/atcprompts": "[DEF] prompts (stage 1/2)",
+    "classify/rubrics_prompt": "[DEF] prompt (stage 3)",
+    "classify/pod_scheduler": "[DEF] thresholds+urls (scheduler/watchdog) — merge into pod_worker [next]",
+    "classify/pod_worker": "[DEF] state machine: state/podid/apiUrl/bearerToken/lease",
+    "llmmodels/{templateid}.podid": "[DEF] pod liveness source of truth"
+  },
+  "pending": [
+    "CREATE endpoint -> ensurePod + set pod_worker LOADING (wire scheduler<->state machine)",
+    "TERMINATE endpoint -> terminateAndReset/doTerminatePod",
+    "/infer contract (callInfer) + max inference time -> INFER_TIMEOUT_MS",
+    "triggerWorkerJob -> Cloud Run Jobs API (WORKER_JOB_NAME/REGION)",
+    "merge classify/pod_scheduler + pod_worker into one doc",
+    "create classify config in PROD (absent -> loop dormant)",
+    "retire getJobRequest/submitJobResult"
+  ]
+}
