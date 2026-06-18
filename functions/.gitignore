@@ -4,3 +4,10 @@ node_modules/
 # emulator). NEVER commit (the prod equivalent would hold real credentials).
 .secret.local
 *.local
+
+# Local development & testing — NOT deployed to prod
+test/
+docs/
+jest.integration.config.js
+firebase.throwaway.json
+workflow.json
