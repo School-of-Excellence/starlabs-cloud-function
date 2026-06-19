@@ -2547,18 +2547,24 @@ async function sendWatiBroadCast(watiarchiveid) {
   }
 
   // ── 3. Load profile_data (always needed for numbermap lookup) ────────
-  var query = null;
-  if(broadCastData['profileid'].length >= 30){
-    query = admin.firestore().collection("profile_data").where('profileid','in',broadCastData['profileid'])
-  }else{
-    query = admin.firestore().collection("profile_data").orderBy("name", "asc")
+  // numbermap stores the profile_data document id, so look up by documentId().
+  // Firestore 'in' query supports max 30 ids per call — chunk them.
+  const profileIds = broadCastData['profileid'] || [];
+  const profileChunkSize = 30;
+  for (let i = 0; i < profileIds.length; i += profileChunkSize) {
+    const chunk = profileIds.slice(i, i + profileChunkSize);
+    try {
+      const snap = await admin.firestore()
+        .collection("profile_data")
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      snap.docs.forEach(doc => {
+        mapProfile[doc.id] = doc.data();
+      });
+    } catch (err) {
+      console.error("Error loading profile_data chunk:", err);
+    }
   }
-
-  await query.get().then((profileSnap) => {
-    profileSnap.docs.forEach(doc => {
-      mapProfile[doc.id] = doc.data();
-    });
-  });
 
   // ── 4. Load participant metadata (only if any param uses metadata mode) ─
   const hasMetadataParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'metadata');

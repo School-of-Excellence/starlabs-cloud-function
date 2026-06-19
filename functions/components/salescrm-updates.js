@@ -488,7 +488,7 @@ exports.sendSlackNotificationSaleRejection = onDocumentUpdated({document:'salesl
     console.log("Sending Data to watson");
 
     const watsonUrl = commonService.production
-      ? ""
+      ? "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateSalesleads"
       : "https://us-central1-watson-test-19.cloudfunctions.net/updateSalesleads";
 
     const postData = JSON.stringify(afterData);

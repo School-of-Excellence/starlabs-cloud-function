@@ -28,7 +28,7 @@ const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
 
-exports.onQueueStageChange = onDocumentWritten( {
+exports.onQueueStageChange = onDocumentWritten({
     document: "queue_token/{id}",
     secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
   }, async (change) =>{
@@ -55,68 +55,126 @@ exports.onQueueStageChange = onDocumentWritten( {
     });
   }
 
+  // get slot title if variation id exists
+  let getSlotTitle = () => null;
+
+  if (afterData['variationid']) {
+    const queuePlanningSnap = await admin.firestore()
+      .collection('queue planning')
+      .where('queueref', '==', afterData['queueref'])
+      .where('variationlist', 'array-contains', afterData['variationid'])
+      .get();
+
+    const planDoc = queuePlanningSnap.docs[0];
+
+    if (planDoc) {
+      const planning = planDoc.data()['planning'] || [];
+      
+      const slots = planning.flatMap(plan =>
+        (plan['segments'] || []).flatMap(segment =>
+          (segment['slots'] || []).map(slot => ({
+            ...slot,
+            segmentid: segment['segmentid']  
+          }))
+        )
+      );
+
+      getSlotTitle = (slotValue, stageName) => {
+        const matchedSlot = slots.find(slot =>
+          slot['segmentid'] === slotValue['segmentid'] &&
+          slot['stagename'] === stageName &&
+          slot['startdate']?.seconds === slotValue['startdate']?.seconds &&
+          slot['enddate']?.seconds === slotValue['enddate']?.seconds
+        );
+        return matchedSlot?.['title'];
+      };
+    }
+  }
+
   try {
-    let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
-    let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+      let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
+      let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
 
-    const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
-    const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
+      const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
+      const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
 
-    let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+      let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
 
-    // Process added keys
-    for (const key of addedKeys) {
-      const addedValue = afterData['selectedstageslot'][key];
+      // Process added keys
+      for (const key of addedKeys) {
+        const addedValue = afterData['selectedstageslot'][key];
 
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
-      }
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
+        }
 
-      const isScopeEnhancement = key === 'Scope Enhancement';
-      try {
-        const startDate = addedValue['startdate'];
-        const formattedDate = startDate._seconds
-          ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-            timeZone: 'Asia/Kolkata'
-          }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
+        // Only Scope Enhancement and Evolution Prep Orientation slots send a WATI
+        // confirmation — decided by the added slot's stage (key).
+        const isPrepStage = key === 'Evolution Prep Orientation';
+        const isScopeEnhancement = key === 'Scope Enhancement';
+        const isGuidedOrientation = key === 'Guided Self ATC Orientation';
+        const formattedTitle = getSlotTitle(addedValue, key);
 
-        // const phoneNumber = `${countrycode}${profiledata['number']}`;
-        const phoneNumber = `${profiledata['number']}`;
+        try {
+          await commonService.saveNotificationRecord({
+            title: 'Slot Confirmed',
+            message: `✅ Your ${key} slot has been confirmed for ${formattedTitle}`,
+            subtitle: null,
+            date: admin.firestore.FieldValue.serverTimestamp(),
+            landingpage: null,
+            logged: true,
+            profileid: [profileid],
+            sticky: false,
+            notificationtype: 'queue',
+            notificationimage: null,
+            metadata: { ...afterData }
+          });
+          console.log(`Push notification sent for confirmed slot | key: ${key}`);
+        } catch (pushError) {
+          console.error(`Push notification failed for key ${key}:`, pushError.message);
+        }
 
-        const isPrepStage = afterData['currentstage'] === 'Evolution Prep Orientation';
+        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation) {
+          console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
+          continue;
+        }
 
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: isPrepStage ? [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'choosendate', value: addedValue['title'] ?? 'NA' }
-            ] : [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'stage', value: key },
-              { name: 'date_time_slot', value: formattedDate },
-              { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
-            ]
-          }
-        };
+        try {
+          const startDate = addedValue['startdate'];
+          const formattedDate = startDate._seconds
+            ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+              timeZone: 'Asia/Kolkata'
+            }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        // await commonService.sendToWhatsappViaWati(waticontent);
-        
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
+          // const phoneNumber = `${countrycode}${profiledata['number']}`;
+          const phoneNumber = `${profiledata['number']}`;
 
-        if (!isScopeEnhancement) {
-          const templateId = isPrepStage ? 'test_ep_confirmation' : 'app_slot_confirmation_automate_app_to_wati_v2';
+          const waticontent = {
+            phonenumber: phoneNumber,
+            body: {
+              parameters: [
+                { name: 'name', value: profiledata['name'] },
+                { name: 'date_time_slot', value: formattedTitle },
+              ]
+            }
+          };
+
+          // await commonService.sendToWhatsappViaWati(waticontent);
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : isScopeEnhancement   ? 'se_slot_cofirmation_june_2026' : 'guided_ori_slot_confirmation_june_v1';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
@@ -136,82 +194,101 @@ exports.onQueueStageChange = onDocumentWritten( {
           const response = await commonService.createWatiArchiveDocument(map);
           console.log('WATI ARCHIVE RESPONSE', response);
 
-          console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-        } else {
-          console.log(`Skipping WATI for Scope Enhancement stage | key ${key}`);
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
         }
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
-      }
-    }
-
-    // Process removed keys
-    for (const key of removedKeys) {
-      const removedValue = beforeData['selectedstageslot'][key];
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
       }
 
-      try {
-        const startDate = removedValue['startdate'];
-        const formattedDate = startDate._seconds
+      // Process removed keys
+      for (const key of removedKeys) {
+        const removedValue = beforeData['selectedstageslot'][key];
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
+        }
+
+        try {
+          const startDate = removedValue['startdate'];
+          const formattedDate = startDate._seconds
           ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
             dateStyle: 'medium',
             timeStyle: 'short',
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        const phoneNumber = `${profiledata['number']}`;
+          const formattedTitle = getSlotTitle(removedValue, key);
 
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'date_time_slot', value: formattedDate },
-            ]
+          // push notification for revert slot
+          try {
+            await commonService.saveNotificationRecord({
+              title: 'Slot Reverted',
+              message: `Your ${key} slot has been reverted for ${formattedTitle}`,
+              subtitle: null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: null,
+              logged: true,
+              profileid: [profileid],
+              sticky: false,
+              notificationtype: 'queue',
+              notificationimage: null,
+              metadata: { ...afterData }
+            });
+            console.log(`Push notification sent for reverted slot | key: ${key}`);
+          } catch (pushError) {
+            console.error(`Push notification failed for key ${key}:`, pushError.message);
           }
-        };
 
-        // await commonService.sendToWhatsappViaWati(waticontent);
+          const phoneNumber = `${profiledata['number']}`;
 
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
+          const waticontent = {
+            phonenumber: phoneNumber,
+            body: {
+              parameters: [
+                { name: 'name', value: profiledata['name'] },
+                { name: 'date_time_slot', value: formattedTitle },
+              ]
+            }
+          };
 
-        map = {
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-          broadcastname: 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
-          type: 'queue',
-          metadata: {...afterData}
+          // await commonService.sendToWhatsappViaWati(waticontent);
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
+            type: 'queue',
+            metadata: {...afterData}
+          }
+
+          console.log("Reverted Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
         }
-
-        console.log("Reverted Slot", map);
-        const response = await commonService.createWatiArchiveDocument(map);
-        console.log('WATI ARCHIVE RESPONSE', response);
-
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
+        console.log('Removed:', key, removedValue);
       }
-      console.log('Removed:', key, removedValue);
-    }
-  } catch (error) {
+    } catch (error) {
     console.log('Error processing slot changes:', error);
   }
 
@@ -1303,7 +1380,7 @@ exports.studioZoomLinkDeactivate = onDocumentUpdated("live assignment/{id}", asy
     }
 })
 
-exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret]},async (req, res)=>{
+exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret],cors: true, },async (req, res)=>{
   console.log(req.query.zoomdata, 'zoomdata');
   var liveassignmentData
   var oldZoomData = JSON.parse(req.query.zoomdata)
@@ -1926,7 +2003,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
 
   // Migrate AEL Form
   var aelFormID = ["KqHfM292QPXRLpv9RQNi", "xGhIkwZfSjhUC1sv1tlw"]
-  if(aelFormID.includes(data["formid"]) && data["queueref"]){
+  if(aelFormID.includes(data["formid"])){
     var formData = data;
     const formDoc = snapshot.data.ref
 
@@ -1951,7 +2028,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
       "crossovermetric": {},
       "reallifesituation": null,
       // "rsvpid": mapRSVP[data["profile_id"]]["docid"]
-      "queueid": data["queueref"].id
+      "queueid": data["queueref"]?.id ?? null
     }
     var crossoverid = admin.firestore().collection("interim crossover").doc().id;
     var crossoverdata = {
@@ -1981,10 +2058,11 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
     var batch = admin.firestore().batch()
     batch.set(admin.firestore().collection("participant AEL").doc(aelid), aeldata)
     batch.set(admin.firestore().collection("interim crossover").doc(crossoverid), crossoverdata)
-    batch.update(formDoc, {
-      aelid: aelid
+    await batch.commit().then(async() =>{
+      await formDoc.update({
+        aelid: aelid
+      })
     })
-    await batch.commit()
   }
 })
 

@@ -3,6 +3,8 @@ const { onRequest } = require("firebase-functions/v2/https");
 const commonService = require("./service");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret, defineString } = require("firebase-functions/params");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
 const axios = require("axios");
@@ -1116,3 +1118,4 @@ async function throwParticipantMetaDataException(exception) {
   let data = { ...exception, ...{ updateddate: new Date() } }
   await admin.firestore().collection('participantmetadata exception').add(data)
 }
+

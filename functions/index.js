@@ -76,6 +76,11 @@ exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/
 exports.autoCloseTickets = clientIssueSystem.autoCloseTickets 
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
 
+// Negligence rating + CS coaching functions were EXTRACTED to the customer-support
+// repo and now deploy from there (project starlabs-test, codebase "cs-coaching").
+// Do NOT re-add the coaching exports here — they would collide with that codebase.
+// The original ticketing functions above (ticketfromwebsite … dashboardcustomersupport) stay here.
+
 //communication
 exports.notifyMobileApp = communication.notifyMobileApp // c - "/notificationrecord/{id}"
 exports.SupportDeskToSlack = communication.SupportDeskToSlack // c - '/supportdesk/{docid}/messages/{messageid}'
