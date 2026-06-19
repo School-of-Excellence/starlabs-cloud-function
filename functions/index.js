@@ -218,6 +218,10 @@ exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
 
+//tvlogin
+exports.authorizeTvDevice = workshop.authorizeTvDevice
+
+
 //workshop payment razorpay
 // exports.createRazorpayOrder = workshop.createRazorpayOrder
 // exports.verifyRazorpayPayment = workshop.verifyRazorpayPayment
