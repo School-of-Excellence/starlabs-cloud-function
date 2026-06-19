@@ -1978,10 +1978,11 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
     var batch = admin.firestore().batch()
     batch.set(admin.firestore().collection("participant AEL").doc(aelid), aeldata)
     batch.set(admin.firestore().collection("interim crossover").doc(crossoverid), crossoverdata)
-    batch.update(formDoc, {
-      aelid: aelid
+    await batch.commit().then(() =>{
+      await formDoc.update({
+        aelid: aelid
+      })
     })
-    await batch.commit()
   }
 })
 
