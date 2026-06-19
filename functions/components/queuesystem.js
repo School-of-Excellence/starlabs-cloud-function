@@ -2003,7 +2003,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
 
   // Migrate AEL Form
   var aelFormID = ["KqHfM292QPXRLpv9RQNi", "xGhIkwZfSjhUC1sv1tlw"]
-  if(aelFormID.includes(data["formid"]) && data["queueref"]){
+  if(aelFormID.includes(data["formid"])){
     var formData = data;
     const formDoc = snapshot.data.ref
 
@@ -2028,7 +2028,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
       "crossovermetric": {},
       "reallifesituation": null,
       // "rsvpid": mapRSVP[data["profile_id"]]["docid"]
-      "queueid": data["queueref"].id
+      "queueid": data["queueref"]?.id ?? null
     }
     var crossoverid = admin.firestore().collection("interim crossover").doc().id;
     var crossoverdata = {
@@ -2058,10 +2058,11 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
     var batch = admin.firestore().batch()
     batch.set(admin.firestore().collection("participant AEL").doc(aelid), aeldata)
     batch.set(admin.firestore().collection("interim crossover").doc(crossoverid), crossoverdata)
-    batch.update(formDoc, {
-      aelid: aelid
+    await batch.commit().then(async() =>{
+      await formDoc.update({
+        aelid: aelid
+      })
     })
-    await batch.commit()
   }
 })
 
