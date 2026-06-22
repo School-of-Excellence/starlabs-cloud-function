@@ -1,0 +1,25 @@
+# cf-e2e — THIN CALLER for the Stage-2 gate on a Cloud-Functions change.
+# Runs the queue e2e suite against THIS PR's real triggers in the emulator (preview = the gate).
+# Logic lives in the hub (starlabs-e2e-tests/.github/workflows/cf-e2e.yml).
+name: cf-e2e (emulator gate)
+
+on:
+  pull_request:
+    branches: [cicd-dev, cicd-prod]   # sudo branches — gate runs on PR to either. Switch to [development] at cutover.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths:
+      - 'functions/**'
+      - '.github/workflows/cf-e2e.yml'
+  workflow_dispatch: {}
+
+jobs:
+  gate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.draft == false ||
+      contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    uses: School-of-Excellence/starlabs-e2e-tests/.github/workflows/cf-e2e.yml@main
+    with:
+      app_branch: feature/cicd-rollout  # TODO: change to development after Phase 1B cutover
+      e2e_ref: main
+    secrets: inherit

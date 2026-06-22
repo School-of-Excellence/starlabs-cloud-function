@@ -5,6 +5,7 @@ const admin = require('firebase-admin');
 const { Buffer } = require('buffer');
 const axios = require('axios');
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { getAuth } = require("firebase-admin/auth");
 const { defineSecret } = require("firebase-functions/params");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 // const Razorpay = require("razorpay");
@@ -707,19 +708,19 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 15 * * *"
   }
 })
 
-// function requireAuth(request) {
-//   if (!request.auth || !request.auth.uid) {
-//     throw new HttpsError("unauthenticated", "Sign-in is required.");
-//   }
-//   return request.auth.uid;
-// }
+function requireAuth(request) {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "Sign-in is required.");
+  }
+  return request.auth.uid;
+}
 
-// function requireString(value, field) {
-//   if (typeof value !== "string" || value.trim() === "") {
-//     throw new HttpsError("invalid-argument", `Missing "${field}".`);
-//   }
-//   return value.trim();
-// }
+function requireString(value, field) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new HttpsError("invalid-argument", `Missing "${field}".`);
+  }
+  return value.trim();
+}
 
 // /**
 //  * Reads `series/{seriesId}` and validates it is a paid item with a price.
@@ -890,3 +891,127 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 15 * * *"
 //     return { verified: true };
 //   }
 // );
+
+exports.authorizeTvDevice = onCall(
+  {
+    region: "us-central1",
+  },
+  async (request) => {
+    // SELF-CONTAINED: do NOT call the module-level `requireAuth` /
+    // `requireString` helpers from here. A previous deploy of this
+    // function ReferenceError'd on `requireAuth` even though it was
+    // visible at module scope in the source — Cloud Functions' gen-2
+    // function-target wrapper appears to bundle this handler without
+    // pulling in sibling top-level declarations. Inlining the auth
+    // and validation logic makes the function bullet-proof against
+    // whatever bundling quirk caused that.
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError("unauthenticated", "Sign-in is required.");
+    }
+    const uid = request.auth.uid;
+
+    const rawCode = (request.data && request.data.code) || "";
+    const code = String(rawCode).toUpperCase().trim();
+    if (!code || code.length !== 6) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A 6-character pairing code is required."
+      );
+    }
+
+    const db = getFirestore();
+    const docRef = db.collection("pendingAuth").doc(code);
+
+    // ── Diagnostic logging ────────────────────────────────────────────────
+    // The Firestore Console shows pendingAuth/{code} present, yet this
+    // function keeps reporting snap.exists === false. The four most likely
+    // causes are: (a) the project has a non-default Firestore database and
+    // we are reading from the wrong one, (b) the TV writes a doc ID that
+    // looks identical to the eye but has hidden whitespace/Unicode chars,
+    // (c) the function is bound to a different Firebase project than the
+    // Console we are inspecting, (d) eventual-consistency lag (rare for a
+    // strongly-consistent doc.get). These log lines let us tell them apart.
+    // Nothing sensitive — pairing codes are not bearer credentials.
+    const dbId =
+      (db && db._settings && db._settings.databaseId) || "(default)";
+    const projectId =
+      process.env.GCLOUD_PROJECT ||
+      process.env.GCP_PROJECT ||
+      "(unknown)";
+    console.log(
+      `authorizeTvDevice: rawCode=${JSON.stringify(rawCode)} ` +
+        `normalisedCode=${JSON.stringify(code)} ` +
+        `codeBytesHex=${Buffer.from(code).toString("hex")} ` +
+        `docPath="${docRef.path}" databaseId="${dbId}" projectId="${projectId}"`
+    );
+
+    const snap = await docRef.get();
+    console.log(`authorizeTvDevice: snap.exists=${snap.exists} for code=${code}`);
+    if (!snap.exists) {
+      // Dump every doc ID currently in pendingAuth so we can compare
+      // against the code the TV displayed. If our normalised code is
+      // 4929FC but the collection contains a doc named " 4929FC" (with a
+      // leading space) or "4929fc" (lowercase) the mismatch will be
+      // visible immediately.
+      try {
+        const existing = await db.collection("pendingAuth").listDocuments();
+        const ids = existing.map((d) => d.id);
+        const idsHex = existing.map((d) =>
+          `${d.id}=${Buffer.from(d.id).toString("hex")}`
+        );
+        console.warn(
+          `authorizeTvDevice: not-found. pendingAuth has ${ids.length} ` +
+            `doc(s): ${JSON.stringify(ids)} hex=${JSON.stringify(idsHex)}`
+        );
+      } catch (listError) {
+        console.warn(
+          `authorizeTvDevice: listDocuments failed: ${listError.message}`
+        );
+      }
+      throw new HttpsError(
+        "not-found",
+        "This pairing code is not valid. Generate a new one on the TV."
+      );
+    }
+
+    const expiresAt = snap.get("expiresAt");
+    if (!expiresAt || expiresAt.toMillis() < Date.now()) {
+      throw new HttpsError(
+        "deadline-exceeded",
+        "This code has expired. Generate a new one on the TV."
+      );
+    }
+
+    const existingUid = snap.get("uid");
+    if (existingUid) {
+      throw new HttpsError(
+        "already-exists",
+        "This code has already been used."
+      );
+    }
+
+    let customToken;
+    try {
+      customToken = await getAuth().createCustomToken(uid);
+    } catch (error) {
+      // Do not surface SDK internals to the client — log server-side and
+      // return a generic error. The token itself is never logged.
+      console.error("authorizeTvDevice: createCustomToken failed:", error);
+      throw new HttpsError(
+        "internal",
+        "Could not authorize the TV. Please try again."
+      );
+    }
+
+    await docRef.set(
+      {
+        uid,
+        customToken,
+        authorizedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return { ok: true };
+  }
+);
