@@ -11,6 +11,11 @@
     "test": "jest test/unit",
     "test:integration": "firebase emulators:exec --only firestore --project fir-sample-aae4a \"jest --runInBand --config jest.integration.config.js\"",
     "test:integration:safe": "firebase emulators:exec --only firestore --project fir-sample-aae4a --config firebase.throwaway.json \"jest --runInBand --config jest.integration.config.js\"",
+    "ci:local": "bash scripts/ci-local.sh",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "verify:live": "node scripts/verify-live-pipeline.js",
+    "verify:indexes": "bash scripts/verify-indexes.sh",
+    "stage-test": "node scripts/stage-test.js",
     "test:invariants": "node test/invariants.js"
   },
   "engines": {

@@ -11,3 +11,8 @@ docs/
 jest.integration.config.js
 firebase.throwaway.json
 workflow.json
+scripts/
+
+# Claude Code local tooling — not part of the codebase
+CLAUDE.md
+.claude/
