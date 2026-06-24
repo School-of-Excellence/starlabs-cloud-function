@@ -23,6 +23,10 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
+const voiptest = require("./components/voiptest")
+
+//voiptestcalls
+exports.testVoipCall = voiptest.testVoipCall;
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -70,7 +74,7 @@ exports.ticketMsgNotification = clientIssueSystem.ticketMsgNotification // c - '
 exports.slackCustomerSupport = clientIssueSystem.slackCustomerSupport // w - "clientissue/{id}"
 exports.ticketCreated = clientIssueSystem.ticketCreated // c - "clientissue/{id}"
 exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/{id}"
-exports.autoCloseTickets = clientIssueSystem.autoCloseTickets 
+exports.autoCloseTickets = clientIssueSystem.autoCloseTickets
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
 
 //communication
@@ -103,7 +107,7 @@ exports.uploadContentToPublitio = contentSystem.uploadContentToPublitio
 exports.totalparticipant_tierupdate = eiflixTierSystem.totalparticipant_tierupdate // w - "/tier access config/{docid}"
 
 // exports & alerts
-if(commonService.production){
+if (commonService.production) {
   exports.scheduledFirestoreExport = exportsAndAlerts.scheduledFirestoreExport // schedule "every 12 hours"
 }
 exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublished "Launch-Your-Legacy-budget-alert-slack"
