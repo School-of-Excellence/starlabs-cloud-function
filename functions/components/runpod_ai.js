@@ -1,12 +1,22 @@
 const admin = require('firebase-admin');
 const { onRequest } = require("firebase-functions/v2/https");
-const {defineSecret} = require("firebase-functions/params");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret } = require("firebase-functions/params");
+const { getFirestore } = require("firebase-admin/firestore");
 //components imports
+const { notifySlack, alertAtc } = require("./atc_alerts");
+const { shouldStartPod } = require("./atc_helpers");
+const { claimNextJob, writeJobResult, DEFAULT_MAX_ATTEMPTS } = require("./pod_jobs");
 
 const cors = require("cors");
 const corsHandler = cors({origin: true});
 
-const db = admin.firestore()
+// Default DB holds `llmmodels` + `classify`. The job collection
+// (`queue_atc_generation`) lives in the `firestore-atc` database — every
+// writer (queuesystem/queue_atc_generation/ATC) uses it, so the pod pipeline
+// must read/write jobs there too.
+const db = admin.firestore();
+const atcDb = getFirestore("firestore-atc");
 
 // ── Secrets ──
 const runpodApiKey = defineSecret("RUNPOD_API_KEY");
@@ -15,6 +25,12 @@ const {logger} = require("firebase-functions");
 const {FieldValue} = require("firebase-admin/firestore");
 const BATCH_LIMIT = 400;
 const {getAuth} = require("firebase-admin/auth");
+
+const SCHEDULER_CONFIG_DOCID = "pod_scheduler";
+const DEFAULT_MIN_JOBS = 20;
+const DEFAULT_FLUSH_WAIT_MINUTES = 120; // 2h: flush a sub-min batch once the oldest pending job is this old
+const DEFAULT_STUCK_PROCESSING_MINUTES = 30;
+const DEFAULT_COLLECTION = "queue_atc_generation";
 
 // =============================================================================
 // Helpers
@@ -50,569 +66,269 @@ function handleOptions(req, res) {
   return false;
 }
 
+// Convert a Firestore Timestamp / Date / {_seconds} to epoch millis, else null.
+function toMillis(ts) {
+  if (!ts) return null;
+  if (typeof ts.toDate === "function") return ts.toDate().getTime();
+  if (typeof ts._seconds === "number") return ts._seconds * 1000;
+  if (ts instanceof Date) return ts.getTime();
+  return null;
+}
+
+// claimNextJob + writeJobResult now live in ./pod_jobs (shared with the Cloud
+// Run drain worker). Imported at the top of this file.
+
 // =============================================================================
-// Merged cloud functions for the RunPod-backed job pipeline.
-//
-// Functions exported:
-//   - run_jobrequest   : ensure a pod exists for a template; trigger drain
-//   - getJobRequest    : pod fetches pending jobs and claims them
-//   - submitJobResult  : pod submits results; dispatch /process or terminate
-//   - terminatePod     : delete the RunPod pod and clear llmmodels.podid
-//
-// Single source of truth on llmmodels/{TEMPLATEID}: only `podid` field is
-// written by this code (set on create, cleared on terminate). No `status`.
+// ensurePod — core "make sure exactly one pod exists for this template" logic.
+// Shared by the run_jobrequest HTTP wrapper and the atcPodScheduler cron.
+// Race-guarded via llmmodels/{TEMPLATEID}.podid ("__creating__" sentinel),
+// with podid-drift healing and a post-lock recheck against RunPod.
 // =============================================================================
+async function ensurePod(payload) {
+  const slackUrl = payload.SLACK_WEBHOOK_URL || "";
+  const apiKey = runpodApiKey.value();
+  if (!apiKey) return {success: false, error: "RunPod API key not configured"};
 
-const TRIGGER_TIMEOUT_MS = 10000;
+  const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
+  const templateSnap = await templateRef.get();
+  if (!templateSnap.exists) return {success: false, error: "Template not found"};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1) run_jobrequest
-// ─────────────────────────────────────────────────────────────────────────────
-// exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
-//   (req, res) => {
-//     corsHandler(req, res, async () => {
-//       if (handleOptions(req, res)) return;
-//       const auth = await requireAuth(req, res);
-//       if (!auth) return;
+  const docData = templateSnap.data();
+  const runpodTemplateId = docData.templateid;
 
-//       const payload = req.body || {};
-//       const slackUrl = payload.SLACK_WEBHOOK_URL || "";
+  // ── (a) Reuse path: is a pod with this template already up? ──
+  const listResp = await fetch("https://rest.runpod.io/v1/pods", {
+    method: "GET",
+    headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!listResp.ok) {
+    const errorData = await listResp.json().catch(() => ({}));
+    return {success: false, error: `RunPod list error: ${listResp.status}`, details: errorData};
+  }
+  const listData = await listResp.json();
+  const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
+  const existing = pods.find((p) => p.templateId === runpodTemplateId);
 
-//       try {
-//         const required = [
-//           "TEMPLATEID",
-//           "SLACK_WEBHOOK_URL",
-//           "FIREBASE_FETCH_URL",
-//           "FIREBASE_SUBMIT_URL",
-//           "FIREBASE_COLLECTION_NAME",
-//         ];
-//         for (const k of required) {
-//           if (!payload[k]) {
-//             return res.status(400).json({success: false, error: `payload field '${k}' is required`});
-//           }
-//         }
+  if (existing) {
+    if (docData.podid !== existing.id) {
+      await templateRef.update({podid: existing.id}); // heal drift
+    }
+    // No trigger: the worker self-loops once its model is health-ready and pulls
+    // jobs via getJobRequest, so a live pod will pick up new pending work on its
+    // own next claim. Nothing to do but report it's already running.
+    return {success: true, alreadyRunning: true, podid: existing.id};
+  }
 
-//         const apiKey = runpodApiKey.value();
-//         if (!apiKey) return res.status(500).json({success: false, error: "RunPod API key not configured"});
+  // No matching live pod — clear stale podid (but leave "__creating__" alone).
+  if (docData.podid && docData.podid !== "__creating__") {
+    await templateRef.update({podid: ""});
+  }
 
-//         const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
-//         const templateSnap = await templateRef.get();
-//         if (!templateSnap.exists) return res.status(404).json({success: false, error: "Template not found"});
+  // ── (b) Race guard: serialize concurrent creators ──
+  const reserved = await db.runTransaction(async (tx) => {
+    const s = await tx.get(templateRef);
+    const d = s.data() || {};
+    if (d.podid === "__creating__") return {raceLost: true, reason: "creating"};
+    if (d.podid) return {raceLost: true, reason: "exists", podid: d.podid};
+    tx.update(templateRef, {podid: "__creating__"});
+    return {raceLost: false};
+  });
+  if (reserved.raceLost) {
+    if (reserved.reason === "creating") return {success: true, alreadyRunning: true, creating: true};
+    return {success: true, alreadyRunning: true, podid: reserved.podid};
+  }
 
-//         const docData = templateSnap.data();
-//         const runpodTemplateId = docData.templateid;
+  try {
+    // ── (b.1) Re-check RunPod after acquiring the lock ──
+    const recheckResp = await fetch("https://rest.runpod.io/v1/pods", {
+      method: "GET",
+      headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+      signal: AbortSignal.timeout(30000),
+    });
+    if (recheckResp.ok) {
+      const recheckData = await recheckResp.json();
+      const recheckPods = Array.isArray(recheckData) ? recheckData : (recheckData.pods || recheckData.data || []);
+      const raced = recheckPods.find((p) => p.templateId === runpodTemplateId);
+      if (raced) {
+        await templateRef.update({podid: raced.id});
+        // Worker self-starts; no /process trigger needed (see reuse path above).
+        return {success: true, alreadyRunning: true, podid: raced.id};
+      }
+    }
 
-//         // ── (a) Reuse path: ask RunPod if a pod with this template is up ──
-//         const listResp = await fetch("https://rest.runpod.io/v1/pods", {
-//           method: "GET",
-//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//           signal: AbortSignal.timeout(30000),
-//         });
-//         if (!listResp.ok) {
-//           const errorData = await listResp.json().catch(() => ({}));
-//           return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
-//         }
-//         const listData = await listResp.json();
-//         const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
-//         const existing = pods.find((p) => p.templateId === runpodTemplateId);
+    // ── (c) Build env once; GPU choice changes per attempt ──
+    const env = {
+      MODEL_PATH: docData.path,
+      MODEL_NAME: docData.name,
+      TEMPLATE_ID: runpodTemplateId,
+      GIT_REPO: docData.git_repo,
+      REPO_ID: docData.repo_id,
+      D_TYPE: docData.dtype,
+      SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
+      FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
+      FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
+      FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
+      DOC_ID: payload.DOC_ID || "",
+      FUNCTIONS_API_KEY: sharedSecret.value(),
+    };
 
-//         if (existing) {
-//           // Pod already running. Trigger a drain so it picks up new pending jobs.
-//           await triggerProcess(existing.id).catch((e) =>
-//             logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
-//         }
+    const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
+    if (gpupriority.length === 0) {
+      await templateRef.update({podid: ""});
+      return {success: false, error: "llmmodels doc missing gpupriority[]"};
+    }
 
-//         // ── (b) Race guard: atomically reserve the slot before creating ──
-//         const reserved = await db.runTransaction(async (tx) => {
-//           const s = await tx.get(templateRef);
-//           const d = s.data() || {};
-//           if (d.podid) return {raceLost: true, podid: d.podid};
-//           tx.update(templateRef, {podid: "__creating__"});
-//           return {raceLost: false};
-//         });
-//         if (reserved.raceLost) {
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
-//         }
+    // ── (d) Try each GPU option in order ──
+    const attempts = [];
+    let created = null;
+    for (const choice of gpupriority) {
+      const runpodPayload = {
+        name: `${docData.name}_${new Date().toISOString()}`,
+        cloudType: "SECURE",
+        computeType: "GPU",
+        containerDiskInGb: docData.tempvolumesize,
+        gpuCount: choice.count,
+        gpuTypeIds: [choice.gpu],
+        gpuTypePriority: "availability",
+        templateId: runpodTemplateId,
+        volumeInGb: 0,
+        env: {...env, GPU_COUNT: String(choice.count)},
+      };
+      const createResp = await fetch("https://rest.runpod.io/v1/pods", {
+        method: "POST",
+        headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
+        body: JSON.stringify(runpodPayload),
+        signal: AbortSignal.timeout(45000),
+      });
+      if (createResp.ok) {
+        created = await createResp.json();
+        break;
+      }
+      const errorData = await createResp.json().catch(() => ({}));
+      attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
+      logger.warn("runpod create attempt failed", {gpu: choice.gpu, status: createResp.status});
+    }
 
-//         // ── (c) Build env once; GPU choice changes per attempt ──
-//         const env = {
-//           MODEL_PATH: docData.path,
-//           MODEL_NAME: docData.name,
-//           TEMPLATE_ID: runpodTemplateId,
-//           GIT_REPO: docData.git_repo,
-//           REPO_ID: docData.repo_id,
-//           D_TYPE: docData.dtype,
-//           SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
-//           FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
-//           FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
-//           FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
-//           DOC_ID: payload.DOC_ID || "",
-//           FUNCTIONS_API_KEY: sharedSecret.value(),
-//         };
+    if (!created) {
+      await templateRef.update({podid: ""}); // release reservation
+      await alertAtc("critical", `Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`, {
+        stage: "Pod", webhookUrl: slackUrl, extra: {attempts},
+      });
+      return {success: false, error: "All GPU options failed", attempts};
+    }
 
-//         const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
-//         if (gpupriority.length === 0) {
-//           await templateRef.update({podid: ""});
-//           return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
-//         }
+    await templateRef.update({podid: created.id});
+    logger.info("pod created", {podId: created.id, templateId: runpodTemplateId});
+    return {success: true, created: true, podid: created.id, data: created};
+  } catch (err) {
+    // Release the __creating__ lock if we still hold it.
+    try {
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(templateRef);
+        const d = s.data() || {};
+        if (d.podid === "__creating__") tx.update(templateRef, {podid: ""});
+      });
+    } catch (cleanupErr) {
+      logger.warn("ensurePod cleanup failed", {error: cleanupErr.message});
+    }
+    await alertAtc("critical", `ensurePod crashed for *${payload.TEMPLATEID}*: ${err.message}`, {
+      stage: "Pod", webhookUrl: slackUrl, extra: {stack: err.stack},
+    });
+    return {success: false, error: err.message};
+  }
+}
 
-//         // ── (d) Try each GPU option in order ──
-//         const attempts = [];
-//         let created = null;
-//         for (const choice of gpupriority) {
-//           const runpodPayload = {
-//             name: `${docData.name}_${new Date().toISOString()}`,
-//             cloudType: "SECURE",
-//             computeType: "GPU",
-//             containerDiskInGb: docData.tempvolumesize,
-//             gpuCount: choice.count,
-//             gpuTypeIds: [choice.gpu],
-//             gpuTypePriority: "availability",
-//             templateId: runpodTemplateId,
-//             volumeInGb: 0,
-//             env: {...env, GPU_COUNT: String(choice.count)},
-//           };
-//           const createResp = await fetch("https://rest.runpod.io/v1/pods", {
-//             method: "POST",
-//             headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//             body: JSON.stringify(runpodPayload),
-//             signal: AbortSignal.timeout(45000),
-//           });
-//           if (createResp.ok) {
-//             created = await createResp.json();
-//             break;
-//           }
-//           const errorData = await createResp.json().catch(() => ({}));
-//           attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
-//           logger.warn("runpod create attempt failed", {gpu: choice.gpu, status: createResp.status});
-//         }
+// doTerminatePod — DELETE the RunPod pod, requeue orphaned jobs, clear podid.
+// Shared by the terminatePod HTTP wrapper and submitJobResult's drain dispatch.
+async function doTerminatePod({podId, templateId, collectionName}) {
+  const apiResponse = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
+    method: "DELETE",
+    headers: {
+      "Authorization": `Bearer ${runpodApiKey.value()}`,
+      "Content-Type": "application/json",
+    },
+  });
 
-//         if (!created) {
-//           await templateRef.update({podid: ""}); // release reservation
-//           await notifySlack(slackUrl, {
-//             text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
-//             attempts,
-//           });
-//           return res.status(502).json({success: false, error: "All GPU options failed", attempts});
-//         }
+  // Treat 404 as already-gone (idempotent).
+  if (!apiResponse.ok && apiResponse.status !== 404) {
+    let errorData = {};
+    const ct = apiResponse.headers.get("content-type") || "";
+    if (ct.includes("application/json")) errorData = await apiResponse.json().catch(() => ({}));
+    logger.warn("runpod terminate failed", {status: apiResponse.status, errorData});
+    return {success: false, status: apiResponse.status, error: `RunPod API error: ${apiResponse.status}`, details: errorData};
+  }
 
-//         await templateRef.update({podid: created.id});
-//         logger.info("pod created", {podId: created.id, templateId: runpodTemplateId});
-//         return res.status(200).json({success: true, created: true, podid: created.id, data: created});
-//       } catch (err) {
-//         logger.error("run_jobrequest crashed", {error: err.message, stack: err.stack});
-//         await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
-//         return res.status(500).json({success: false, error: err.message});
-//       }
-//     });
-//   },
-// );
+  // ── Sweep orphans: any docs still 'processing' under this pod → 'pending' ──
+  if (collectionName) {
+    const stuck = await atcDb.collection(collectionName)
+      .where("status", "==", "processing")
+      .where("claimedBy", "==", podId)
+      .get();
+    if (!stuck.empty) {
+      let batch = atcDb.batch();
+      let n = 0;
+      for (const d of stuck.docs) {
+        batch.update(d.ref, {
+          status: "pending",
+          claimedBy: FieldValue.delete(),
+          startedAt: FieldValue.delete(),
+          lastupdatedat: FieldValue.serverTimestamp(),
+        });
+        n++;
+        if (n % BATCH_LIMIT === 0) { await batch.commit(); batch = atcDb.batch(); }
+      }
+      if (n % BATCH_LIMIT !== 0) await batch.commit();
+      logger.info("orphans requeued", {podId, count: stuck.size});
+    }
+  }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1) run_jobrequest  (DEBUG build)
-// ─────────────────────────────────────────────────────────────────────────────
-// exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
-//   (req, res) => {
-//     corsHandler(req, res, async () => {
-//       if (handleOptions(req, res)) return;
-//       const auth = await requireAuth(req, res);
-//       if (!auth) return;
+  if (templateId) {
+    await db.collection("llmmodels").doc(templateId).update({podid: ""});
+  }
 
-//       const payload = req.body || {};
-//       const slackUrl = payload.SLACK_WEBHOOK_URL || "";
-//       const dbg = (step, extra = {}) => console.log(`DEBUG run_jobrequest :: ${step}`, JSON.stringify(extra));
+  logger.info("pod terminated", {podId, templateId});
+  return {success: true, message: `Pod ${podId} terminated`};
+}
 
+// =============================================================================
+// 1) run_jobrequest — HTTP wrapper around ensurePod.
+// =============================================================================
+exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
+  (req, res) => {
+    corsHandler(req, res, async () => {
+      if (handleOptions(req, res)) return;
+      const auth = await requireAuth(req, res);
+      if (!auth) return;
 
-//       dbg("ENTER", {payload});
+      const payload = req.body || {};
+      try {
+        const required = [
+          "TEMPLATEID",
+          "FIREBASE_FETCH_URL",
+          "FIREBASE_SUBMIT_URL",
+          "FIREBASE_COLLECTION_NAME",
+        ];
+        for (const k of required) {
+          if (!payload[k]) {
+            return res.status(400).json({success: false, error: `payload field '${k}' is required`});
+          }
+        }
 
-//       try {
-//         const required = [
-//           "TEMPLATEID",
-//           "SLACK_WEBHOOK_URL",
-//           "FIREBASE_FETCH_URL",
-//           "FIREBASE_SUBMIT_URL",
-//           "FIREBASE_COLLECTION_NAME",
-//         ];
-//         for (const k of required) {
-//           if (!payload[k]) {
-//             dbg("MISSING_FIELD", {field: k});
-//             return res.status(400).json({success: false, error: `payload field '${k}' is required`});
-//           }
-//         }
-//         dbg("REQUIRED_FIELDS_OK");
+        const result = await ensurePod(payload);
+        const status = result.success ? 200 : (result.error === "Template not found" ? 404 : 502);
+        return res.status(status).json(result);
+      } catch (err) {
+        logger.error("run_jobrequest crashed", {error: err.message, stack: err.stack});
+        return res.status(500).json({success: false, error: err.message});
+      }
+    });
+  },
+);
 
-//         const apiKey = runpodApiKey.value();
-//         if (!apiKey) {
-//           dbg("NO_API_KEY");
-//           return res.status(500).json({success: false, error: "RunPod API key not configured"});
-//         }
-//         dbg("API_KEY_LOADED", {len: apiKey.length});
-
-//         const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
-//         const templateSnap = await templateRef.get();
-//         if (!templateSnap.exists) {
-//           dbg("TEMPLATE_NOT_FOUND", {TEMPLATEID: payload.TEMPLATEID});
-//           return res.status(404).json({success: false, error: "Template not found"});
-//         }
-//         const docData = templateSnap.data();
-//         const runpodTemplateId = docData.templateid;
-//         dbg("TEMPLATE_LOADED", {runpodTemplateId, name: docData.name, gpupriority: docData.gpupriority, podidField: docData.podid});
-
-//         // ── (a) Reuse path ──
-//         dbg("LIST_PODS_START");
-//         const listResp = await fetch("https://rest.runpod.io/v1/pods", {
-//           method: "GET",
-//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//           signal: AbortSignal.timeout(30000),
-//         });
-//         dbg("LIST_PODS_STATUS", {status: listResp.status, ok: listResp.ok});
-//         if (!listResp.ok) {
-//           const errorData = await listResp.json().catch(() => ({}));
-//           dbg("LIST_PODS_ERROR_BODY", {errorData});
-//           return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
-//         }
-//         const listData = await listResp.json();
-//         const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
-//         dbg("LIST_PODS_COUNT", {count: pods.length});
-//         const existing = pods.find((p) => p.templateId === runpodTemplateId);
-
-//         if (existing) {
-//           dbg("REUSE_EXISTING_POD", {podId: existing.id});
-//           await triggerProcess(existing.id).catch((e) =>
-//             logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
-//         }
-
-//         // ── (b) Race guard ──
-//         dbg("RACE_GUARD_TX_START");
-//         const reserved = await db.runTransaction(async (tx) => {
-//           const s = await tx.get(templateRef);
-//           const d = s.data() || {};
-//           if (d.podid) return {raceLost: true, podid: d.podid};
-//           tx.update(templateRef, {podid: "__creating__"});
-//           return {raceLost: false};
-//         });
-//         dbg("RACE_GUARD_RESULT", reserved);
-//         if (reserved.raceLost) {
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
-//         }
-
-//         // ── (c) Build env ──
-//         const env = {
-//           MODEL_PATH: docData.path,
-//           MODEL_NAME: docData.name,
-//           TEMPLATE_ID: runpodTemplateId,
-//           GIT_REPO: docData.git_repo,
-//           REPO_ID: docData.repo_id,
-//           D_TYPE: docData.dtype,
-//           SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
-//           FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
-//           FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
-//           FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
-//           DOC_ID: payload.DOC_ID || "",
-//           FUNCTIONS_API_KEY: sharedSecret.value(),
-//         };
-//         dbg("ENV_BUILT", {envKeys: Object.keys(env)});
-
-//         const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
-//         if (gpupriority.length === 0) {
-//           dbg("GPU_PRIORITY_EMPTY");
-//           await templateRef.update({podid: ""});
-//           return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
-//         }
-//         dbg("GPU_PRIORITY_LIST", {gpupriority});
-
-//         // ── (d) Try each GPU ──
-//         const attempts = [];
-//         let created = null;
-//         for (const choice of gpupriority) {
-//           const runpodPayload = {
-//             name: `${docData.name}_${new Date().toISOString()}`,
-//             cloudType: "SECURE",
-//             computeType: "GPU",
-//             containerDiskInGb: docData.tempvolumesize,
-//             gpuCount: choice.count,
-//             gpuTypeIds: [choice.gpu],
-//             gpuTypePriority: "availability",
-//             templateId: runpodTemplateId,
-//             volumeInGb: 0,
-//             env: {...env, GPU_COUNT: String(choice.count)},
-//           };
-//           dbg("CREATE_POD_ATTEMPT", {gpu: choice.gpu, count: choice.count, runpodPayload});
-//           const createResp = await fetch("https://rest.runpod.io/v1/pods", {
-//             method: "POST",
-//             headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//             body: JSON.stringify(runpodPayload),
-//             signal: AbortSignal.timeout(45000),
-//           });
-//           dbg("CREATE_POD_STATUS", {gpu: choice.gpu, status: createResp.status, ok: createResp.ok});
-//           if (createResp.ok) {
-//             created = await createResp.json();
-//             dbg("CREATE_POD_OK", {gpu: choice.gpu, created});
-//             break;
-//           }
-//           const errorData = await createResp.json().catch(() => ({}));
-//           dbg("CREATE_POD_FAIL_BODY", {gpu: choice.gpu, status: createResp.status, errorData});
-//           attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
-//         }
-
-//         if (!created) {
-//           dbg("ALL_GPU_FAILED", {attempts});
-//           await templateRef.update({podid: ""});
-//           await notifySlack(slackUrl, {
-//             text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
-//             attempts,
-//           });
-//           return res.status(502).json({success: false, error: "All GPU options failed", attempts});
-//         }
-
-//         await templateRef.update({podid: created.id});
-//         dbg("PODID_PERSISTED", {podId: created.id});
-//         return res.status(200).json({success: true, created: true, podid: created.id, data: created});
-//       } catch (err) {
-//         logger.error("DEBUG run_jobrequest :: CRASH", {error: err.message, stack: err.stack});
-//         await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
-//         return res.status(500).json({success: false, error: err.message, stack: err.stack});
-//       }
-//     });
-//   },
-// );
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1) run_jobrequest  (DEBUG build)
-// ─────────────────────────────────────────────────────────────────────────────
-// exports.run_jobrequest = onRequest({secrets: [runpodApiKey, sharedSecret]},
-//   (req, res) => {
-//     corsHandler(req, res, async () => {
-//       if (handleOptions(req, res)) return;
-//       const auth = await requireAuth(req, res);
-//       if (!auth) return;
-
-//       const payload = req.body || {};
-//       const slackUrl = payload.SLACK_WEBHOOK_URL || "";
-//       const dbg = (step, extra = {}) => console.log(`DEBUG run_jobrequest :: ${step}`, JSON.stringify(extra));
-
-
-//       dbg("ENTER", {payload});
-
-//       try {
-//         const required = [
-//           "TEMPLATEID",
-//           "SLACK_WEBHOOK_URL",
-//           "FIREBASE_FETCH_URL",
-//           "FIREBASE_SUBMIT_URL",
-//           "FIREBASE_COLLECTION_NAME",
-//         ];
-//         for (const k of required) {
-//           if (!payload[k]) {
-//             dbg("MISSING_FIELD", {field: k});
-//             return res.status(400).json({success: false, error: `payload field '${k}' is required`});
-//           }
-//         }
-//         dbg("REQUIRED_FIELDS_OK");
-
-//         const apiKey = runpodApiKey.value();
-//         if (!apiKey) {
-//           dbg("NO_API_KEY");
-//           return res.status(500).json({success: false, error: "RunPod API key not configured"});
-//         }
-//         dbg("API_KEY_LOADED", {len: apiKey.length});
-
-//         const templateRef = db.collection("llmmodels").doc(payload.TEMPLATEID);
-//         const templateSnap = await templateRef.get();
-//         if (!templateSnap.exists) {
-//           dbg("TEMPLATE_NOT_FOUND", {TEMPLATEID: payload.TEMPLATEID});
-//           return res.status(404).json({success: false, error: "Template not found"});
-//         }
-//         const docData = templateSnap.data();
-//         const runpodTemplateId = docData.templateid;
-//         dbg("TEMPLATE_LOADED", {runpodTemplateId, name: docData.name, gpupriority: docData.gpupriority, podidField: docData.podid});
-
-//         // ── (a) Reuse path ──
-//         dbg("LIST_PODS_START");
-//         const listResp = await fetch("https://rest.runpod.io/v1/pods", {
-//           method: "GET",
-//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//           signal: AbortSignal.timeout(30000),
-//         });
-//         dbg("LIST_PODS_STATUS", {status: listResp.status, ok: listResp.ok});
-//         if (!listResp.ok) {
-//           const errorData = await listResp.json().catch(() => ({}));
-//           dbg("LIST_PODS_ERROR_BODY", {errorData});
-//           return res.status(listResp.status).json({success: false, error: `RunPod list error: ${listResp.status}`, details: errorData});
-//         }
-//         const listData = await listResp.json();
-//         const pods = Array.isArray(listData) ? listData : (listData.pods || listData.data || []);
-//         dbg("LIST_PODS_COUNT", {count: pods.length});
-//         const existing = pods.find((p) => p.templateId === runpodTemplateId);
-
-//         if (existing) {
-//           dbg("REUSE_EXISTING_POD", {podId: existing.id});
-//           // Heal Firestore if it drifted from the live pod
-//           if (docData.podid !== existing.id) {
-//             dbg("HEALING_PODID_DRIFT", {from: docData.podid, to: existing.id});
-//             await templateRef.update({podid: existing.id});
-//           }
-//           await triggerProcess(existing.id).catch((e) =>
-//             logger.warn("trigger /process failed (pod may still be booting)", {podId: existing.id, error: e.message}));
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: existing.id});
-//         }
-
-//         // No matching live pod — clear stale podid before the race guard so we don't
-//         // block on a ghost. "__creating__" is left alone (another invocation may be mid-create).
-//         if (docData.podid && docData.podid !== "__creating__") {
-//           dbg("CLEARING_STALE_PODID", {stale: docData.podid});
-//           await templateRef.update({podid: ""});
-//         }
-
-//         // ── (b) Race guard ──
-//         // Serializes concurrent invocations so only one proceeds to CREATE.
-//         // Losers bail with a clear "another invocation is creating" response
-//         // (without leaking the "__creating__" sentinel as a real podid).
-//         dbg("RACE_GUARD_TX_START");
-//         const reserved = await db.runTransaction(async (tx) => {
-//           const s = await tx.get(templateRef);
-//           const d = s.data() || {};
-//           if (d.podid === "__creating__") return {raceLost: true, reason: "creating"};
-//           if (d.podid) return {raceLost: true, reason: "exists", podid: d.podid};
-//           tx.update(templateRef, {podid: "__creating__"});
-//           return {raceLost: false};
-//         });
-//         dbg("RACE_GUARD_RESULT", reserved);
-//         if (reserved.raceLost) {
-//           if (reserved.reason === "creating") {
-//             return res.status(200).json({success: true, alreadyRunning: true, creating: true});
-//           }
-//           return res.status(200).json({success: true, alreadyRunning: true, podid: reserved.podid});
-//         }
-
-//         // ── (b.1) Re-check RunPod after acquiring the lock ──
-//         // Another invocation may have finished creating between our first list and now.
-//         dbg("RECHECK_PODS_START");
-//         const recheckResp = await fetch("https://rest.runpod.io/v1/pods", {
-//           method: "GET",
-//           headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//           signal: AbortSignal.timeout(30000),
-//         });
-//         if (recheckResp.ok) {
-//           const recheckData = await recheckResp.json();
-//           const recheckPods = Array.isArray(recheckData) ? recheckData : (recheckData.pods || recheckData.data || []);
-//           const raced = recheckPods.find((p) => p.templateId === runpodTemplateId);
-//           if (raced) {
-//             dbg("RECHECK_FOUND_POD", {podId: raced.id});
-//             // Release our lock by persisting the real podid
-//             await templateRef.update({podid: raced.id});
-//             await triggerProcess(raced.id).catch((e) =>
-//               logger.warn("trigger /process failed (pod may still be booting)", {podId: raced.id, error: e.message}));
-//             return res.status(200).json({success: true, alreadyRunning: true, podid: raced.id});
-//           }
-//           dbg("RECHECK_NO_POD");
-//         } else {
-//           dbg("RECHECK_FAILED", {status: recheckResp.status});
-//           // Non-fatal: proceed to create. Worst case is a rare duplicate, which is better
-//           // than bailing on a recoverable list failure.
-//         }
-
-//         // ── (c) Build env ──
-//         const env = {
-//           MODEL_PATH: docData.path,
-//           MODEL_NAME: docData.name,
-//           TEMPLATE_ID: runpodTemplateId,
-//           GIT_REPO: docData.git_repo,
-//           REPO_ID: docData.repo_id,
-//           D_TYPE: docData.dtype,
-//           SLACK_WEBHOOK_URL: payload.SLACK_WEBHOOK_URL,
-//           FIREBASE_FETCH_URL: payload.FIREBASE_FETCH_URL,
-//           FIREBASE_SUBMIT_URL: payload.FIREBASE_SUBMIT_URL,
-//           FIREBASE_COLLECTION_NAME: payload.FIREBASE_COLLECTION_NAME,
-//           DOC_ID: payload.DOC_ID || "",
-//           FUNCTIONS_API_KEY: sharedSecret.value(),
-//         };
-//         dbg("ENV_BUILT", {envKeys: Object.keys(env)});
-
-//         const gpupriority = Array.isArray(docData.gpupriority) ? docData.gpupriority : [];
-//         if (gpupriority.length === 0) {
-//           dbg("GPU_PRIORITY_EMPTY");
-//           await templateRef.update({podid: ""});
-//           return res.status(400).json({success: false, error: "llmmodels doc missing gpupriority[]"});
-//         }
-//         dbg("GPU_PRIORITY_LIST", {gpupriority});
-
-//         // ── (d) Try each GPU ──
-//         const attempts = [];
-//         let created = null;
-//         for (const choice of gpupriority) {
-//           const runpodPayload = {
-//             name: `${docData.name}_${new Date().toISOString()}`,
-//             cloudType: "SECURE",
-//             computeType: "GPU",
-//             containerDiskInGb: docData.tempvolumesize,
-//             gpuCount: choice.count,
-//             gpuTypeIds: [choice.gpu],
-//             gpuTypePriority: "availability",
-//             templateId: runpodTemplateId,
-//             volumeInGb: 0,
-//             env: {...env, GPU_COUNT: String(choice.count)},
-//           };
-//           dbg("CREATE_POD_ATTEMPT", {gpu: choice.gpu, count: choice.count, runpodPayload});
-//           const createResp = await fetch("https://rest.runpod.io/v1/pods", {
-//             method: "POST",
-//             headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"},
-//             body: JSON.stringify(runpodPayload),
-//             signal: AbortSignal.timeout(45000),
-//           });
-//           dbg("CREATE_POD_STATUS", {gpu: choice.gpu, status: createResp.status, ok: createResp.ok});
-//           if (createResp.ok) {
-//             created = await createResp.json();
-//             dbg("CREATE_POD_OK", {gpu: choice.gpu, created});
-//             break;
-//           }
-//           const errorData = await createResp.json().catch(() => ({}));
-//           dbg("CREATE_POD_FAIL_BODY", {gpu: choice.gpu, status: createResp.status, errorData});
-//           attempts.push({gpu: choice.gpu, count: choice.count, status: createResp.status, errorData});
-//         }
-
-//         if (!created) {
-//           dbg("ALL_GPU_FAILED", {attempts});
-//           await templateRef.update({podid: ""});
-//           await notifySlack(slackUrl, {
-//             text: `:rotating_light: Pod create failed for *${payload.TEMPLATEID}* (${docData.name}). All GPU options exhausted.`,
-//             attempts,
-//           });
-//           return res.status(502).json({success: false, error: "All GPU options failed", attempts});
-//         }
-
-//         await templateRef.update({podid: created.id});
-//         dbg("PODID_PERSISTED", {podId: created.id});
-//         return res.status(200).json({success: true, created: true, podid: created.id, data: created});
-//       } catch (err) {
-//         logger.error("DEBUG run_jobrequest :: CRASH", {error: err.message, stack: err.stack});
-//         // Release the __creating__ lock if we're holding it, so we don't wedge future invocations.
-//         // Use a transaction to only clear if it's still "__creating__" (don't overwrite a real podid
-//         // that a parallel invocation may have just written).
-//         try {
-//           await db.runTransaction(async (tx) => {
-//             const s = await tx.get(templateRef);
-//             const d = s.data() || {};
-//             if (d.podid === "__creating__") {
-//               tx.update(templateRef, {podid: ""});
-//             }
-//           });
-//         } catch (cleanupErr) {
-//           logger.warn("run_jobrequest :: cleanup failed", {error: cleanupErr.message});
-//         }
-//         await notifySlack(slackUrl, {text: `:rotating_light: run_jobrequest crashed for *${payload.TEMPLATEID}*: ${err.message}`});
-//         return res.status(500).json({success: false, error: err.message, stack: err.stack});
-//       }
-//     });
-//   },
-// );
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 2) getJobRequest — fixed: removed `attempts` and `type` fields
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// 2) getJobRequest — pod fetches pending jobs and claims them.
+// =============================================================================
 exports.getJobRequest = onRequest({secrets: [sharedSecret]}, (req, res) => {
   corsHandler(req, res, async () => {
     if (handleOptions(req, res)) return;
@@ -623,39 +339,14 @@ exports.getJobRequest = onRequest({secrets: [sharedSecret]}, (req, res) => {
       const {collectionName, podId} = req.body || {};
       if (!collectionName) return res.status(400).json({error: "collectionName is required"});
 
-      const snapshot = await db.collection(collectionName).where("status", "==", "pending").limit(100).get();
-      if (snapshot.empty) return res.status(200).json({jobs: []});
+      // Single-job model: claim exactly the oldest pending job. The worker
+      // self-loops (claim → infer → submit → claim) until it gets an empty
+      // result, then terminates. An empty {jobs:[]} is the worker's drain signal.
+      const job = await claimNextJob({collectionName, podId});
+      if (!job) return res.status(200).json({jobs: []});
 
-      const jobs = [];
-      let batch = db.batch();
-      let opCount = 0;
-
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-        batch.update(doc.ref, {
-          status: "processing",
-          claimedBy: podId || "unknown",
-          startedAt: FieldValue.serverTimestamp(),
-          lastupdatedat: FieldValue.serverTimestamp(),
-        });
-        opCount++;
-        jobs.push({
-          jobId: doc.id,
-          path: doc.ref.path,
-          profileid: data.profileid || "",
-          prompt: data.prompt || "",
-          systemPrompt: data.systemPrompt || "",
-        });
-        if (opCount % BATCH_LIMIT === 0) {
-          await batch.commit();
-          batch = db.batch();
-          opCount = 0;
-        }
-      }
-      if (opCount > 0) await batch.commit();
-
-      logger.info("jobs claimed", {collectionName, count: jobs.length, podId});
-      return res.status(200).json({jobs});
+      logger.info("job claimed", {collectionName, jobId: job.jobId, podId});
+      return res.status(200).json({jobs: [job]});
     } catch (error) {
       logger.error("getJobRequest failed", {error: error.message, stack: error.stack});
       return res.status(500).json({success: false, error: error.message});
@@ -663,81 +354,9 @@ exports.getJobRequest = onRequest({secrets: [sharedSecret]}, (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3) submitJobResult — writes results, then dispatches /process or terminate
-// ─────────────────────────────────────────────────────────────────────────────
-// exports.submitJobResult = onRequest({secrets: [sharedSecret, runpodApiKey]}, (req, res) => {
-//   corsHandler(req, res, async () => {
-//     if (handleOptions(req, res)) return;
-//     const auth = await requireAuth(req, res);
-//     if (!auth) return;
-
-//     try {
-//       const {results, model, podId, templateId} = req.body || {};
-//       if (!Array.isArray(results) || results.length === 0) {
-//         return res.status(400).json({error: "results array is required"});
-//       }
-//       if (!podId) return res.status(400).json({error: "podId is required"});
-
-//       const modelName = model || "unknown";
-//       let batch = db.batch();
-//       let opCount = 0;
-//       let committed = 0;
-
-//       for (const result of results) {
-//         if (!result.path) {
-//           logger.warn("skipping result missing path", {jobId: result.jobId});
-//           continue;
-//         }
-//         batch.set(db.doc(result.path), {
-//           raw_output: result.raw_output || "",
-//           output: result.output || "",
-//           status: result.status || "completed",
-//           tokensGenerated: result.tokensGenerated || 0,
-//           finishReason: result.finishReason || "unknown",
-//           error: result.error || null,
-//           model: modelName,
-//           completedAt: FieldValue.serverTimestamp(),
-//           lastupdatedat: FieldValue.serverTimestamp(),
-//         }, {merge: true});
-//         opCount++;
-//         if (opCount % BATCH_LIMIT === 0) {
-//           await batch.commit();
-//           committed += opCount;
-//           batch = db.batch();
-//           opCount = 0;
-//         }
-//       }
-//       if (opCount > 0) {
-//         await batch.commit();
-//         committed += opCount;
-//       }
-
-//       // ── Lifecycle dispatch ──
-//       const collectionName = results[0].path.split("/")[0];
-//       const pendingSnap = await db.collection(collectionName)
-//         .where("status", "==", "pending").limit(1).get();
-
-//       let dispatch;
-//       if (!pendingSnap.empty) {
-//         triggerProcess(podId).catch((e) =>
-//           logger.warn("trigger /process failed", {podId, error: e.message}));
-//         dispatch = {action: "process", podId};
-//       } else {
-//         triggerTerminate(podId, templateId).catch((e) =>
-//           logger.warn("trigger terminate failed", {podId, error: e.message}));
-//         dispatch = {action: "terminate", podId, templateId};
-//       }
-
-//       logger.info("results submitted", {count: committed, model: modelName, dispatch});
-//       return res.status(200).json({success: true, count: committed, dispatch});
-//     } catch (error) {
-//       logger.error("submitJobResult failed", {error: error.message, stack: error.stack});
-//       return res.status(500).json({success: false, error: error.message});
-//     }
-//   });
-// });
-
+// =============================================================================
+// 3) submitJobResult — write results, then dispatch /process or terminate.
+// =============================================================================
 exports.submitJobResult = onRequest({secrets: [sharedSecret]}, (req, res) => {
   corsHandler(req, res, async () => {
     if (handleOptions(req, res)) return;
@@ -752,41 +371,31 @@ exports.submitJobResult = onRequest({secrets: [sharedSecret]}, (req, res) => {
       if (!podId) return res.status(400).json({error: "podId is required"});
 
       const modelName = model || "unknown";
-      let batch = db.batch();
-      let opCount = 0;
-      let committed = 0;
+      let written = 0;
+      let skipped = 0;
+      const failures = [];
 
+      // Each write is ownership-guarded (see writeJobResult): only persists if the
+      // doc is still `processing` and still claimed by this pod.
       for (const result of results) {
-        if (!result.path) {
-          logger.warn("skipping result missing path", {jobId: result.jobId});
-          continue;
+        const outcome = await writeJobResult({result, podId, modelName});
+        if (outcome.written) written++; else skipped++;
+        if (outcome.skipped && outcome.reason) {
+          logger.warn("result write skipped", {jobId: result && result.jobId, reason: outcome.reason});
         }
-        batch.set(db.doc(result.path), {
-          raw_output: result.raw_output || "",
-          output: result.output || "",
-          status: result.status || "completed",
-          tokensGenerated: result.tokensGenerated || 0,
-          finishReason: result.finishReason || "unknown",
-          error: result.error || null,
-          model: modelName,
-          completedAt: FieldValue.serverTimestamp(),
-          lastupdatedat: FieldValue.serverTimestamp(),
-        }, {merge: true});
-        opCount++;
-        if (opCount % BATCH_LIMIT === 0) {
-          await batch.commit();
-          committed += opCount;
-          batch = db.batch();
-          opCount = 0;
-        }
-      }
-      if (opCount > 0) {
-        await batch.commit();
-        committed += opCount;
+        if (outcome.failure) failures.push(outcome.failure);
       }
 
-      logger.info("results submitted", {count: committed, model: modelName, podId});
-      return res.status(200).json({success: true, count: committed});
+      if (failures.length) {
+        await alertAtc("warn", `${failures.length}/${results.length} jobs returned errors/empty output (pod ${podId}, model ${modelName}).`, {
+          stage: "Pod", extra: {failures: failures.slice(0, 20)},
+        });
+      }
+
+      // No lifecycle dispatch here: the worker owns the loop and termination. It
+      // keeps calling getJobRequest until it drains, then calls terminatePod.
+      logger.info("results submitted", {written, skipped, model: modelName, podId});
+      return res.status(200).json({success: true, written, skipped});
     } catch (error) {
       logger.error("submitJobResult failed", {error: error.message, stack: error.stack});
       return res.status(500).json({success: false, error: error.message});
@@ -794,31 +403,9 @@ exports.submitJobResult = onRequest({secrets: [sharedSecret]}, (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// helpers
-// ─────────────────────────────────────────────────────────────────────────────
-// async function triggerProcess(podId) {
-//   const url = `https://${podId}-8000.proxy.runpod.net/process`;
-//   return fetch(url, {
-//     method: "POST",
-//     headers: {"X-Api-Key": sharedSecret.value(), "Content-Type": "application/json"},
-//     signal: AbortSignal.timeout(TRIGGER_TIMEOUT_MS),
-//   });
-// }
-
-// async function triggerTerminate(podId, templateId) {
-//   const url = "https://us-central1-fir-sample-aae4a.cloudfunctions.net/terminatePod";
-//   return fetch(url, {
-//     method: "POST",
-//     headers: {"X-Api-Key": sharedSecret.value(), "Content-Type": "application/json"},
-//     body: JSON.stringify({podId, templateId}),
-//     signal: AbortSignal.timeout(TRIGGER_TIMEOUT_MS),
-//   });
-// }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4) terminatePod — DELETE pod, sweep orphans, clear llmmodels.podid
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// 4) terminatePod — HTTP wrapper around doTerminatePod.
+// =============================================================================
 exports.terminatePod = onRequest({secrets: [runpodApiKey, sharedSecret]}, (req, res) => {
   corsHandler(req, res, async () => {
     if (handleOptions(req, res)) return;
@@ -829,57 +416,8 @@ exports.terminatePod = onRequest({secrets: [runpodApiKey, sharedSecret]}, (req, 
       const {podId, templateId, collectionName} = req.body || {};
       if (!podId) return res.status(400).json({error: "podId is required"});
 
-      const apiResponse = await fetch(`https://rest.runpod.io/v1/pods/${podId}`, {
-        method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${runpodApiKey.value()}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      // Treat 404 as already-gone (idempotent).
-      if (!apiResponse.ok && apiResponse.status !== 404) {
-        let errorData = {};
-        const ct = apiResponse.headers.get("content-type") || "";
-        if (ct.includes("application/json")) errorData = await apiResponse.json().catch(() => ({}));
-        logger.warn("runpod terminate failed", {status: apiResponse.status, errorData});
-        return res.status(apiResponse.status).json({
-          success: false,
-          error: `RunPod API error: ${apiResponse.status}`,
-          details: errorData,
-        });
-      }
-
-      // ── Sweep orphans: any docs still 'processing' under this pod → 'pending' ──
-      if (collectionName) {
-        const stuck = await db.collection(collectionName)
-          .where("status", "==", "processing")
-          .where("claimedBy", "==", podId)
-          .get();
-        if (!stuck.empty) {
-          let batch = db.batch();
-          let n = 0;
-          for (const d of stuck.docs) {
-            batch.update(d.ref, {
-              status: "pending",
-              claimedBy: FieldValue.delete(),
-              startedAt: FieldValue.delete(),
-              lastupdatedat: FieldValue.serverTimestamp(),
-            });
-            n++;
-            if (n % BATCH_LIMIT === 0) { await batch.commit(); batch = db.batch(); }
-          }
-          if (n % BATCH_LIMIT !== 0) await batch.commit();
-          logger.info("orphans requeued", {podId, count: stuck.size});
-        }
-      }
-
-      if (templateId) {
-        await db.collection("llmmodels").doc(templateId).update({podid: ""});
-      }
-
-      logger.info("pod terminated", {podId, templateId});
-      return res.status(200).json({success: true, message: `Pod ${podId} terminated`});
+      const result = await doTerminatePod({podId, templateId, collectionName});
+      return res.status(result.success ? 200 : (result.status || 500)).json(result);
     } catch (error) {
       logger.error("terminatePod crashed", {error: error.message});
       return res.status(500).json({success: false, error: error.message});
@@ -887,19 +425,162 @@ exports.terminatePod = onRequest({secrets: [runpodApiKey, sharedSecret]}, (req, 
   });
 });
 
-async function notifySlack(slackUrl, body) {
-  if (!slackUrl) return;
-  try {
-    const text = body.attempts
-      ? `${body.text}\n\`\`\`${JSON.stringify(body.attempts, null, 2)}\`\`\``
-      : body.text;
-    await fetch(slackUrl, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({text}),
-      signal: AbortSignal.timeout(10000),
+// =============================================================================
+// 5) atcPodScheduler — batching gate. Starts a pod only when enough jobs have
+// accumulated (configurable min, default 20) OR the oldest pending job has
+// waited past the flush window (so small batches aren't stranded). Zero pending
+// jobs → graceful no-op.
+//
+// Config: classify/pod_scheduler = {
+//   podtemplateid, SLACK_WEBHOOK_URL, FIREBASE_FETCH_URL, FIREBASE_SUBMIT_URL,
+//   FIREBASE_COLLECTION_NAME?, minJobsToStartPod?, flushWaitMinutes?
+// }
+// =============================================================================
+exports.atcPodScheduler = onSchedule(
+  {schedule: "every 1 hours", secrets: [runpodApiKey, sharedSecret]},
+  async () => {
+    const cfgSnap = await db.collection("classify").doc(SCHEDULER_CONFIG_DOCID).get();
+    if (!cfgSnap.exists) {
+      // No scheduler config (e.g. dev) — nothing to do. Stay silent to avoid noise.
+      logger.info("atcPodScheduler: classify/pod_scheduler missing — skipping");
+      return;
+    }
+    const cfg = cfgSnap.data();
+    const collectionName = cfg.FIREBASE_COLLECTION_NAME || DEFAULT_COLLECTION;
+    const minJobs = Number(cfg.minJobsToStartPod ?? DEFAULT_MIN_JOBS);
+    const flushWaitMinutes = Number(cfg.flushWaitMinutes ?? DEFAULT_FLUSH_WAIT_MINUTES);
+
+    if (!cfg.podtemplateid) {
+      await alertAtc("critical", "atcPodScheduler: classify/pod_scheduler.podtemplateid not set — cannot start pods.", {
+        stage: "Scheduler", webhookUrl: cfg.SLACK_WEBHOOK_URL,
+      });
+      return;
+    }
+
+    const pendingQuery = atcDb.collection(collectionName).where("status", "==", "pending");
+    const countSnap = await pendingQuery.count().get();
+    const pendingCount = countSnap.data().count;
+
+    if (pendingCount === 0) {
+      logger.info("atcPodScheduler: no pending jobs — no-op");
+      return;
+    }
+
+    // Oldest pending job age (minutes) for the flush rule.
+    const oldestSnap = await pendingQuery.orderBy("createdAt", "asc").limit(1).get();
+    let oldestAgeMin = 0;
+    if (!oldestSnap.empty) {
+      const ms = toMillis(oldestSnap.docs[0].data().createdAt);
+      if (ms) oldestAgeMin = (Date.now() - ms) / 60000;
+    }
+
+    const reachedMin = pendingCount >= minJobs;
+    const flushDue = oldestAgeMin >= flushWaitMinutes;
+    if (!shouldStartPod({ pendingCount, oldestAgeMin, minJobs, flushWaitMinutes })) {
+      logger.info("atcPodScheduler: below threshold, waiting", {pendingCount, minJobs, oldestAgeMin, flushWaitMinutes});
+      return;
+    }
+
+    logger.info("atcPodScheduler: starting pod", {pendingCount, minJobs, oldestAgeMin, flushDue});
+    const result = await ensurePod({
+      TEMPLATEID: cfg.podtemplateid,
+      SLACK_WEBHOOK_URL: cfg.SLACK_WEBHOOK_URL || "",
+      FIREBASE_FETCH_URL: cfg.FIREBASE_FETCH_URL || "",
+      FIREBASE_SUBMIT_URL: cfg.FIREBASE_SUBMIT_URL || "",
+      FIREBASE_COLLECTION_NAME: collectionName,
     });
-  } catch (e) {
-    logger.warn("slack notify failed", {error: e.message});
+    if (!result.success) {
+      await alertAtc("critical", `atcPodScheduler: failed to start pod — ${result.error}`, {
+        stage: "Scheduler", webhookUrl: cfg.SLACK_WEBHOOK_URL, extra: {pendingCount, result},
+      });
+    }
   }
-}
+);
+
+// =============================================================================
+// 6) atcJobWatchdog — requeue jobs stuck in `processing` past the threshold,
+// and alert when a pending backlog is not draining (no live pod).
+// =============================================================================
+exports.atcJobWatchdog = onSchedule(
+  {schedule: "every 10 minutes", secrets: [runpodApiKey, sharedSecret]},
+  async () => {
+    const cfgSnap = await db.collection("classify").doc(SCHEDULER_CONFIG_DOCID).get();
+    const cfg = cfgSnap.exists ? cfgSnap.data() : {};
+    const collectionName = cfg.FIREBASE_COLLECTION_NAME || DEFAULT_COLLECTION;
+    const stuckMin = Number(cfg.stuckProcessingMinutes ?? DEFAULT_STUCK_PROCESSING_MINUTES);
+    const flushWaitMinutes = Number(cfg.flushWaitMinutes ?? DEFAULT_FLUSH_WAIT_MINUTES);
+    const maxAttempts = Number(cfg.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
+    const webhookUrl = cfg.SLACK_WEBHOOK_URL;
+
+    // 1. Requeue jobs stuck in `processing` — attempts-capped (same guard as the
+    //    drain worker) so a repeatedly-stuck job can't be reprocessed forever.
+    const cutoff = new Date(Date.now() - stuckMin * 60000);
+    const stuckSnap = await atcDb.collection(collectionName)
+      .where("status", "==", "processing")
+      .where("startedAt", "<=", cutoff)
+      .get();
+    if (!stuckSnap.empty) {
+      let batch = atcDb.batch();
+      let n = 0;
+      let errored = 0;
+      for (const d of stuckSnap.docs) {
+        const attempts = (d.data().attempts || 0) + 1;
+        if (attempts >= maxAttempts) {
+          batch.update(d.ref, {
+            status: "error",
+            error: `stuck > ${stuckMin}m (attempts=${attempts})`,
+            attempts,
+            claimedBy: FieldValue.delete(),
+            startedAt: FieldValue.delete(),
+            lastupdatedat: FieldValue.serverTimestamp(),
+          });
+          errored++;
+        } else {
+          batch.update(d.ref, {
+            status: "pending",
+            attempts,
+            claimedBy: FieldValue.delete(),
+            startedAt: FieldValue.delete(),
+            lastupdatedat: FieldValue.serverTimestamp(),
+          });
+        }
+        n++;
+        if (n % BATCH_LIMIT === 0) { await batch.commit(); batch = atcDb.batch(); }
+      }
+      if (n % BATCH_LIMIT !== 0) await batch.commit();
+      await alertAtc("warn", `Requeued ${stuckSnap.size - errored}, errored ${errored} job(s) stuck in "processing" > ${stuckMin}m.`, {
+        stage: "Watchdog", webhookUrl, extra: {collectionName, stuckMinutes: stuckMin},
+      });
+    }
+
+    // 2. Non-draining backlog: oldest pending past flush window with no live pod.
+    const oldestPending = await atcDb.collection(collectionName)
+      .where("status", "==", "pending")
+      .orderBy("createdAt", "asc")
+      .limit(1)
+      .get();
+    if (!oldestPending.empty) {
+      const ms = toMillis(oldestPending.docs[0].data().createdAt);
+      const ageMin = ms ? (Date.now() - ms) / 60000 : 0;
+      if (ageMin >= flushWaitMinutes) {
+        // Pod liveness now lives in classify/pod_worker (controller path), not
+        // llmmodels. A backlog with no live (LOADING/READY) pod — or a HALTED
+        // pod — needs attention.
+        const pwSnap = await db.collection("classify").doc("pod_worker").get();
+        const state = (pwSnap.exists ? pwSnap.data().state : "") || "IDLE";
+        const live = state === "LOADING" || state === "READY";
+        if (!live) {
+          await alertAtc("critical", `Pending ATC backlog not draining — oldest job is ${Math.round(ageMin)}m old and pod state is ${state}.`, {
+            stage: "Watchdog", webhookUrl, extra: {collectionName, oldestAgeMin: Math.round(ageMin), state},
+          });
+        }
+      }
+    }
+  }
+);
+
+// Exposed for integration tests (not deployed — index.js only re-exports the
+// HTTP/scheduled handlers). The getJobRequest / submitJobResult handlers wrap
+// these; tests drive them directly against the emulator.
+exports.claimNextJob = claimNextJob;
+exports.writeJobResult = writeJobResult;

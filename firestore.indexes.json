@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "scope_enhancement_atc_usage_daily",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "profileid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
