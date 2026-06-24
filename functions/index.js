@@ -23,14 +23,13 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
-const voiptest = require("./components/voiptest")
 const runpodLLMRunning = require("./components/runpod_ai")
 const queue_atc_generation = require("./components/queue_atc_generation")
 const podWorker = require("./components/pod_worker")
 const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
 //voiptestcalls
-exports.testVoipCall = voiptest.testVoipCall;
+exports.testVoipCall = appointmentSystem.testVoipCall;
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
