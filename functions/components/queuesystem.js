@@ -1,6 +1,9 @@
 const admin = require('firebase-admin');
+const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
+const { alertAtc } = require('./atc_alerts');
+const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -27,9 +30,14 @@ const zoomSDkClientId = defineSecret("ZOOM_SDK_CLIENTID");
 const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
-exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change) =>{
+
+exports.onQueueStageChange = onDocumentWritten({
+    document: "queue_token/{id}",
+    secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
+  }, async (change) =>{
   var beforeData = change.data.before.exists ? change.data.before.data() : {};
   var afterData = change.data.after.exists ? change.data.after.data() : {};
+  const queueTokenId = change.params.id;
 
   var profileid = afterData["profile_id"];
   var queue = afterData["variationid"] != null ? admin.firestore().collection("queue variation").doc(afterData["variationid"]).path : afterData["queueref"]?.path;
@@ -41,7 +49,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
   })
 
   var queueData = {};
-  if (afterData["queueref"]) {
+  const queueDocSnap = await admin.firestore().doc(afterData["queueref"].path).get();
+  if(afterData["queueref"]) {
     await admin.firestore().doc(afterData["queueref"].path).get().then(queueDoc => {
       if (queueDoc.exists) {
         queueData = queueDoc.data();
@@ -49,145 +58,240 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
     });
   }
 
-  try {
-    let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
-    let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+  // get slot title if variation id exists
+  let getSlotTitle = () => null;
 
-    const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
-    const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
+  if (afterData['variationid']) {
+    const queuePlanningSnap = await admin.firestore()
+      .collection('queue planning')
+      .where('queueref', '==', afterData['queueref'])
+      .where('variationlist', 'array-contains', afterData['variationid'])
+      .get();
 
-    let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+    const planDoc = queuePlanningSnap.docs[0];
 
-    // Process added keys
-    for (const key of addedKeys) {
-      const addedValue = afterData['selectedstageslot'][key];
+    if (planDoc) {
+      const planning = planDoc.data()['planning'] || [];
+      
+      const slots = planning.flatMap(plan =>
+        (plan['segments'] || []).flatMap(segment =>
+          (segment['slots'] || []).map(slot => ({
+            ...slot,
+            segmentid: segment['segmentid']  
+          }))
+        )
+      );
 
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
-      }
-
-      try {
-        const startDate = addedValue['startdate'];
-        const formattedDate = startDate._seconds
-          ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-            timeZone: 'Asia/Kolkata'
-          }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
-
-        // const phoneNumber = `${countrycode}${profiledata['number']}`;
-        const phoneNumber = `${profiledata['number']}`;
-
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'date_time_slot', value: formattedDate },
-              { name: 'apphomepagelink', value: 'https://breakthroughs.app/home' }
-            ],
-            broadcast_name: 'app_slot_confirmation_automate_app_to_wati_v1',
-            template_name: 'app_slot_confirmation_automate_app_to_wati_v1'
-          }
-        };
-
-        // await commonService.sendToWhatsappViaWati(waticontent);
-
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
-        
-        const response = await commonService.createWatiArchiveDocument({
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap : {[`${waticontent['phonenumber']}`] : profileid},
-          broadcastname : 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: 'app_slot_confirmation_automate_app_to_wati_v1',
-        });
-        console.log('WATI ARCHIVE RESPONSE', response);
-
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
-      }
+      getSlotTitle = (slotValue, stageName) => {
+        const matchedSlot = slots.find(slot =>
+          slot['segmentid'] === slotValue['segmentid'] &&
+          slot['stagename'] === stageName &&
+          slot['startdate']?.seconds === slotValue['startdate']?.seconds &&
+          slot['enddate']?.seconds === slotValue['enddate']?.seconds
+        );
+        return matchedSlot?.['title'];
+      };
     }
+  }
 
-    // Process removed keys
-    for (const key of removedKeys) {
-      const removedValue = beforeData['selectedstageslot'][key];
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
+  try {
+      let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
+      let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+
+      const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
+      const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
+
+      let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+
+      // Process added keys
+      for (const key of addedKeys) {
+        const addedValue = afterData['selectedstageslot'][key];
+
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
+        }
+
+        // Only Scope Enhancement and Evolution Prep Orientation slots send a WATI
+        // confirmation — decided by the added slot's stage (key).
+        const isPrepStage = key === 'Evolution Prep Orientation';
+        const isScopeEnhancement = key === 'Scope Enhancement';
+        const isGuidedOrientation = key === 'Guided Self ATC Orientation';
+        const formattedTitle = getSlotTitle(addedValue, key);
+
+        try {
+          await commonService.saveNotificationRecord({
+            title: 'Slot Confirmed',
+            message: `✅ Your ${key} slot has been confirmed for ${formattedTitle}`,
+            subtitle: null,
+            date: admin.firestore.FieldValue.serverTimestamp(),
+            landingpage: null,
+            logged: true,
+            profileid: [profileid],
+            sticky: false,
+            notificationtype: 'queue',
+            notificationimage: null,
+            metadata: { ...afterData }
+          });
+          console.log(`Push notification sent for confirmed slot | key: ${key}`);
+        } catch (pushError) {
+          console.error(`Push notification failed for key ${key}:`, pushError.message);
+        }
+
+        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation) {
+          console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
+          continue;
+        }
+
+        try {
+          const startDate = addedValue['startdate'];
+          const formattedDate = startDate._seconds
+            ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+              timeZone: 'Asia/Kolkata'
+            }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
+
+          // const phoneNumber = `${countrycode}${profiledata['number']}`;
+          const phoneNumber = `${profiledata['number']}`;
+
+          const waticontent = {
+            phonenumber: phoneNumber,
+            body: {
+              parameters: [
+                { name: 'name', value: profiledata['name'] },
+                { name: 'date_time_slot', value: formattedTitle },
+              ]
+            }
+          };
+
+          // await commonService.sendToWhatsappViaWati(waticontent);
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : isScopeEnhancement   ? 'se_slot_cofirmation_june_2026' : 'guided_ori_slot_confirmation_june_v1';
+
+          var map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: templateId,
+            type: 'queue',
+            metadata: { ...afterData }
+          }
+
+          console.log("Added Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
+        }
       }
 
-      try {
-        const startDate = removedValue['startdate'];
-        const formattedDate = startDate._seconds
+      // Process removed keys
+      for (const key of removedKeys) {
+        const removedValue = beforeData['selectedstageslot'][key];
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
+        }
+
+        try {
+          const startDate = removedValue['startdate'];
+          const formattedDate = startDate._seconds
           ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
             dateStyle: 'medium',
             timeStyle: 'short',
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        const phoneNumber = `${profiledata['number']}`;
+          const formattedTitle = getSlotTitle(removedValue, key);
 
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'date_time_slot', value: formattedDate },
-            ],
-            broadcast_name: 'app_slot_revert_automate_app_to_wati_v1',
-            template_name: 'app_slot_revert_automate_app_to_wati_v1'
+          // push notification for revert slot
+          try {
+            await commonService.saveNotificationRecord({
+              title: 'Slot Reverted',
+              message: `Your ${key} slot has been reverted for ${formattedTitle}`,
+              subtitle: null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: null,
+              logged: true,
+              profileid: [profileid],
+              sticky: false,
+              notificationtype: 'queue',
+              notificationimage: null,
+              metadata: { ...afterData }
+            });
+            console.log(`Push notification sent for reverted slot | key: ${key}`);
+          } catch (pushError) {
+            console.error(`Push notification failed for key ${key}:`, pushError.message);
           }
-        };
 
-        // await commonService.sendToWhatsappViaWati(waticontent);
+          const phoneNumber = `${profiledata['number']}`;
 
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
+          const waticontent = {
+            phonenumber: phoneNumber,
+            body: {
+              parameters: [
+                { name: 'name', value: profiledata['name'] },
+                { name: 'date_time_slot', value: formattedTitle },
+              ]
+            }
+          };
 
-        const response = await commonService.createWatiArchiveDocument({
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-          broadcastname: 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
-        });
-        console.log('WATI ARCHIVE RESPONSE', response);
+          // await commonService.sendToWhatsappViaWati(waticontent);
 
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
 
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
+          map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
+            type: 'queue',
+            metadata: {...afterData}
+          }
+
+          console.log("Reverted Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
+        }
+        console.log('Removed:', key, removedValue);
       }
-      console.log('Removed:', key, removedValue);
-    }
-  } catch (error) {
+    } catch (error) {
     console.log('Error processing slot changes:', error);
   }
 
@@ -325,6 +429,30 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
     } catch (error) {
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
+
+    // creating queue_atc_generation document where atc is created from ai
+    try{
+      const previousStage = await resolvePreviousStage({
+        queueData,
+        tokenData: afterData,
+        currentStage: afterData["currentstage"],
+      });
+      if (!previousStage){console.log("no previous stage resolved")}
+      else{
+        await processStage({
+          queueData,
+          queueRef: queueDocSnap.ref,
+          tokenData: afterData,
+          queueTokenId,
+          currentStage: previousStage,
+        });
+      }
+    }catch (error){
+      console.log("queue_atc_genration collection creation error",error.toString())
+      await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+        stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+      }).catch(() => {});
+    }
   }
 
   // Send Wati Update
@@ -384,6 +512,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
             profileid: [profileid],
             templateid: null,
             watitemplateid: queueGenerationDoc['queuewelcometemplate'],
+            type: 'queue',
+            metadata: {...afterData}
           });
           console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -451,6 +581,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queuecompletion_v3',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -480,13 +612,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 datamodel : clientModel,
                 attachments : [],
                 emailTo : [profiledata["email"]],
-                emailMap : [{[profiledata["email"]] : profileid}],
+                emailMap : {[profiledata["email"]] : profileid},
                 fileURL : '',
                 from:'starlabs@excellenceinstallation.com',
                 notes : '',
                 profileId : [profileid],
                 postmarkTemplateId: '31423529',
-                templateAlias:'queue_stage_formtype'
+                templateAlias:'queue_stage_formtype',
+                type: 'queue',
+                metadata: {...afterData}
               });
 
             // mobileapp
@@ -502,9 +636,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 sticky: false,
                 notificationtype: "queue",
                 notificationimage: null,
-                metadata: {
-                  queuetoken: change.data.after.ref,
-                },
+                metadata: {...afterData},
               });
               //wati
               let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
@@ -541,6 +673,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
                 profileid: [profileid],
                 templateid: null,
                 watitemplateid: 'queue_stage_formtype_v3',
+                type: 'queue',
+                metadata: {...afterData}
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -568,13 +702,15 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               datamodel : clientModel,
               attachments : [],
               emailTo : [profiledata["email"]],
-              emailMap : [{[profiledata["email"]] : profiledata['profileid']}],
+              emailMap : {[profiledata["email"]] : profiledata['profileid']},
               fileURL : '',
               from:'starlabs@excellenceinstallation.com',
               notes : '',
               profileId : [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link'
+              templateAlias:'queue_stage_actiontype_link',
+              type: 'queue',
+              metadata: {...afterData}
             });
 
             // mobileapp
@@ -590,9 +726,7 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {
-                queuetoken: change.data.after.ref
-              },
+              metadata: {...afterData},
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -638,6 +772,8 @@ exports.onQueueStageChange = onDocumentWritten("queue_token/{id}", async (change
               profileid: [profileid],
               templateid: null,
               watitemplateid: 'queue_stage_linktype_v4',
+              type: 'queue',
+              metadata: {...afterData}
             });
             console.log('WATI ARCHIVE RESPONSE', response);
             
@@ -683,6 +819,8 @@ exports.studioZoomLink = onDocumentCreated({
     console.log("liveassignment.id",liveassignment.id);
     
     let participantTokenData = {}
+    
+    console.log("Fetching... queue token");
     await admin.firestore().collection("queue_token").where("liveassignmentid", "==", liveassignment.id).get().then(token=>{
       token.forEach(doc=>{
         participantTokenData = doc.data()
@@ -690,6 +828,8 @@ exports.studioZoomLink = onDocumentCreated({
       })
     })
 
+    console.log("Fetched queue token", participantTokenData);
+    
     let queueData = {}
     if(participantTokenData['currentstage']){
       await admin.firestore().collection("queue generation").doc(participantTokenData['queueref'].id).get().then(snap=>{
@@ -701,178 +841,55 @@ exports.studioZoomLink = onDocumentCreated({
       
       //old structure liveassignmentData["zoomlinkrequired"] != false now zoom enabling not for queue now zoom enabling per stage
       const stageKey = participantTokenData['currentstage'];
+      console.log("Stage Key", stageKey)
       const enableZoom = queueData['stageproperty'][stageKey]['enablezoom']
-      
+      console.log("Enable Zoom", enableZoom)
+
       if(enableZoom){
-      const studioid = liveassignmentData["studioid"]
-      var openViduEnabled = false
-      // Check Studio Type
-      await admin.firestore().collection("queue studio pairing").doc(studioid).get().then(studioDoc =>{
-        if(studioDoc.exists){
-          openViduEnabled = studioDoc.data()["openvidu"] || false
+        const studioid = liveassignmentData["studioid"]
+        var openViduEnabled = false
+        // Check Studio Type
+        await admin.firestore().collection("queue studio pairing").doc(studioid).get().then(studioDoc =>{
+          if(studioDoc.exists){
+            openViduEnabled = studioDoc.data()["openvidu"] || false
+          }
+        })
+
+        // Map profile data
+        var mapProfile = {}
+        let profileArray = []
+        if(liveassignmentData['participantid']) profileArray.push(liveassignmentData['participantid'])
+        if(liveassignmentData['participantsactivity'] && Object.keys(liveassignmentData['participantsactivity']).length > 0){ 
+          let participantActivityProfileIds = Object.keys(liveassignmentData['participantsactivity'])
+          profileArray = [...profileArray,...participantActivityProfileIds]
         }
-      })
-
-      // Map profile data
-      var mapProfile = {}
-      let profileArray = []
-      if(liveassignmentData['participantid']) profileArray.push(liveassignmentData['participantid'])
-      if(liveassignmentData['participantsactivity'] && Object.keys(liveassignmentData['participantsactivity']).length > 0){ 
-        let participantActivityProfileIds = Object.keys(liveassignmentData['participantsactivity'])
-        profileArray = [...profileArray,...participantActivityProfileIds]
-      }
-      if(liveassignmentData['bonusactivity'] && Object.keys(liveassignmentData['bonusactivity']).length > 0){ 
-        let participantActivityProfileIds = Object.keys(liveassignmentData['bonusactivity'])
-        profileArray = [...profileArray,...participantActivityProfileIds]
-      }
-      profileArray = Array.from(new Set(profileArray));
-      for (let i = 0; i < profileArray.length; i = i+30) {
-        const slicedProfileArray =  profileArray.slice(i,i+30)
-        await admin.firestore().collection("profile_data").where("profileid","in",slicedProfileArray).get().then(profile=>{
-          profile.docs.forEach(p=>{
-            mapProfile[p.id] = p.data()
+        if(liveassignmentData['bonusactivity'] && Object.keys(liveassignmentData['bonusactivity']).length > 0){ 
+          let participantActivityProfileIds = Object.keys(liveassignmentData['bonusactivity'])
+          profileArray = [...profileArray,...participantActivityProfileIds]
+        }
+        profileArray = Array.from(new Set(profileArray));
+        for (let i = 0; i < profileArray.length; i = i+30) {
+          const slicedProfileArray =  profileArray.slice(i,i+30)
+          await admin.firestore().collection("profile_data").where("profileid","in",slicedProfileArray).get().then(profile=>{
+            profile.docs.forEach(p=>{
+              mapProfile[p.id] = p.data()
+            })
           })
-        })
-      }
-      console.log("profileArray",profileArray.length);
-      console.log("mapProfile",Object.keys(mapProfile).length);
+        }
+        console.log("profileArray",profileArray.length);
+        console.log("mapProfile",Object.keys(mapProfile).length);
 
-      // Setup Participant Link
-      var zoomRequestResult = null
-      var participantStudioLink
-      if(commonService.production){
-        participantStudioLink = "https://breakthroughs.app/participantstudio"
-      }
-      else{
-        participantStudioLink = "https://breakthroughs-test.web.app/participantstudio"
-      }
-
-      if(openViduEnabled){
-        await liveassignment.ref.update({
-          zoomdata: {
-            host_email: "soe1@soexcellence.com",
-            start_url: "Link Broken"
-          }
-        })
-      }
-      else {
-        // Generate Zoom Link
-        let getZoomAccountEmail = await commonService.getUnusedZoomAccount()
-        console.log("getZoomAccountEmail",getZoomAccountEmail);
-        if(![null,undefined].includes(getZoomAccountEmail)){
-          var zoomaccountData = {email : getZoomAccountEmail}
-          console.log("zoomaccountData['email']",zoomaccountData['email']);
-
-          // Get Participant Activity
-          const keys = Object.keys(liveassignmentData['participantsactivity']);
-          let objectKeys = keys;
-          let participantactivity = [];
-          for (let j = 0; j < objectKeys.length; j++) {
-            const element = objectKeys[j];
-            participantactivity.push(mapProfile[element]['name'])
-          }
-
-          var flatternarray = '';    
-          // Get Bons Participant
-          if(liveassignmentData['bonusactivityparticipant'] != undefined && liveassignmentData['bonusactivityparticipant'] != null ){
-            var names = [];
-            for (let i = 0; i < liveassignmentData['bonusactivityparticipant'].length; i++) {
-              const element = liveassignmentData['bonusactivityparticipant'][i];
-              names.push(mapProfile[element]['name'])
-            }
-            flatternarray = names.join(", ")
-          }
-
-          // Zoom Topic ID
-          var time = new Date();
-          const finaltime = time.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
-          var zoomTopic = `${mapProfile[liveassignmentData['participantid']]['name']} with ${participantactivity.join(", ")}`;
-          // Append Bonus Activity Specialist with zoom topic
-          if(flatternarray.trim().length != 0){
-            zoomTopic = zoomTopic + ` (${flatternarray})`
-          }
-          // Append Stagename & Time
-          zoomTopic = zoomTopic + ` - ${liveassignmentData['stagename']} Studio - ${finaltime}`
-          console.log("Zoom Topic", zoomTopic)
-
-          // Server To Server
-          var accountid = zoomAccountId.value()
-          var clientid = zoomClientId.value()
-          var clientsecret = zoomClientSecret.value()
-          const tokenResponse = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountid}&client_id=${clientid}&client_secret=${clientsecret}`, {
-            method: 'POST'
-          });
-          const tokenData = await tokenResponse.json();
-
-          try {
-            const email = zoomaccountData["email"]; //host email id;
-            const zoomresult = await axios.post("https://api.zoom.us/v2/users/" + email + "/meetings", {
-              "topic": zoomTopic,
-              "type": 1,
-              "start_time": new Date(),
-              "timezone": "India",
-              "host_email": zoomaccountData["email"],
-              "settings": {
-                "host_video": true,
-                "participant_video": true,
-                "cn_meeting": false,
-                "in_meeting": true,
-                "join_before_host": true,
-                "mute_upon_entry": false,
-                "watermark": false,
-                "use_pmi": false,
-                "approval_type": 1,
-                "audio": "both",
-                // "auto_recording": "local",
-                "enforce_login": false,
-                "registrants_email_notification": false,
-                "waiting_room": true,
-                "allow_multiple_devices": true,
-              }
-            }, {
-              headers: {
-                'Authorization': 'Bearer ' + tokenData.access_token,
-                'content-type': 'application/json'
-              }
-            });
-            let sdkclientid = zoomSDkClientId.value()
-            let sdkclientsecret = zoomSDKClientSecret.value()
-            // let signature  = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
-            var hostSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
-            var participantSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 0)
-
-            // Mark Zoom Email inuse: true,
-            await admin.firestore().collection("zoomaccount").where("email", "==", getZoomAccountEmail).get().then(emailaccount=>{
-              emailaccount.docs.forEach(doc=>{
-                doc.ref.update({
-                  inuse: true,
-                  hostid: zoomresult.data["host_id"],
-                  useby: snapshot.data.ref.path
-                })
-              })
-            })
-            // Ensure Host Email is updated
-            if(zoomresult.data["host_email"] == null || zoomresult.data["host_email"] == undefined){
-              zoomresult.data["host_email"] = zoomaccountData["email"]
-            }
-            console.log("zoom created ", zoomresult.data['join_url']);
-            zoomRequestResult = zoomresult.data
-
-            // Update Live Assignment
-            await liveassignment.ref.update({
-              // signature: hostSignature,
-              hostsignature: hostSignature,
-              participantsignature: participantSignature,
-              zoomdata: zoomresult.data
-            })
-          } catch (zoomError) {
-            console.log("Zoom Link Not Generated", zoomError.message);
-            console.log("Error 1", JSON.stringify(zoomError.message));
-            console.log("Error 2", JSON.stringify(zoomError))
-          }
-
+        // Setup Participant Link
+        var zoomRequestResult = null
+        var participantStudioLink
+        if(commonService.production){
+          participantStudioLink = "https://breakthroughs.app/participantstudio"
         }
         else{
+          participantStudioLink = "https://breakthroughs-test.web.app/participantstudio"
+        }
+
+        if(openViduEnabled){
           await liveassignment.ref.update({
             zoomdata: {
               host_email: "soe1@soexcellence.com",
@@ -880,173 +897,302 @@ exports.studioZoomLink = onDocumentCreated({
             }
           })
         }
-      }
+        else {
+          // Generate Zoom Link
+          let getZoomAccountEmail = await commonService.getUnusedZoomAccount()
+          console.log("getZoomAccountEmail",getZoomAccountEmail);
+          if(![null,undefined].includes(getZoomAccountEmail)){
+            var zoomaccountData = {email : getZoomAccountEmail}
+            console.log("zoomaccountData['email']",zoomaccountData['email']);
 
-      // Send Slack
-      let slackMessage = {
-        "blocks": [
-          {
+            // Get Participant Activity
+            const keys = Object.keys(liveassignmentData['participantsactivity']);
+            let objectKeys = keys;
+            let participantactivity = [];
+            for (let j = 0; j < objectKeys.length; j++) {
+              const element = objectKeys[j];
+              participantactivity.push(mapProfile[element]['name'])
+            }
+
+            var flatternarray = '';    
+            // Get Bons Participant
+            if(liveassignmentData['bonusactivityparticipant'] != undefined && liveassignmentData['bonusactivityparticipant'] != null ){
+              var names = [];
+              for (let i = 0; i < liveassignmentData['bonusactivityparticipant'].length; i++) {
+                const element = liveassignmentData['bonusactivityparticipant'][i];
+                names.push(mapProfile[element]['name'])
+              }
+              flatternarray = names.join(", ")
+            }
+
+            // Zoom Topic ID
+            var time = new Date();
+            const finaltime = time.toLocaleString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+            var zoomTopic = `${mapProfile[liveassignmentData['participantid']]['name']} with ${participantactivity.join(", ")}`;
+            // Append Bonus Activity Specialist with zoom topic
+            if(flatternarray.trim().length != 0){
+              zoomTopic = zoomTopic + ` (${flatternarray})`
+            }
+            // Append Stagename & Time
+            zoomTopic = zoomTopic + ` - ${liveassignmentData['stagename']} Studio - ${finaltime}`
+            console.log("Zoom Topic", zoomTopic)
+
+            // Server To Server
+            var accountid = zoomAccountId.value()
+            var clientid = zoomClientId.value()
+            var clientsecret = zoomClientSecret.value()
+            const tokenResponse = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountid}&client_id=${clientid}&client_secret=${clientsecret}`, {
+              method: 'POST'
+            });
+            const tokenData = await tokenResponse.json();
+
+            try {
+              const email = zoomaccountData["email"]; //host email id;
+              const zoomresult = await axios.post("https://api.zoom.us/v2/users/" + email + "/meetings", {
+                "topic": zoomTopic,
+                "type": 1,
+                "start_time": new Date(),
+                "timezone": "India",
+                "host_email": zoomaccountData["email"],
+                "settings": {
+                  "host_video": true,
+                  "participant_video": true,
+                  "cn_meeting": false,
+                  "in_meeting": true,
+                  "join_before_host": true,
+                  "mute_upon_entry": false,
+                  "watermark": false,
+                  "use_pmi": false,
+                  "approval_type": 1,
+                  "audio": "both",
+                  // "auto_recording": "local",
+                  "enforce_login": false,
+                  "registrants_email_notification": false,
+                  "waiting_room": true,
+                  "allow_multiple_devices": true,
+                }
+              }, {
+                headers: {
+                  'Authorization': 'Bearer ' + tokenData.access_token,
+                  'content-type': 'application/json'
+                }
+              });
+              let sdkclientid = zoomSDkClientId.value()
+              let sdkclientsecret = zoomSDKClientSecret.value()
+              // let signature  = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
+              var hostSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 1)
+              var participantSignature = await commonService.generateSignature(sdkclientid, sdkclientsecret, zoomresult.data['id'], 0)
+
+              // Mark Zoom Email inuse: true,
+              await admin.firestore().collection("zoomaccount").where("email", "==", getZoomAccountEmail).get().then(emailaccount=>{
+                emailaccount.docs.forEach(doc=>{
+                  doc.ref.update({
+                    inuse: true,
+                    hostid: zoomresult.data["host_id"],
+                    useby: snapshot.data.ref.path
+                  })
+                })
+              })
+              // Ensure Host Email is updated
+              if(zoomresult.data["host_email"] == null || zoomresult.data["host_email"] == undefined){
+                zoomresult.data["host_email"] = zoomaccountData["email"]
+              }
+              console.log("zoom created ", zoomresult.data['join_url']);
+              zoomRequestResult = zoomresult.data
+
+              // Update Live Assignment
+              await liveassignment.ref.update({
+                // signature: hostSignature,
+                hostsignature: hostSignature,
+                participantsignature: participantSignature,
+                zoomdata: zoomresult.data
+              })
+            } catch (zoomError) {
+              console.log("Zoom Link Not Generated", zoomError.message);
+              console.log("Error 1", JSON.stringify(zoomError.message));
+              console.log("Error 2", JSON.stringify(zoomError))
+            }
+
+          }
+          else{
+            await liveassignment.ref.update({
+              zoomdata: {
+                host_email: "soe1@soexcellence.com",
+                start_url: "Link Broken"
+              }
+            })
+          }
+        }
+
+        // Send Slack
+        let slackMessage = {
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Participant Name*: ${mapProfile[liveassignmentData["participantid"]]["name"]}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Specialist Name*: ${liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Stage*: ${liveassignmentData["stagename"]}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Participant Studio Link*: ${participantStudioLink}`
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": `*Meeting Created In*: ${openViduEnabled ? "OpenVidu" : "Zoom"}`
+              }
+            },
+          ]
+        }
+        if(openViduEnabled){
+          let participantMeetingLink
+          if(commonService.production){
+            participantMeetingLink = `https://breakthroughs.app/joinroom/${liveassignmentData["docid"]}`
+          }
+          else{
+            participantMeetingLink = `https://breakthroughs-test.web.app/joinroom/${liveassignmentData["docid"]}`
+          }
+          slackMessage.blocks.push({
             "type": "section",
             "text": {
               "type": "mrkdwn",
-              "text": `*Participant Name*: ${mapProfile[liveassignmentData["participantid"]]["name"]}`
+              "text": `*OpenVidu Meeting ID*: ${participantMeetingLink}`
             }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Specialist Name*: ${liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Stage*: ${liveassignmentData["stagename"]}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Participant Studio Link*: ${participantStudioLink}`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Meeting Created In*: ${openViduEnabled ? "OpenVidu" : "Zoom"}`
-            }
-          },
-        ]
-      }
-      if(openViduEnabled){
-        let participantMeetingLink
-        if(commonService.production){
-          participantMeetingLink = `https://breakthroughs.app/joinroom/${liveassignmentData["docid"]}`
+          })
         }
         else{
-          participantMeetingLink = `https://breakthroughs-test.web.app/joinroom/${liveassignmentData["docid"]}`
+          if(zoomRequestResult == null){
+            zoomRequestResult = {
+              start_url: "No Link Generated",
+              join_url: "No Link Generated"
+            }
+          }
+          slackMessage.blocks.push({
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `*Zoom Host URL*: ${zoomRequestResult["start_url"]}`
+            }
+          })
+          slackMessage.blocks.push({
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `*Zoom Join URL*: ${zoomRequestResult["join_url"]}`
+            }
+          })
         }
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*OpenVidu Meeting ID*: ${participantMeetingLink}`
-          }
+        await slackQueueZoomLink(slackMessage).catch(err =>{
+          console.log("Slack Failed")
+          console.log(err)
         })
-      }
-      else{
-        if(zoomRequestResult == null){
-          zoomRequestResult = {
-            start_url: "No Link Generated",
-            join_url: "No Link Generated"
+
+        // Send Email
+        var clientModel = {
+          company_name: "Antano & Harini",
+          product_name: "StarLabs",
+          stagename: liveassignmentData["stagename"],
+          clientname: mapProfile[liveassignmentData["participantid"]]["name"],
+          specialistname: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", "),
+          joinurl: participantStudioLink
+        }
+        var receiverList = [liveassignmentData["participantid"]]
+        for (let i = 0; i < receiverList.length; i++) {
+          const receiver = receiverList[i];
+
+          // await commonService.postmarkClient.sendEmailWithTemplate({
+          //   From: "starlabs@excellenceinstallation.com",
+          //   To: mapProfile[receiver]["email"],
+          //   TemplateAlias: "queuestudioinvitation",
+          //   TemplateModel: clientModel,
+          // }).catch(err=>{
+          //   console.log(err)
+          // }); 
+
+          await commonService.createEmailArchiveDocument({
+            emailData : clientModel,
+            datamodel : clientModel,
+            attachments : [],
+            emailTo : [mapProfile[receiver]["email"]],
+            emailMap : {[mapProfile[receiver]["email"]] : receiver},
+            fileURL : '',
+            from:'starlabs@excellenceinstallation.com',
+            notes : '',
+            profileId : [receiver],
+            postmarkTemplateId: '42760699',
+            templateAlias:'queuestudioinvitation',
+            type: 'queue',
+            metadata: {...participantTokenData}
+          });
+
+        }
+
+        // Send Watti
+        let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
+        let waticontent = {
+          phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
+          body : {
+            parameters: [
+              {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
+              {name: 'stage', value: liveassignmentData["stagename"]},
+              {name: 'url', value: participantStudioLink},
+              {name: 'eis', value: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")},
+              {name: 'product', value:participantTokenData['productname']},
+            ],
+            broadcast_name: 'queue_link_generationv2',
+            template_name: 'queue_link_generationv2'
           }
         }
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Zoom Host URL*: ${zoomRequestResult["start_url"]}`
-          }
-        })
-        slackMessage.blocks.push({
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Zoom Join URL*: ${zoomRequestResult["join_url"]}`
-          }
-        })
-      }
-      await slackQueueZoomLink(slackMessage).catch(err =>{
-        console.log("Slack Failed")
-        console.log(err)
-      })
 
-      // Send Email
-      var clientModel = {
-        company_name: "Antano & Harini",
-        product_name: "StarLabs",
-        stagename: liveassignmentData["stagename"],
-        clientname: mapProfile[liveassignmentData["participantid"]]["name"],
-        specialistname: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", "),
-        joinurl: participantStudioLink
-      }
-      var receiverList = [liveassignmentData["participantid"]]
-      for (let i = 0; i < receiverList.length; i++) {
-        const receiver = receiverList[i];
+        const parameterConfig = waticontent['body']['parameters'].map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+        console.log('Triggered Wati Archive Creation');
 
-        // await commonService.postmarkClient.sendEmailWithTemplate({
-        //   From: "starlabs@excellenceinstallation.com",
-        //   To: mapProfile[receiver]["email"],
-        //   TemplateAlias: "queuestudioinvitation",
-        //   TemplateModel: clientModel,
-        // }).catch(err=>{
-        //   console.log(err)
-        // }); 
-
-        await commonService.createEmailArchiveDocument({
-          emailData : clientModel,
-          datamodel : clientModel,
-          attachments : [],
-          emailTo : [mapProfile[receiver]["email"]],
-          emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
-          fileURL : '',
-          from:'starlabs@excellenceinstallation.com',
-          notes : '',
-          profileId : [receiver],
-          postmarkTemplateId: '42760699',
-          templateAlias:'queuestudioinvitation'
+        const response = await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(waticontent['phonenumber'])],
+          numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig: parameterConfig,
+          params: [],
+          profileid: [liveassignmentData['participantid']],
+          templateid: null,
+          watitemplateid: 'queue_link_generationv2',
+          type: 'queue',
+          metadata: {...participantTokenData}
         });
+        console.log('WATI ARCHIVE RESPONSE', response);
 
+        // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+        //   console.log("Watti Message Failed")
+        //   console.log(err)
+        // })
       }
-
-      // Send Watti
-      let countrycode = ![null,undefined].includes(mapProfile[liveassignmentData['participantid']]['countrycode']) ? mapProfile[liveassignmentData['participantid']]['countrycode'] : '+91'
-      let waticontent = {
-        phonenumber : `${mapProfile[liveassignmentData['participantid']]['number']}`,
-        body : {
-          parameters: [
-            {name: 'name', value: mapProfile[liveassignmentData['participantid']]['name']},
-            {name: 'stage', value: liveassignmentData["stagename"]},
-            {name: 'url', value: participantStudioLink},
-            {name: 'eis', value: liveassignmentData["pairing"].map(e => mapProfile[e]["name"]).join(", ")},
-            {name: 'product', value:participantTokenData['productname']},
-          ],
-          broadcast_name: 'queue_link_generationv2',
-          template_name: 'queue_link_generationv2'
-        }
-      }
-
-      const parameterConfig = waticontent['body']['parameters'].map(param => ({
-        excelColumn: null,
-        fillType: 'static',
-        metadataField: null,
-        name: param.name,
-        staticValue: param.value
-      }));
-      console.log('Triggered Wati Archive Creation');
-
-      const response = await commonService.createWatiArchiveDocument({
-        numbers: [parseInt(waticontent['phonenumber'])],
-        numbermap: { [`${waticontent['phonenumber']}`]: liveassignmentData['participantid'] },
-        broadcastname: 'Individual',
-        paramFillMode: 'static',
-        parameterConfig: parameterConfig,
-        params: [],
-        profileid: [liveassignmentData['participantid']],
-        templateid: null,
-        watitemplateid: 'queue_link_generationv2',
-      });
-      console.log('WATI ARCHIVE RESPONSE', response);
-
-      // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-      //   console.log("Watti Message Failed")
-      //   console.log(err)
-      // })
-    }
     
     // Activity Log
     let atcModel = null
@@ -1240,7 +1386,7 @@ exports.studioZoomLinkDeactivate = onDocumentUpdated("live assignment/{id}", asy
     }
 })
 
-exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret]},async (req, res)=>{
+exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientId,zoomClientSecret,zoomSDkClientId,zoomSDKClientSecret],cors: true, },async (req, res)=>{
   console.log(req.query.zoomdata, 'zoomdata');
   var liveassignmentData
   var oldZoomData = JSON.parse(req.query.zoomdata)
@@ -1533,13 +1679,15 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
         datamodel : clientModel,
         attachments : [],
         emailTo : [mapProfile[receiver]["email"]],
-        emailMap : [{[mapProfile[receiver]["email"]] : receiver}],
+        emailMap : {[mapProfile[receiver]["email"]] : receiver},
         fileURL : '',
         from:'starlabs@excellenceinstallation.com',
         notes : '',
         profileId : [receiver],
         postmarkTemplateId: '42760699',
-        templateAlias:'queuestudioinvitation'
+        templateAlias:'queuestudioinvitation',
+        type: 'queue',
+        metadata: {...participantTokenData}
       });
 
     }
@@ -1584,6 +1732,8 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       profileid: [liveassignmentData['participantid']],
       templateid: null,
       watitemplateid: 'queue_link_generationv2',
+      type: 'queue',
+      metadata: {...participantTokenData}
     });
     console.log('WATI ARCHIVE RESPONSE', response);
   }
@@ -1598,115 +1748,93 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
   let docData = snapshot.data()
   let queueref = docData['queueref']
   let queueGenerationDoc = {}
-  console.log("queueref",queueref.path);
-  await admin.firestore().doc(queueref.path).get().then( queueGenerationDocSnap => {
+  console.log("queueref", queueref.path);
+  await admin.firestore().doc(queueref.path).get().then(queueGenerationDocSnap => {
     queueGenerationDoc = queueGenerationDocSnap.data()
   })
-  console.log("queueGenerationDoc",queueGenerationDoc['queuename']);
+  console.log("queueGenerationDoc", queueGenerationDoc['queuename']);
 
   var stageProperty = queueGenerationDoc["stageproperty"]
-  if(stageProperty[docData["currentstage"]]["compulsoryactivity"].length != 0){
+  if (stageProperty[docData["currentstage"]]["compulsoryactivity"].length != 0) {
     let batch = admin.firestore().batch()
-    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage","==", docData["currentstage"]).orderBy("logdate","asc").get().then(async queueTokenSnap => {
+    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage", "==", docData["currentstage"]).where('tokenstatus', '==', 'Active').orderBy("logdate", "asc").get().then(async queueTokenSnap => {
       console.log("Current Stage length", docData["currentstage"], queueTokenSnap.docs.length);
       var preassignedMap = {}
       var waitingList = []
       var queuedList = []
-      for(let i = 0; i < queueTokenSnap.size; i++){
+      for (let i = 0; i < queueTokenSnap.size; i++) {
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
-        var stagePreassigned = preassigned[docData["currentstage"]] != null && preassigned[docData["currentstage"]] != undefined ? preassigned[docData["currentstage"]] : []
-        if(stagePreassigned.length == 0){
-          if(tokenData["status"] == "ready"){
-            waitingList.push(tokenDoc)
-          }
-          else if(tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited"){
-            queuedList.push(tokenDoc)
-          }
-        }
-        else{
-          stagePreassigned.forEach(studio=>{
-            preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
-            preassignedMap[studio].push(tokenDoc)
+        var stagePreassigned = preassigned[docData["currentstage"]] != null && preassigned[docData["currentstage"]] != undefined
+          ? preassigned[docData["currentstage"]]
+          : []
+
+        if (stagePreassigned.length != 0) {
+          batch.update(tokenDoc.ref, { queueposition: null })
+          stagePreassigned.forEach(studio => {
+            preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
+            preassignedMap[studio].push(tokenDoc);
           })
+        } else if (tokenData["status"] == "ready") {
+          waitingList.push(tokenDoc);
+        } else {
+          batch.update(tokenDoc.ref, { queueposition: null });
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
-        })
+
+      let waitingPositionCounter = 1;
+      waitingList.forEach((waiting) => {
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ });
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
-        })
-      })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+
       await batch.commit().then(() => {
-        console.log("batch updated")
+        console.log("batch updated");
       })
     })
   }
 
-  if(docData["currentstage"] != docData["previousstage"] && stageProperty[docData["previousstage"]]["compulsoryactivity"].length != 0){
+  if (docData["currentstage"] != docData["previousstage"] && stageProperty[docData["previousstage"]]["compulsoryactivity"].length != 0) {
     let batch = admin.firestore().batch()
-    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage","==", docData["previousstage"]).orderBy("logdate","asc").get().then(async queueTokenSnap => {
+    await admin.firestore().collection("queue_token").where('queueref', '==', queueref).where("currentstage", "==", docData["previousstage"]).where('tokenstatus', '==', 'Active').orderBy("logdate", "asc").get().then(async queueTokenSnap => {
       console.log("Previous Stage length", docData["previousstage"], queueTokenSnap.docs.length);
       var preassignedMap = {}
       var waitingList = []
       var queuedList = []
-      for(let i = 0; i < queueTokenSnap.size; i++){
+      for (let i = 0; i < queueTokenSnap.size; i++) {
         var tokenDoc = queueTokenSnap.docs[i]
         var tokenData = tokenDoc.data()
         var preassigned = (tokenData["preassigned"] != null && tokenData["preassigned"] != undefined) ? tokenData["preassigned"] : {}
-        var stagePreassigned = preassigned[docData["previousstage"]] != null && preassigned[docData["previousstage"]] != undefined ? preassigned[docData["previousstage"]] : []
-        if(stagePreassigned.length == 0){
-          if(tokenData["status"] == "ready"){
-            waitingList.push(tokenDoc)
-          }
-          else if(tokenData["status"] == null || tokenData["status"] == "queued" || tokenData["status"] == "invited"){
-            queuedList.push(tokenDoc)
-          }
-        }
-        else{
-          stagePreassigned.forEach(studio=>{
-            preassignedMap[studio] = preassignedMap[studio] != null && preassignedMap[studio] != null ? preassignedMap[studio] : []
-            preassignedMap[studio].push(tokenDoc)
+        var stagePreassigned = preassigned[docData["previousstage"]] != null && preassigned[docData["previousstage"]] != undefined
+          ? preassigned[docData["previousstage"]]
+          : [];
+
+        if (stagePreassigned.length != 0) {
+          batch.update(tokenDoc.ref, { queueposition: null })
+          stagePreassigned.forEach(studio => {
+            preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
+            preassignedMap[studio].push(tokenDoc);
           })
+        } else if (tokenData["status"] == "ready") {
+          waitingList.push(tokenDoc);
+        } else {
+          batch.update(tokenDoc.ref, { queueposition: null });
         }
       }
-      waitingList.forEach((waiting, i)=>{
-        batch.update(waiting.ref,{ 
-          queueposition: i + 1
-        })
+
+      let waitingPositionCounter = 1;
+      waitingList.forEach((waiting) => {
+        batch.update(waiting.ref, { queueposition: waitingPositionCounter++ });
       })
-      queuedList.forEach((queued, i)=>{
-        batch.update(queued.ref,{ 
-          queueposition: i + 1+ waitingList.length
-        })
-      })
-      Object.keys(preassignedMap).forEach(studio=>{
-        preassignedMap[studio].forEach((assignedtoken, i)=>{
-          batch.update(assignedtoken.ref,{ 
-            queueposition: i + 1
-          })
-        })
-      })
+
       await batch.commit().then(() => {
-        console.log("batch updated")
+        console.log("batch updated");
       })
     })
   }
 })
 
-exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient/{id}" , async (snapshot) => {
+exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "formsByClient/{id}", database: "firestore-forms"} , async (snapshot) => {
   let change = snapshot.data
   let data = change.data()
   
@@ -1744,9 +1872,9 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient
   })
   if(mapform[data["formname"]] != data["formid"] && (mapform[data["formname"]] != undefined && mapform[data["formname"]] != null)){
     console.log(mapform[data["formname"]], "/", data["formid"])
-    let ref = admin.firestore().collection('formsByClient').doc(data['docid'])
+    // let ref = admin.firestore().collection('formsByClient').doc(data['docid'])
     console.log("docid",data['docid'],"formid", data['formid'], mapform[data["formname"]]);
-    await ref.update({
+    await change.ref.update({
       formid :  mapform[data["formname"]]
     })
   }
@@ -1881,7 +2009,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient
 
   // Migrate AEL Form
   var aelFormID = ["KqHfM292QPXRLpv9RQNi", "xGhIkwZfSjhUC1sv1tlw"]
-  if(aelFormID.includes(data["formid"]) && data["queueref"]){
+  if(aelFormID.includes(data["formid"])){
     var formData = data;
     const formDoc = snapshot.data.ref
 
@@ -1906,7 +2034,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient
       "crossovermetric": {},
       "reallifesituation": null,
       // "rsvpid": mapRSVP[data["profile_id"]]["docid"]
-      "queueid": data["queueref"].id
+      "queueid": data["queueref"]?.id ?? null
     }
     var crossoverid = admin.firestore().collection("interim crossover").doc().id;
     var crossoverdata = {
@@ -1936,10 +2064,11 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated("formsByClient
     var batch = admin.firestore().batch()
     batch.set(admin.firestore().collection("participant AEL").doc(aelid), aeldata)
     batch.set(admin.firestore().collection("interim crossover").doc(crossoverid), crossoverdata)
-    batch.update(formDoc, {
-      aelid: aelid
+    await batch.commit().then(async() =>{
+      await formDoc.update({
+        aelid: aelid
+      })
     })
-    await batch.commit()
   }
 })
 
@@ -1961,6 +2090,14 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
   
   if(snapshot.exists){
     var inviteData = snapshot.data()
+
+    // Fetch Queue Token Data
+    var participantTokenData = {}
+    await inviteData['tokenref'].get().then(token => {
+      if (token.exists) {
+        participantTokenData = token.data();
+      }
+    })
     await commonService.saveNotificationRecord({
       title: `${inviteData["stage"]} invitation received.`,
       message: "Our specialist has invited you for the '" + inviteData["stage"] + "' Call. Please open the app, accept the invitation, and join the call from your laptop.",
@@ -2018,6 +2155,8 @@ exports.inviteToStudio = onDocumentCreated("studioinvitation/{docid}",async(snap
         profileid: [profileData['profileid']],
         templateid: null,
         watitemplateid: 'bulkinvitetemplate_v3',
+        type: 'queue',
+        metadata: snap.data.data()
       });
       console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2621,6 +2760,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
   var email = profileData["email"]
   var zoomlink = data["zoomlink"]
   var profileUID = profileData["user_ref"] != null && profileData["user_ref"] != undefined ? profileData["user_ref"].id : null
+
+  // Fetch Queue Token Data
+  var participantTokenData = {}
+  await data['tokenref'].get().then(token => {
+    token.forEach(doc => {
+      participantTokenData = doc.data()
+    })
+  })
+
   //whatsapp
   let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
   
@@ -2660,6 +2808,8 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     profileid: [profileData['profileid']],
     templateid: null,
     watitemplateid: 'audio_video_zoom_v3',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
   console.log('WATI ARCHIVE RESPONSE', response);
 
@@ -2686,13 +2836,15 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
     datamodel: messageModel,
     attachments: [],
     emailTo: [email],
-    emailMap: [{ [email]: data["profileid"] }],
+    emailMap: { [email]: data["profileid"] },
     fileURL: '',
     from: 'starlabs@excellenceinstallation.com',
     notes: '',
     profileId: [data["profileid"]],
     postmarkTemplateId: '33910948',
-    templateAlias: 'queueavtest'
+    templateAlias: 'queueavtest',
+    type: 'queue',
+    metadata: {...participantTokenData}
   });
 
   // App notification
@@ -2709,7 +2861,7 @@ exports.queueavtest = onDocumentCreated("queue avtest/{docid}", async(snap)=>{
       sticky: false,
       notificationtype: "queue",
       notificationimage: null,
-      metadata: snap.data.data()
+      metadata: {...participantTokenData}
     })
     
     // await admin.firestore().collection("notifications").doc(profileUID).set({
@@ -2856,6 +3008,11 @@ exports.CreateQueueActivityLogV2 = onDocumentUpdated("live assignment/{docid}",a
   let change = snap.data
   var beforeData = change.before.data()
   var afterData = change.after.data()
+
+  if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
+    return null;
+  }
+
   if(beforeData['isactivitydone'] != afterData['isactivitydone'] && afterData['isactivitydone'] == true && afterData['status'] == 'completed'){
     let getAtcModel = null
     await admin.firestore().collection("queue stage log").where("liveassignmentid","==",afterData['docid']).where("profile_id","==",afterData['participantid']).get().then( async queueLogSnap => {
@@ -3325,4 +3482,238 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   await batch.commit()
   console.log("shifting product done");
 })
+
+// Previous stage = the one that just completed. Use queue variation stages
+// when the token has variationid, else fall back to queue generation stages.
+async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
+  let stages = queueData["stages"] || [];
+  if (tokenData["variationid"]) {
+    const variationSnap = await admin.firestore().collection("queue variation")
+      .doc(tokenData["variationid"]).get();
+    if (variationSnap.exists) {
+      stages = variationSnap.data()["stages"] || stages;
+    }
+  }
+  return pickPreviousStage(stages, currentStage);
+}
+
+// ---------- Shared stage processor ----------
+async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
+  const adminATC = getFirestore("firestore-atc");
+  const adminForms = getFirestore("firestore-forms");
+  const atcrequiredstages = queueData["atcrequiredstages"] || [];
+  const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
+  if (!stageCfg) return;
+
+  const profileid = tokenData["profile_id"];
+  let sourceref = null;
+  let data = null;
+
+  if (stageCfg.type === "form") {
+    const formref = queueData["stageproperty"][currentStage]["actionresource"];
+    if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
+    // formsByClient lives in the firestore-forms database (its queueref is stored
+    // as a firestore-forms ref), so query + match there — not firestore-atc.
+    const snap = await adminForms.collection("formsByClient")
+      .where("profileid", "==", profileid)
+      .where("formid", "==", formref.id)
+      .where("queueref", "==", adminForms.doc(queueRef.path))
+      .orderBy("date", "desc")
+      .get();
+
+    if (snap.docs.length === 0) {
+      await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
+      });
+      return console.log(`no form doc for stage ${currentStage}`);
+    }
+    const formDoc = snap.docs[0];
+    sourceref = formDoc.ref;
+
+    const element = formDoc.data();
+    const formData = [];
+    for (const formelement of element["formarray"] || []) {
+      if (["label", "video", "audio"].includes(formelement["type"])) continue;
+      if (!formelement["value"]) continue;
+      formData.push({
+        questions: formelement["fieldname"],
+        answer: formelement["type"] === "date"
+          ? new Date(formelement["value"].toDate()).toISOString().substring(0, 10)
+          : formelement["value"],
+      });
+    }
+    data = await buildUpLifeAspirationReport(formData, element["formname"]);
+  } else if (stageCfg.type === "zoom") {
+    const logSnap = await admin.firestore().collection("queue stage log")
+      .where("currentstage", "==", currentStage)
+      .where("status", "==", "instudio")
+      .where("profile_id", "==", profileid)
+      .where("queueref", "==", queueRef)
+      .orderBy("logdate", "desc")
+      .get();
+
+    if (logSnap.docs.length === 0) {
+      await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      return console.log(`no queue stage log for ${currentStage}`);
+    }
+    const logDoc = logSnap.docs[0];
+    const logData = logDoc.data();
+    if (!logData["liveassignmentid"]) {
+      await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      return console.log("no live assignment id");
+    }
+
+    const liveSnap = await admin.firestore().collection("live assignment")
+      .doc(logData["liveassignmentid"]).get();
+    const liveData = liveSnap.data();
+    if (!liveData || !liveData["zoomdata"]?.["id"]) {
+      await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
+      });
+      return console.log("no zoom meeting id");
+    }
+
+    sourceref = liveSnap.ref;
+    let transcript;
+    try {
+      transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    } catch (err) {
+      await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
+    }
+    if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
+      await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      return console.log(`empty transcript for ${currentStage}`);
+    }
+    data = {
+      transcript_text: transcript.transcript_text,
+      transcript_raw: transcript.transcript_raw,
+      zoom_topic: transcript.topic,
+      zoom_start_time: transcript.start_time,
+      zoom_duration: transcript.duration,
+    };
+  } else {
+    return console.log(`unknown stage type ${stageCfg.type}`);
+  }
+
+  const existingSnap = await adminATC.collection("queue_atc_generation")
+    .where("queueref", "==", adminATC.doc(queueRef.path))
+    .where("profileid", "==", profileid)
+    .where("queue_token_id", "==", queueTokenId)
+    .where("stage", "==", currentStage)
+    .get();
+
+  if (!existingSnap.empty) {
+    const existingDoc = existingSnap.docs[0];
+    const existingSourceRef = existingDoc.data()["sourceref"];
+    if (existingSourceRef && sourceref && existingSourceRef.path === sourceref.path) {
+      return console.log(`queue_atc_generation already exists for ${currentStage}`);
+    }
+  }
+
+  const docid = adminATC.collection("queue_atc_generation").doc().id;
+  const payload = {
+    docid: docid,
+    queueref: adminATC.doc(queueRef.path),
+    profileid: profileid,
+    queue_token_id: queueTokenId,
+    stage: currentStage,
+    generateatc: stageCfg.generateatc,
+    type: stageCfg.type,
+    pairingstages: stageCfg.pairingstages || [],
+    sourceref: sourceref,
+    data: data,
+    createdAt: new Date(),
+  };
+  await adminATC.collection("queue_atc_generation").doc(docid).set(payload);
+  console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
+}
+
+// Exposed for integration tests (not deployed functions). onQueueStageChange
+// drives these internally; tests call them directly to exercise the Stage-0
+// ATC logic without the surrounding WATI/Zoom/Slack side effects.
+exports.processStage = processStage;
+exports.resolvePreviousStage = resolvePreviousStage;
+
+// ---------- Helpers ----------
+async function getTranscript(meetingId) {
+  if (!meetingId) throw new Error("meetingId is required");
+  const accountId =  zoomAccountId.value();
+  const clientId = zoomClientId.value();
+  const clientSecret = zoomClientSecret.value();
+
+  const tokenResponse = await fetch(
+    `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}&client_id=${clientId}&client_secret=${clientSecret}`,
+    { method: "POST" }
+  );
+  const tokenData = await tokenResponse.json();
+  if (!tokenData.access_token) throw new Error("Failed to get Zoom access token");
+
+  const accessToken = tokenData.access_token;
+  const recordingResponse = await fetch(
+    `https://api.zoom.us/v2/meetings/${meetingId}/recordings`,
+    { headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" } }
+  );
+  if (!recordingResponse.ok) {
+    const err = await recordingResponse.json();
+    throw new Error(err.message || "Recording not found");
+  }
+  const recordingData = await recordingResponse.json();
+  const transcriptFile = recordingData.recording_files?.find((f) => f.file_type === "TRANSCRIPT");
+  if (!transcriptFile) throw new Error("No transcript found. Enable Audio Transcript in Zoom settings.");
+
+  const transcriptResponse = await fetch(`${transcriptFile.download_url}?access_token=${accessToken}`);
+  if (!transcriptResponse.ok) throw new Error("Failed to download transcript file");
+  const vttContent = await transcriptResponse.text();
+
+  return {
+    meetingId,
+    topic: recordingData.topic,
+    start_time: recordingData.start_time,
+    duration: recordingData.duration,
+    transcript_raw: vttContent,
+    transcript_text: convertVttToLLM(vttContent),
+    download_url: transcriptFile.download_url,
+  };
+}
+
+function convertVttToLLM(vttText) {
+  const lines = vttText.trim().split("\n");
+  const entries = [];
+  let currentSpeaker = null;
+  let currentText = "";
+
+  for (let line of lines) {
+    line = line.trim();
+    if (
+      !line ||
+      line === "WEBVTT" ||
+      /^\d+$/.test(line) ||
+      /^\d{2}:\d{2}:\d{2}/.test(line)
+    ) continue;
+
+    const match = line.match(/^(.+?):\s+(.+)$/);
+    if (match) {
+      const speaker = match[1].trim();
+      const text = match[2].trim();
+      if (speaker === currentSpeaker) {
+        currentText += " " + text;
+      } else {
+        if (currentSpeaker) entries.push(`${currentSpeaker}: ${currentText}`);
+        currentSpeaker = speaker;
+        currentText = text;
+      }
+    }
+  }
+  if (currentSpeaker) entries.push(`${currentSpeaker}: ${currentText}`);
+  return entries.join("\n");
+}
 

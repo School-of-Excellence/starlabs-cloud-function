@@ -41,7 +41,12 @@ const apn = require("apn");
 const APPLE_AUTHKEY_P8 = defineSecret("APPLE_AUTHKEY_P8");
 const APPLE_APN_KEYID = defineSecret("APPLE_APN_KEYID");
 const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
-const MYOPERATOR_TOKEN = defineSecret("APPLE_TEAMID");
+const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
+
+const postmark = require("postmark");
+const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
+const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
+const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
 
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
@@ -50,7 +55,6 @@ const INVALID_TOKEN_ERRORS = [
   'messaging/invalid-argument',
   'messaging/unregistered'
 ];
-
 exports.notifyMobileApp = onDocumentCreated({
   document: "/notificationrecord/{id}", 
   timeoutSeconds: 540,
@@ -71,6 +75,13 @@ exports.notifyMobileApp = onDocumentCreated({
   const notificationImage = notificationData["notificationimage"] || null;
   const metaData = notificationData["metadata"] || {};
   const profileID = notificationData["profileid"] || [];
+
+  // receivingapp routing. Absent → current (breakthroughs) behaviour for
+  // backward compatibility. "eiflixapp" → only EiFlix (EIFLIX_FCM_token, no
+  // FCM_token/AHCRM). "all" → both apps.
+  const receivingApp = notificationData["receivingapp"] || "breakthroughsapp";
+  const sendBreakthroughs = receivingApp === "all" || receivingApp === "breakthroughsapp";
+  const sendEiflix = receivingApp === "all" || receivingApp === "eiflixapp";
 
   if (profileID.length === 0) {
     console.log("No profiles to notify");
@@ -104,6 +115,12 @@ exports.notifyMobileApp = onDocumentCreated({
           return { docs: [] };
         })
       );
+      profilePromises.push(
+        admin.firestore().collection("new_user_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+          console.error("new_user_data fetch batch failed:", err);
+          return { docs: [] };
+        })
+      );
     }
 
     const profileResults = await Promise.all(profilePromises);
@@ -115,14 +132,23 @@ exports.notifyMobileApp = onDocumentCreated({
         const profileId = profileDoc.id;
         foundProfileIds.push(profileId);
 
+        let userId = null;
         if (profileData["user_ref"]) {
-          const userId = profileData["user_ref"].id;
-          profilesWithUserRef.push(profileId);
+          userId = profileData["user_ref"].id;
+        } else if (profileData["uid"]) {
+          userId = profileData["uid"];
+        }
+
+        if (userId) {
+          if (!profilesWithUserRef.includes(profileId)) {
+            profilesWithUserRef.push(profileId);
+          }
           if (!allUsersForLogs.includes(userId)) {
             allUsersForLogs.push(userId);
           }
-        } else {
-          failedlist[profileId] = "No user_ref found in profile";
+          delete failedlist[profileId];
+        } else if (!profilesWithUserRef.includes(profileId)) {
+          failedlist[profileId] = "No user_ref/uid found in profile";
         }
       }
     }
@@ -156,27 +182,47 @@ exports.notifyMobileApp = onDocumentCreated({
     const fcmPromises = [];
     const AHCRMPromises = [];
 
-    for (let a = 0; a < profileID.length; a += 30) {
-      const profileList = profileID.slice(a, a + 30).map(e =>
-        admin.firestore().collection("profile_data").doc(e)
-      );
-      fcmPromises.push(
-        admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
-          console.error("FCM token fetch batch failed:", err);
-          return { docs: [] };
-        })
-      );
-    }
-
-    // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
-    if (notificationType === "supportticket") {
+    // Breakthroughs app tokens (current behaviour) — skipped for "eiflixapp".
+    if (sendBreakthroughs) {
       for (let a = 0; a < profileID.length; a += 30) {
         const profileList = profileID.slice(a, a + 30).map(e =>
           admin.firestore().collection("profile_data").doc(e)
         );
-        AHCRMPromises.push(
-          admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+        fcmPromises.push(
+          admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
             console.error("FCM token fetch batch failed:", err);
+            return { docs: [] };
+          })
+        );
+      }
+
+      // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
+      if (notificationType === "supportticket") {
+        for (let a = 0; a < profileID.length; a += 30) {
+          const profileList = profileID.slice(a, a + 30).map(e =>
+            admin.firestore().collection("profile_data").doc(e)
+          );
+          AHCRMPromises.push(
+            admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+              console.error("FCM token fetch batch failed:", err);
+              return { docs: [] };
+            })
+          );
+        }
+      }
+    }
+
+    // EiFlix app tokens (separate collection) — added for "eiflixapp" / "all".
+    // FCM routes each token to its own app, and the Firebase project's APNs key
+    // for com.soe.eiflix handles iOS delivery, so the existing send path is reused.
+    if (sendEiflix) {
+      for (let a = 0; a < profileID.length; a += 30) {
+        const profileList = profileID.slice(a, a + 30).map(e =>
+          admin.firestore().collection("profile_data").doc(e)
+        );
+        fcmPromises.push(
+          admin.firestore().collection("EIFLIX_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+            console.error("EIFLIX FCM token fetch batch failed:", err);
             return { docs: [] };
           })
         );
@@ -292,6 +338,8 @@ exports.notifyMobileApp = onDocumentCreated({
               type: notificationType,
               click_action: "FLUTTER_NOTIFICATION_CLICK",
               recordid: snapshot.data.id,
+              landingpage: notificationData["landingpage"] || "",
+              sticky: String(notificationData["sticky"] || false),
               ...sanitizeDataPayload(metaData),
               // ...sanitizeDataPayload(notificationData),
             },
@@ -525,6 +573,498 @@ exports.notifyMobileApp = onDocumentCreated({
     }).catch(e => console.error("Failed to update error status:", e));
   }
 });
+
+// exports.notifyMobileApp = onDocumentCreated({
+//   document: "/notificationrecord/{id}", 
+//   timeoutSeconds: 540,
+//   memory: "512MiB",
+//   secrets: [APPLE_AUTHKEY_P8, APPLE_APN_KEYID, APPLE_TEAMID]
+//   }, async (snapshot) => {
+//   const notificationData = snapshot.data.data();
+
+//   if (!notificationData) {
+//     console.error("No notification data found");
+//     return;
+//   }
+
+//   const title = notificationData["title"] || "A&H Update";
+//   const message = notificationData["message"] || "You have a new notification!";
+//   const subtitle = notificationData["subtitle"] || null;
+//   const notificationType = notificationData["notificationtype"] || "ahupdate";
+//   const notificationImage = notificationData["notificationimage"] || null;
+//   const metaData = notificationData["metadata"] || {};
+//   const profileID = notificationData["profileid"] || [];
+
+//   if (profileID.length === 0) {
+//     console.log("No profiles to notify");
+//     await snapshot.data.ref.update({ success: true, profilesuccess: [], profilefailed: [], failedlist: {} });
+//     return;
+//   }
+
+//   console.log("Profile ID", profileID);
+//   console.log(`Starting notification for ${profileID.length} profiles`);
+
+//   const fcmTokens = [];
+//   const voipTokens = [];
+//   const mapTokenProfile = {};
+//   const mapVoipTokenProfile = {};
+//   const allUsersForLogs = [];
+//   const failedlist = {};
+//   const profilesWithUserRef = [];
+//   const profilesWithFCMToken = [];
+
+//   try {
+//     // ============ STEP 1: FETCH PROFILES TO GET USER_REF FOR LOGS ============
+//     const profilePromises = [];
+//     for (let a = 0; a < profileID.length; a += 30) {
+//       const profileBatch = profileID.slice(a, a + 30);
+//       profilePromises.push(
+//         admin.firestore().collection("profile_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+//           console.error("Profile fetch batch failed:", err);
+//           profileBatch.forEach(pid => {
+//             failedlist[pid] = `Profile fetch failed: ${err.message}`;
+//           });
+//           return { docs: [] };
+//         })
+//       );
+//       profilePromises.push(
+//         admin.firestore().collection("new_user_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+//           console.error("new_user_data fetch batch failed:", err);
+//           return { docs: [] };
+//         })
+//       );
+//     }
+
+//     const profileResults = await Promise.all(profilePromises);
+//     const foundProfileIds = [];
+
+//     for (const result of profileResults) {
+//       for (const profileDoc of result.docs) {
+//         const profileData = profileDoc.data();
+//         const profileId = profileDoc.id;
+//         foundProfileIds.push(profileId);
+
+//         let userId = null;
+//         if (profileData["user_ref"]) {
+//           userId = profileData["user_ref"].id;
+//         } else if (profileData["uid"]) {
+//           userId = profileData["uid"];
+//         }
+
+//         if (userId) {
+//           if (!profilesWithUserRef.includes(profileId)) {
+//             profilesWithUserRef.push(profileId);
+//           }
+//           if (!allUsersForLogs.includes(userId)) {
+//             allUsersForLogs.push(userId);
+//           }
+//           delete failedlist[profileId];
+//         } else if (!profilesWithUserRef.includes(profileId)) {
+//           failedlist[profileId] = "No user_ref/uid found in profile";
+//         }
+//       }
+//     }
+
+//     profileID.forEach(pid => {
+//       if (!foundProfileIds.includes(pid) && !failedlist[pid]) {
+//         failedlist[pid] = "Profile not found in database";
+//       }
+//     });
+
+//     console.log("Users Found", allUsersForLogs);
+//     console.log(`Found ${allUsersForLogs.length} users with user_ref for logs`);
+
+//     // ============ STEP 2: CREATE NOTIFICATION LOGS (BEFORE FCM) ============
+//     if (notificationData["logged"] && allUsersForLogs.length > 0) {
+//       console.log(`Creating logs for ${allUsersForLogs.length} users`);
+//       await storeNotificationLogs(allUsersForLogs, {
+//         title,
+//         message,
+//         subtitle,
+//         notificationImage,
+//         notificationType,
+//         landingpage: notificationData["landingpage"],
+//         sticky: notificationData["sticky"],
+//         metaData,
+//         recordid: snapshot.data.id
+//       });
+//     }
+
+//     // ============ STEP 3: FETCH FCM TOKENS FOR PUSH NOTIFICATIONS ============
+//     const fcmPromises = [];
+//     const AHCRMPromises = [];
+
+//     for (let a = 0; a < profileID.length; a += 30) {
+//       const profileList = profileID.slice(a, a + 30).map(e =>
+//         admin.firestore().collection("profile_data").doc(e)
+//       );
+//       fcmPromises.push(
+//         admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+//           console.error("FCM token fetch batch failed:", err);
+//           return { docs: [] };
+//         })
+//       );
+//     }
+
+//     // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
+//     if (notificationType === "supportticket") {
+//       for (let a = 0; a < profileID.length; a += 30) {
+//         const profileList = profileID.slice(a, a + 30).map(e =>
+//           admin.firestore().collection("profile_data").doc(e)
+//         );
+//         AHCRMPromises.push(
+//           admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+//             console.error("FCM token fetch batch failed:", err);
+//             return { docs: [] };
+//           })
+//         );
+//       }
+//     }
+
+//     fcmPromises.push(...AHCRMPromises);
+//     console.log("ahcrm promises", AHCRMPromises.length);
+//     const fcmResults = await Promise.all(fcmPromises);
+
+//     for (const result of fcmResults) {
+//       for (const tokenDoc of result.docs) {
+//         const tokenData = tokenDoc.data();
+//         tokenData["path"] = tokenDoc.ref.path;
+//         const fcmToken = tokenData["FCM_id"];
+//         const profileId = tokenData["profile_ref"]?.id;
+//         const voipToken = tokenData["voipToken"]; 
+//         const platform = tokenData["device_os"]; 
+
+//         // console.log(`Token doc - platform: "${platform}", hasVoIP: ${voipToken}, profileId: ${profileId}`);
+
+//         if (fcmToken && profileId ) {
+//           fcmTokens.push(fcmToken);
+//           mapTokenProfile[fcmToken] = tokenData;
+//           if (!profilesWithFCMToken.includes(profileId)) {
+//             profilesWithFCMToken.push(profileId);
+//           }
+//         }
+
+//         //call kit for ios
+//         if (voipToken && profileId && platform == "ios") {          
+//           voipTokens.push(voipToken);
+//           console.log("voipTokens",voipToken);
+//           mapVoipTokenProfile[voipToken] = tokenData;
+//         }
+
+//       }
+//     }
+
+//     profilesWithUserRef.forEach(pid => {
+//       if (!profilesWithFCMToken.includes(pid)) {
+//         if (failedlist[pid]) {
+//           failedlist[pid] += "; No active FCM token found";
+//         } else {
+//           failedlist[pid] = "No active FCM token found";
+//         }
+//       }
+//     });
+
+//     if (notificationType === "supportticket") {
+//       console.log(`Found ${fcmTokens.length} FCM tokens (from FCM_token + AHCRM_FCM_token)`);
+//     } else {
+//       console.log(`Found ${fcmTokens.length} FCM tokens for push notifications`);
+//     }
+
+//     // ============ STEP 4: SEND PUSH NOTIFICATIONS ============
+//     const successfullProfileid = [];
+//     const failedFCM = [];
+//     const appFCMSuccess = [];
+//     const webFCMSuccess = [];
+//     const appFCMFailed = [];
+//     const webFCMFailed = [];
+//     const invalidTokenPaths = []; // Only invalid tokens to deactivate
+//     const voipResults = { success: [], failed: [], invalidTokens: [] }; 
+
+//     if (fcmTokens.length > 0) {
+//       const splitToken = commonService.chunkArray(fcmTokens, 500);
+
+//       for (let i = 0; i < splitToken.length; i++) {
+//         const tokenSet = splitToken[i];
+//         if (i > 0) {
+//           await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+//         }
+//         let payload;
+//         if(notificationType === "studio invitation"){
+//           payload = {
+//             data: {
+//               type: "studio_invitation_call", 
+//               click_action: "FLUTTER_NOTIFICATION_CLICK",
+//               recordid: snapshot.data.id,
+//               title: title,
+//               body: message,
+//               stage: metaData?.stage || title,
+//               studioid: metaData?.studioid || "",
+//               docid: metaData?.docid || "",
+//               ...sanitizeDataPayload(metaData),
+//             },
+//             android: {
+//               priority: 'high',
+//               ttl: 0,
+//             },
+//             apns: {
+//               headers: {
+//                 'apns-priority': '10',
+//               },
+//               payload: {
+//                 aps: {
+//                   'content-available': 1,
+//                 },
+//               },
+//             },
+//             tokens: tokenSet,
+//           };
+
+//         }
+//         else{
+//           payload = {
+//             notification: {
+//               title: title,
+//               body: message,
+//             },
+//             data: {
+//               type: notificationType,
+//               click_action: "FLUTTER_NOTIFICATION_CLICK",
+//               recordid: snapshot.data.id,
+//               landingpage: notificationData["landingpage"] || "",
+//               sticky: String(notificationData["sticky"] || false),
+//               ...sanitizeDataPayload(metaData),
+//               // ...sanitizeDataPayload(notificationData),
+//             },
+//             android: {
+//               notification: {
+//                 channel_id: "default_channel",
+//                 sound: "default",
+//                 color: '#ffffff',
+//                 tag: snapshot.data.id,
+//               },
+//             },
+//             apns: {
+//               payload: {
+//                 aps: {
+//                   badge: 1,
+//                   sound: "default",
+//                   "mutable-content": 1,
+//                   'content-available': 1,
+//                 },
+//               },
+//               headers: {
+//                 'apns-collapse-id': snapshot.data.id,
+//               }
+//             },
+//             tokens: tokenSet,
+//           };
+//         }
+       
+//         // Old payload method
+//         // const payload = {
+//         //   notification: {
+//         //     title: title,
+//         //     body: message,
+//         //   },
+//         //   data: {
+//         //     type: notificationType,
+//         //     click_action: "FLUTTER_NOTIFICATION_CLICK",
+//         //     recordid: snapshot.data.id,
+//         //     ...sanitizeDataPayload(metaData),
+//         //     // ...sanitizeDataPayload(notificationData),
+//         //   },
+//         //   android: {
+//         //     notification: {
+//         //       color: '#ffffff',
+//         //       tag: snapshot.data.id,
+//         //       sound: "default",
+//         //     },
+//         //   },
+//         //   apns: {
+//         //     payload: {
+//         //       aps: {
+//         //         badge: 1,
+//         //         sound: "default",
+//         //         "mutable-content": 1
+//         //       },
+//         //     },
+//         //     headers: {
+//         //       'apns-collapse-id': snapshot.data.id,
+//         //     }
+//         //   },
+//         //   tokens: tokenSet,
+//         // }; 
+//         if (notificationImage) {
+//           payload.android.notification["imageUrl"] = notificationImage;
+//           payload.apns["fcm_options"] = { image: notificationImage };
+//         }
+
+//         try {
+//           const response = await sendWithRetry(payload);
+//           response.responses.forEach((res, j) => {
+//             const tokenid = tokenSet[j];
+//             const tokenData = mapTokenProfile[tokenid];
+
+//             if (!tokenData) return;
+
+//             const tokenProfileid = tokenData["profile_ref"]?.id;
+//             const deviceOS = tokenData["device_os"]?.toLowerCase();
+//             const isApp = deviceOS === "ios" || deviceOS === "android";
+//             const isWeb = deviceOS === "linux" || deviceOS === "windows" || deviceOS === "mac";
+
+//             if (res.success) {
+//               if (tokenProfileid && !successfullProfileid.includes(tokenProfileid)) {
+//                 successfullProfileid.push(tokenProfileid);
+//               }
+//               if (isApp && !appFCMSuccess.includes(tokenProfileid)) {
+//                 appFCMSuccess.push(tokenProfileid);
+//               } else if (isWeb && !webFCMSuccess.includes(tokenProfileid)) {
+//                 webFCMSuccess.push(tokenProfileid);
+//               }
+
+//               if (tokenProfileid && failedlist[tokenProfileid]) {
+//                 delete failedlist[tokenProfileid];
+//               }
+//             } else {
+//               failedFCM.push(tokenid);
+
+//               const errorCode = res.error?.code || "unknown";
+//               const errorMessage = res.error?.message || "FCM delivery failed";
+
+//               // Only mark token as invalid if error indicates token is invalid
+//               if (isInvalidTokenError(errorCode)) {
+//                 invalidTokenPaths.push(tokenData["path"]);
+//                 console.log(`Invalid token detected: ${tokenid}, error: ${errorCode}`);
+//               }
+
+//               if (tokenProfileid) {
+//                 const fcmError = `FCM failed: ${errorCode} - ${errorMessage}`;
+//                 if (failedlist[tokenProfileid]) {
+//                   failedlist[tokenProfileid] += `; ${fcmError}`;
+//                 } else {
+//                   failedlist[tokenProfileid] = fcmError;
+//                 }
+//               }
+
+//               if (isApp && !appFCMFailed.includes(tokenProfileid)) {
+//                 appFCMFailed.push(tokenProfileid);
+//               } else if (isWeb && !webFCMFailed.includes(tokenProfileid)) {
+//                 webFCMFailed.push(tokenProfileid);
+//               }
+//             }
+//           });
+
+//           console.log(`Batch ${i + 1}/${splitToken.length} completed: ${response.successCount} success, ${response.failureCount} failed`);
+
+//         } catch (err) {
+//           console.error(`Batch ${i + 1} failed after all retries:`, err);
+//           tokenSet.forEach(tokenid => {
+//             failedFCM.push(tokenid);
+//             if (mapTokenProfile[tokenid]) {
+//               const tokenProfileid = mapTokenProfile[tokenid]["profile_ref"]?.id;
+//               if (tokenProfileid) {
+//                 const batchError = `FCM batch failed: ${err.message}`;
+//                 if (failedlist[tokenProfileid]) {
+//                   failedlist[tokenProfileid] += `; ${batchError}`;
+//                 } else {
+//                   failedlist[tokenProfileid] = batchError;
+//                 }
+//               }
+//             }
+//           });
+//         }
+//       }
+
+
+//       // ============ STEP 4B: SEND VOIP NOTIFICATIONS FOR iOS ============
+//       if (voipTokens.length > 0 && notificationType === "studio invitation") {
+//         console.log(`Sending VoIP to ${voipTokens.length} iOS devices`);
+
+//         const apnToken = {
+//           key: APPLE_AUTHKEY_P8.value(),
+//           keyId: APPLE_APN_KEYID.value(),
+//           teamId: APPLE_TEAMID.value(),
+//         };
+//         const voipResult = await sendVoipNotifications({
+//           apnToken: apnToken,
+//           voipTokens: voipTokens,
+//           mapVoipTokenProfile: mapVoipTokenProfile,
+//           notificationData: {
+//             title,
+//             message,
+//             notificationType,
+//             recordid: snapshot.data.id,
+//             metaData,
+//           }
+//         });
+
+//         voipResults.success = voipResult.success;
+//         voipResults.failed = voipResult.failed;
+        
+//         // Add invalid VoIP tokens to deactivation list
+//         voipResult.invalidTokens.forEach(path => {
+//           if (path && !invalidTokenPaths.includes(path)) {
+//             invalidTokenPaths.push(path);
+//           }
+//         });
+
+//         console.log(`VoIP: ${voipResult.success.length} success, ${voipResult.failed.length} failed`);
+//       }
+
+    
+
+//       // ============ STEP 5: CLEANUP ONLY INVALID FCM TOKENS ============
+//       if (invalidTokenPaths.length > 0) {
+//         console.log(`Deactivating ${invalidTokenPaths.length} invalid tokens`);
+//         const invalidChunks = commonService.chunkArray(invalidTokenPaths, 500);
+//         for (const chunk of invalidChunks) {
+//           const batch = admin.firestore().batch();
+//           chunk.forEach(path => {
+//             batch.update(admin.firestore().doc(path), { active: false });
+//           });
+//           await batch.commit().catch(err => {
+//             console.error("Failed to deactivate invalid FCM tokens:", err);
+//           });
+//         }
+//       }
+//     } else {
+//       console.log("No FCM tokens found, skipping push notifications");
+//     }
+
+//     // ============ STEP 6: UPDATE FINAL RESULT ============
+//     const failedProfile = profileID.filter(e => !successfullProfileid.includes(e));
+
+//     await snapshot.data.ref.update({
+//       profilesuccess: successfullProfileid,
+//       profilefailed: failedProfile,
+//       appFCMSuccess: appFCMSuccess,
+//       webFCMSuccess: webFCMSuccess,
+//       appFCMFailed: appFCMFailed,
+//       voipSuccess: voipResults.success,
+//       voipFailed: voipResults.failed,
+//       webFCMFailed: webFCMFailed,
+//       failedlist: failedlist,
+//       success: true
+//     });
+
+//     console.log(`Completed: ${successfullProfileid.length} FCM success, ${failedProfile.length} FCM failed, ${invalidTokenPaths.length} tokens deactivated`);
+
+//   } catch (err) {
+//     console.error("Critical error in notifyMobileApp:", err);
+
+//     profileID.forEach(pid => {
+//       if (!failedlist[pid]) {
+//         failedlist[pid] = `Critical error: ${err.message}`;
+//       }
+//     });
+
+//     await snapshot.data.ref.update({
+//       success: false,
+//       error: err.message || "Unknown error",
+//       failedlist: failedlist
+//     }).catch(e => console.error("Failed to update error status:", e));
+//   }
+// });
 
 async function sendVoipNotifications({voipTokens, mapVoipTokenProfile, notificationData, apnToken}) {
 
@@ -1161,24 +1701,58 @@ exports.SupportDeskToSlack = onDocumentCreated('/supportdesk/{docid}/messages/{m
 //   return variables;
 // }
 
-exports.sendBatchEmailTest = onDocumentCreated({ document: "email archive/{docid}", timeoutSeconds: 540, memory: "512MiB" },
+exports.sendBatchEmailTest = onDocumentCreated({
+  document: "email archive/{docid}",
+  timeoutSeconds: 540,
+  memory: "512MiB",
+  secrets: [
+    POSTMARK_STARLABS_V1,
+    POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_TEST
+  ]
+},
   async (snap) => {
     const change = snap.data;
     const newDocId = change?.data().docid;
     console.log('Started sending to participants');
-
+ 
     if (change.data()['status'] != 'queued') {
-      const result = await sendBatchEmailArchive(newDocId);
+ 
+      // FIX: Use .value() to get the actual secret string, not the Secret object
+      const serversMap = {
+        POSTMARK_STARLABS_V1,
+        POSTMARK_STARLABS_V2,
+        POSTMARK_STARLABS_TEST,
+      };
+ 
+      const result = await sendBatchEmailArchive(newDocId, serversMap);
       console.log('Finished sending to participants', result);
     }
   }
 );
 
-exports.sendBatchEmail = onRequest({region: "us-central1", cors:true,timeoutSeconds: 540,memory: "512MiB"},async (req, res) => {
+exports.sendBatchEmail = onRequest({
+  region: "us-central1",
+  cors:true,
+  timeoutSeconds: 540,
+  memory: "512MiB",
+  secrets: [
+    POSTMARK_STARLABS_V1,
+    POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_TEST
+  ]
+},async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
   const archiveid = req.body.archiveid;
-  const result = await sendBatchEmailArchive(archiveid);
+
+  const serversMap = {
+    POSTMARK_STARLABS_V1,
+    POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_TEST
+  };
+
+  const result = await sendBatchEmailArchive(archiveid,serversMap);
   console.log('Finished sending to participants', result);
   res.json({
     success: true,
@@ -1247,49 +1821,59 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
 
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core send function
-// ─────────────────────────────────────────────────────────────────────────────
-async function sendBatchEmailArchive(emailArchiveId) {
+async function sendBatchEmailArchive(emailArchiveId, serversMap) {
+ 
   // ── 1. Fetch archive doc ─────────────────────────────────────────────────
   let archiveData = null;
-  let newDocRef  = null;
-
+  let newDocRef   = null;
+ 
   await admin.firestore().collection('email archive').doc(emailArchiveId).get().then((doc) => {
     if (doc.exists) {
       archiveData = doc.data();
       newDocRef   = doc.ref;
     }
   });
-
+ 
   if (!archiveData || !newDocRef) {
     return 'No Archive Data Found';
   }
-
-  // ── 2. Load participant metadata ─────────────────────────────────────────
-  const mapProfile      = {};   // profileid  → profileData
-  const mapProfileEmail = {};   // email      → profileData
-
-  const query = archiveData['profileid'].length < 30 ?  admin.firestore().collection("participant metadata").where('profileid','in',archiveData['profileid']) : admin.firestore().collection("participant metadata");
-
+ 
+  // ── 2. Resolve Postmark server token ─────────────────────────────────────
+  const selectedSecret = serversMap[archiveData['servername']].value();
+ 
+  if (!selectedSecret) {
+    console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
+    await newDocRef.update({ status: "failed", error: `Invalid server name: ${archiveData['servername']}` });
+    throw new Error(`Invalid server name: ${archiveData['servername']}`);
+  }
+ 
+  const postmarkClient = new postmark.ServerClient(selectedSecret);
+ 
+  // ── 3. Load participant metadata ─────────────────────────────────────────
+  const mapProfile      = {};
+  const mapProfileEmail = {};
+ 
+  const query = archiveData['profileid'].length < 30
+    ? admin.firestore().collection("participant metadata").where('profileid', 'in', archiveData['profileid'])
+    : admin.firestore().collection("participant metadata");
+ 
   await query.get().then((snap) => {
-      snap.docs.forEach((d) => {
-        const p = d.data();
-        mapProfile[p['profileid']] = p;
-        mapProfileEmail[p['email']] = p;
-      });
+    snap.docs.forEach((d) => {
+      const p = d.data();
+      mapProfile[p['profileid']] = p;
+      mapProfileEmail[p['email']] = p;
     });
-
-  const datamodel        = archiveData.datamodel || {};
-  const variableConfigs  = datamodel['_variableConfigs'] || {};  // variable → source
-  const sheetFileUrl     = datamodel['_sheetFileUrl']    || null;
-
-  // Detect whether ANY variable uses the sheet source
+  });
+ 
+  const datamodel       = archiveData.datamodel || {};
+  const variableConfigs = datamodel['_variableConfigs'] || {};
+  const sheetFileUrl    = datamodel['_sheetFileUrl'] || null;
+ 
   const needsSheet = Object.values(variableConfigs).some(src => src === 'sheet');
-
+ 
   // ── 4. Load sheet (if needed) ────────────────────────────────────────────
   let sheetData = null;
-
+ 
   if (needsSheet && sheetFileUrl) {
     try {
       sheetData = await fetchAndParseSheet(sheetFileUrl);
@@ -1300,27 +1884,36 @@ async function sendBatchEmailArchive(emailArchiveId) {
       return 'Failed to load sheet data';
     }
   }
-
-  // ── 5. Build per-recipient email list ────────────────────────────────────
+ 
+  // ── 5. Fetch and base64-encode attachments ───────────────────────────────
+  let postmarkAttachments = [];
+ 
+  const rawAttachments = archiveData['postmarkAttachments'] || archiveData['attachments'] || [];
+ 
+  if (rawAttachments.length > 0) {
+    console.log(`Processing ${rawAttachments.length} attachment(s)...`);
+    postmarkAttachments = await buildPostmarkAttachmentsFromUrls(rawAttachments);
+    console.log(`${postmarkAttachments.length} attachment(s) ready for Postmark`);
+  }
+ 
+  // ── 6. Build per-recipient email list ────────────────────────────────────
   const batchEmailList = [];
   let   emailList      = [];
-
+ 
   for (let i = 0; i < archiveData['emailid'].length; i++) {
-    const profileId  = archiveData['profileid'][i];
-    const emailId    = archiveData['emailid'][i];
+    const profileId   = archiveData['profileid'][i];
+    const emailId     = archiveData['emailid'][i];
     const profileData = mapProfile[profileId] || {};
-
+ 
     // ── Build the templateModel for this recipient ──────────────────────
     let templateModel = {};
-    let attachments   = [];
-
-    // Legacy / automated path — keep backward-compat
+ 
+    // Legacy / automated path
     if (archiveData.variableoption === 'automated') {
       templateModel = Array.isArray(archiveData.datamodel) ? archiveData.datamodel : (archiveData.datamodel || []);
-      attachments   = archiveData.attachments || [];
-
+ 
     } else if (Object.keys(variableConfigs).length > 0) {
-      // ── NEW: per-variable source resolution ──────────────────────────
+      // Per-variable source resolution
       templateModel = buildPerVariableModel({
         variableConfigs,
         datamodel,
@@ -1328,34 +1921,36 @@ async function sendBatchEmailArchive(emailArchiveId) {
         emailId,
         sheetData,
       });
-
+ 
     } else {
-      // ── LEGACY fallback (single variableoption) ───────────────────────
+      // Legacy fallback (single variableoption)
       if (archiveData.variableoption === 'static') {
         templateModel = archiveData.datamodel || {};
-
+ 
       } else if (archiveData.variableoption === 'analytics') {
         templateModel = extractAnalyticsVariables(profileData, archiveData.datamodel);
-
+ 
       } else if (archiveData.variableoption === 'sheet' && sheetData) {
         templateModel = extractSheetVariables(archiveData['body'], emailId, sheetData);
-
+ 
       } else {
         templateModel = extractTemplateVariables(archiveData['body'], profileData);
       }
     }
-
+ 
     console.log(`Variables for ${emailId}:`, templateModel);
-
+ 
     const mailOptions = {
       From:          archiveData['from'] || "support@intl.soexcellence.com",
       To:            emailId,
+      Cc: archiveData['cc'] || null,
+      Bcc: archiveData['bcc'] || null,
       TemplateAlias: archiveData['templateid'],
       TemplateModel: templateModel,
       Tag:           archiveData['broadcastname'],
-      Attachments:   attachments,
+      Attachments:   postmarkAttachments,
     };
-
+    
     // Batch in groups of 400 (Postmark limit)
     if (i !== 0 && i % 400 === 0) {
       batchEmailList.push(emailList);
@@ -1364,129 +1959,224 @@ async function sendBatchEmailArchive(emailArchiveId) {
     emailList.push(mailOptions);
   }
   batchEmailList.push(emailList);
-
-  // ── 6. Send batches via Postmark ─────────────────────────────────────────
+ 
+  // ── 7. Send batches via Postmark ─────────────────────────────────────────
   for (let i = 0; i < batchEmailList.length; i++) {
     const mailelement = batchEmailList[i];
-
-    await commonService.postmarkClient.sendEmailBatchWithTemplates(
-      mailelement,
-      async (error, info) => {
-        if (error) {
-          console.error('Error sending email batch:', error);
-          await newDocRef.update({
-            ...archiveData,
-            mailstatus: 'not delivered'
-          }).catch(err => console.error("Error updating archive:", err));
-          return;
-        }
-
-        console.log("Batch sent:", info);
-
-        // Mark completed on last batch
-        if ((i + 1) === batchEmailList.length) {
-          await newDocRef.update({ status: "completed" })
-            .catch(err => console.error("Error marking completed:", err));
-        }
-
-        // Collect message IDs and response map
-        const msgIds     = info.map(e => e.MessageID).filter(Boolean);
-        const responseMap = info.reduce((acc, item) => {
-          if (item.To && item.MessageID) acc[item.To] = item.MessageID;
-          return acc;
-        }, {});
-
-        await newDocRef.update({
-          postmark_msgid: msgIds.length === 0
-            ? []
-            : admin.firestore.FieldValue.arrayUnion(...msgIds),
-          response: responseMap,
-          sent:     info.map(e => e.To).filter(Boolean),
-        }).catch(err => console.error("Error updating msgids:", err));
-
-        // Write per-email send logs
-        const sentLogBatch = admin.firestore().batch();
-
-        for (const log of info) {
-          const docRef = admin.firestore().collection("email logs").doc();
-
-          if (log['ErrorCode'] === 406 || log['Message'] !== 'OK') {
-            const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-            const emails     = log['Message'].match(emailRegex) || [];
-
-            sentLogBatch.set(docRef, {
-              email:          emails[0] || null,
-              profileid:      mapProfileEmail[emails[0]]?.['profileid'] || null,
-              postmark_msgid: log['MessageID'] || null,
-              msgstatus:      "not-sent",
-              errormsg:       log['Message'] || null,
-              templateid:     archiveData['templateid'],
-              emailarchiveid: archiveData['docid'],
-              time:           admin.firestore.FieldValue.serverTimestamp(),
-            });
-          } else {
-            sentLogBatch.set(docRef, {
-              email:          log['To'] || null,
-              profileid:      mapProfileEmail[log['To']]?.['profileid'] || null,
-              postmark_msgid: log['MessageID'] || null,
-              msgstatus:      "sent",
-              templateid:     archiveData['templateid'],
-              emailarchiveid: archiveData['docid'],
-              time:           admin.firestore.FieldValue.serverTimestamp(),
-            });
-          }
-        }
-
-        await sentLogBatch.commit()
-          .catch(err => console.error("Error writing email logs:", err));
+ 
+    try {
+      const info = await postmarkClient.sendEmailBatchWithTemplates(mailelement);
+ 
+      console.log("Batch sent:", info);
+ 
+      // Mark completed on last batch
+      if ((i + 1) === batchEmailList.length) {
+        await newDocRef.update({ status: "completed" })
+          .catch(err => console.error("Error marking completed:", err));
       }
-    );
+ 
+      // Collect message IDs and response map
+      const msgIds = info.map(e => e.MessageID).filter(Boolean);
+      const responseMap = info.reduce((acc, item) => {
+        if (item.To && item.MessageID) acc[item.To] = item.MessageID;
+        return acc;
+      }, {});
+ 
+      await newDocRef.update({
+        postmark_msgid: msgIds.length === 0
+          ? []
+          : admin.firestore.FieldValue.arrayUnion(...msgIds),
+        response: responseMap,
+        sent: info.map(e => e.To).filter(Boolean),
+      }).catch(err => console.error("Error updating msgids:", err));
+ 
+      // Write per-email send logs
+      const sentLogBatch = admin.firestore().batch();
+ 
+      for (const log of info) {
+        const docRef = admin.firestore().collection("email logs").doc();
+ 
+        if (log['ErrorCode'] === 406 || log['Message'] !== 'OK') {
+          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+          const emails = log['Message'].match(emailRegex) || [];
+ 
+          sentLogBatch.set(docRef, {
+            email:          emails[0] || null,
+            profileid:      mapProfileEmail[emails[0]]?.['profileid'] || null,
+            postmark_msgid: log['MessageID'] || null,
+            msgstatus:      "not-sent",
+            errormsg:       log['Message'] || null,
+            templateid:     archiveData['templateid'],
+            emailarchiveid: archiveData['docid'],
+            time:           admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } else {
+          sentLogBatch.set(docRef, {
+            email:          log['To'] || null,
+            profileid:      mapProfileEmail[log['To']]?.['profileid'] || null,
+            postmark_msgid: log['MessageID'] || null,
+            msgstatus:      "sent",
+            templateid:     archiveData['templateid'],
+            emailarchiveid: archiveData['docid'],
+            time:           admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      
+      await sentLogBatch.commit().then(async()=>{
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: true
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      }).catch(async (err) =>  {
+        console.error("Error writing email logs:", err);
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: false
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      });
+ 
+    } catch (error) {
+      console.error('Error sending email batch:', error);
+      await newDocRef.update({
+        ...archiveData,
+        mailstatus: 'not delivered',
+        error: error.message || 'Unknown error',
+      }).catch(err => console.error("Error updating archive:", err));
+    }
   }
-
+ 
   return 'Emails Sent Successfully';
 }
-
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════════
+// Attachment helpers
+// ════════════════════════════════════════════════════════════════════════════
+ 
+/**
+ * Fetch each attachment URL and convert to Postmark format:
+ * { Name, Content (base64), ContentType }
+ *
+ * Handles both formats from the frontend:
+ * - postmarkAttachments: [{ Name, ContentType, ContentUrl, ContentSize }]
+ * - attachments: [{ name, type, url, size }]
+ */
+async function buildPostmarkAttachmentsFromUrls(attachments) {
+  const results = [];
+ 
+  for (const att of attachments) {
+    const name        = att.Name || att.name;
+    const contentType = att.ContentType || att.type || 'application/octet-stream';
+    const url         = att.ContentUrl || att.url;
+ 
+    if (!url || !name) {
+      console.warn('Skipping attachment with missing url or name:', att);
+      continue;
+    }
+ 
+    try {
+      const base64Content = await fetchUrlAsBase64(url);
+      results.push({
+        Name: name,
+        Content: base64Content,
+        ContentType: contentType,
+      });
+      console.log(`Attachment "${name}" encoded (${contentType})`);
+    } catch (error) {
+      console.error(`Failed to fetch attachment "${name}" from ${url}:`, error.message);
+      // Skip failed attachments rather than failing the entire send
+    }
+  }
+ 
+  return results;
+}
+ 
+/**
+ * Fetch a URL and return its content as a base64-encoded string.
+ */
+function fetchUrlAsBase64(fileUrl) {
+  return new Promise((resolve, reject) => {
+    const protocol = fileUrl.startsWith('https:') ? https : http;
+ 
+    protocol.get(fileUrl, (response) => {
+      // Handle redirects (Firebase Storage returns 302 sometimes)
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        fetchUrlAsBase64(response.headers.location).then(resolve).catch(reject);
+        return;
+      }
+ 
+      if (response.statusCode !== 200) {
+        reject(new Error(`HTTP ${response.statusCode} fetching ${fileUrl}`));
+        return;
+      }
+ 
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        try {
+          const buffer = Buffer.concat(chunks);
+          resolve(buffer.toString('base64'));
+        } catch (err) {
+          reject(new Error(`Failed to encode: ${err.message}`));
+        }
+      });
+      response.on('error', (err) => reject(err));
+    }).on('error', (err) => reject(new Error(`Network error: ${err.message}`)));
+  });
+}
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════════
+// Per-variable model builder
+// ════════════════════════════════════════════════════════════════════════════
+ 
 function buildPerVariableModel({ variableConfigs, datamodel, profileData, emailId, sheetData }) {
   const model = {};
-
+ 
   for (const [variable, source] of Object.entries(variableConfigs)) {
     switch (source) {
-
+ 
       case 'static': {
         model[variable] = datamodel[variable] ?? '';
         break;
       }
-
+ 
       case 'analytics': {
-
         const mappedField = datamodel[variable];
-
+ 
         if (Array.isArray(mappedField)) {
-          // Multi-select: collect array of profile values
           model[variable] = mappedField.map(
             field => profileData?.[field] ?? ''
           );
         } else if (mappedField && profileData) {
-          // Single: pull one field from profile
           model[variable] = profileData[mappedField] ?? '';
         } else {
           model[variable] = '';
         }
         break;
       }
-
+ 
       case 'sheet': {
         if (!sheetData) { model[variable] = ''; break; }
-
-        // Find the sheet row whose email column matches this recipient
+ 
         const emailRow = sheetData.data.find(row =>
           Object.values(row).some(val =>
             val && val.toString().trim().toLowerCase() === emailId.trim().toLowerCase()
           )
         );
-
+ 
         if (emailRow) {
-          // Find matching header (flexible match — same logic as frontend)
           const matchingHeader = sheetData.headers.find(h =>
             h && (
               h.trim() === variable.trim() ||
@@ -1502,25 +2192,30 @@ function buildPerVariableModel({ variableConfigs, datamodel, profileData, emailI
         }
         break;
       }
-
+ 
       default:
         model[variable] = '';
     }
   }
-
+ 
   return model;
 }
-
+ 
+ 
+// ════════════════════════════════════════════════════════════════════════════
+// Sheet parser
+// ════════════════════════════════════════════════════════════════════════════
+ 
 async function fetchAndParseSheet(fileUrl) {
   return new Promise((resolve, reject) => {
     const protocol = fileUrl.startsWith('https:') ? https : http;
-
+ 
     protocol.get(fileUrl, (response) => {
       if (response.statusCode !== 200) {
         reject(new Error(`Failed to fetch file: ${response.statusCode}`));
         return;
       }
-
+ 
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
@@ -1529,15 +2224,15 @@ async function fetchAndParseSheet(fileUrl) {
           const workbook = XLSX.read(buffer, { type: 'buffer' });
           const ws       = workbook.Sheets[workbook.SheetNames[0]];
           const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
+ 
           if (jsonData.length < 2) {
             reject(new Error('Sheet must have at least a header row and one data row'));
             return;
           }
-
+ 
           const headers = jsonData[0];
           const rows    = jsonData.slice(1);
-
+ 
           resolve({
             headers,
             data: rows.map(row => {
@@ -1553,8 +2248,11 @@ async function fetchAndParseSheet(fileUrl) {
     }).on('error', (err) => reject(new Error(`Network error: ${err.message}`)));
   });
 }
-
-// Legacy analytics: single variableoption for whole email
+ 
+// ════════════════════════════════════════════════════════════════════════════
+// Legacy helpers
+// ════════════════════════════════════════════════════════════════════════════
+ 
 function extractAnalyticsVariables(profileData, analyticsMapping) {
   const variables = {};
   Object.entries(analyticsMapping).forEach(([key, mappedField]) => {
@@ -1564,19 +2262,18 @@ function extractAnalyticsVariables(profileData, analyticsMapping) {
   });
   return variables;
 }
-
-// Legacy sheet: single variableoption for whole email
+ 
 function extractSheetVariables(template, emailId, sheetData) {
   const variables = {};
   const matches   = template.match(/\{\{([^}]+)\}\}/g);
-
+ 
   if (matches && sheetData?.data) {
     const emailRow = sheetData.data.find(row =>
       Object.values(row).some(val =>
         val && val.toString().trim() === emailId.trim()
       )
     );
-
+ 
     matches.forEach(match => {
       const varName        = match.replace(/[{}]/g, '');
       const matchingHeader = sheetData.headers.find(h =>
@@ -1587,15 +2284,14 @@ function extractSheetVariables(template, emailId, sheetData) {
         : '';
     });
   }
-
+ 
   return variables;
 }
-
-// Legacy fallback: extract from profile data using dot-notation keys
+ 
 function extractTemplateVariables(template, profileData) {
   const variables = {};
   const matches   = template.match(/\{\{([^}]+)\}\}/g);
-
+ 
   if (matches) {
     matches.forEach(match => {
       const varName = match.replace(/[{}]/g, '');
@@ -1603,9 +2299,10 @@ function extractTemplateVariables(template, profileData) {
       variables[varName] = value !== undefined ? value : '';
     });
   }
-
+ 
   return variables;
 }
+
 
 //harish
 exports.myOperatorCalls = onRequest({region: "us-central1", cors:true, secrets: [MYOPERATOR_TOKEN]},async (req, res) => {
@@ -1723,10 +2420,33 @@ async function downloadAndUpload(recordingUrl,docRef) {
 }
 
 //harish
-exports.createPostMarkEmailTemplate = onDocumentUpdated({document:'email templates/{docid}',region: 'us-central1', cors: true},async (change) => {
+exports.createPostMarkEmailTemplate = onDocumentUpdated({
+  document:'email templates/{docid}',
+  region: 'us-central1',
+  cors: true,
+  secrets: [
+    POSTMARK_STARLABS_V1,
+    POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_TEST
+  ]
+},async (change) => {
 
   let previousData = change.data?.before.data();
   let currentData = change.data?.after.data();
+
+  const serversMap = {
+    POSTMARK_STARLABS_V1,
+    POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_TEST
+  };
+
+    const selectedSecret = serversMap[currentData['servername']];
+
+    if (!selectedSecret) {
+      throw new Error(`Invalid server name: ${currentData['servername']}`);
+    }
+
+    const postmarkClient = new postmark.ServerClient(selectedSecret.value());
 
   if(currentData['type'] == "email"){
 
@@ -1734,7 +2454,7 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({document:'email templat
 
       console.log("TEMPLATE NAME",currentData['templatename']);
   
-      await commonService.postmarkClient.createTemplate({
+      await postmarkClient.createTemplate({
         TextBody : currentData['textbody'],
         Alias : currentData['templatealias'],
         LayoutTemplate : currentData['templatelayout'],
@@ -1775,7 +2495,7 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({document:'email templat
 
       try {
 
-        const response = await commonService.postmarkClient.editTemplate(templateId, data);
+        const response = await postmarkClient.editTemplate(templateId, data);
 
         await admin.firestore().collection("email templates").doc(currentData['docid']).update({
           active: true,
@@ -1827,11 +2547,24 @@ async function sendWatiBroadCast(watiarchiveid) {
   }
 
   // ── 3. Load profile_data (always needed for numbermap lookup) ────────
-  await admin.firestore().collection("profile_data").orderBy("name", "asc").get().then((profileSnap) => {
-    profileSnap.docs.forEach(doc => {
-      mapProfile[doc.id] = doc.data();
-    });
-  });
+  // numbermap stores the profile_data document id, so look up by documentId().
+  // Firestore 'in' query supports max 30 ids per call — chunk them.
+  const profileIds = broadCastData['profileid'] || [];
+  const profileChunkSize = 30;
+  for (let i = 0; i < profileIds.length; i += profileChunkSize) {
+    const chunk = profileIds.slice(i, i + profileChunkSize);
+    try {
+      const snap = await admin.firestore()
+        .collection("profile_data")
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      snap.docs.forEach(doc => {
+        mapProfile[doc.id] = doc.data();
+      });
+    } catch (err) {
+      console.error("Error loading profile_data chunk:", err);
+    }
+  }
 
   // ── 4. Load participant metadata (only if any param uses metadata mode) ─
   const hasMetadataParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'metadata');
@@ -1848,12 +2581,24 @@ async function sendWatiBroadCast(watiarchiveid) {
   };
 
   let batchList = [];
+  let numbersWithMissingCountryCode = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    let rawCountryCode = profile['countrycode'];
+    if (!rawCountryCode) {
+      console.warn(`Missing country code for number ${number} (profileId: ${profileId})`);
+      numbersWithMissingCountryCode.push(number);
+      continue; // Skip this number — will be added to failedNumbers later
+    }
+
+    // Strip leading + if present, then prepend to number
+    const cleanedCountryCode = rawCountryCode.toString().replace(/^\+/, '').trim();
+    const formattedNumber = cleanedCountryCode + number.toString().trim();
 
     // Build custom params using the new parameterConfig
     const customParams = buildCustomParams(
@@ -1877,7 +2622,7 @@ async function sendWatiBroadCast(watiarchiveid) {
     }
 
     broadCast['receivers'].push({
-      whatsappNumber: number,
+      whatsappNumber: formattedNumber,
       customParams: customParams
     });
   }
@@ -1890,7 +2635,7 @@ async function sendWatiBroadCast(watiarchiveid) {
   console.log("First batch sample:", JSON.stringify(batchList[0]?.receivers?.[0]));
 
   let sentNumbers = [];
-  let failedNumbers = [];
+  let failedNumbers = [...numbersWithMissingCountryCode];
 
   // ── 6. Send all batches ───────────────────────────────────────────────
   for (let b = 0; b < batchList.length; b++) {
@@ -1954,28 +2699,6 @@ async function sendWatiBroadCast(watiarchiveid) {
   }).catch((error)=>{
     console.log('Error while updating wati Archive', error);
   });
-
-  // await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //   status: 'sent',
-  //   sentAt: admin.firestore.FieldValue.serverTimestamp(),
-  //   batchCount: batchList.length,
-  //   totalSent: sentNumbers.length,
-  //   totalFailed: failedNumbers.length,
-  //   sent: admin.firestore.FieldValue.arrayUnion(...(sentNumbers.length ? sentNumbers : ['__placeholder__'])),
-  //   failed: admin.firestore.FieldValue.arrayUnion(...(failedNumbers.length ? failedNumbers : ['__placeholder__'])),
-  // });
-
-  // // Remove placeholder if no items existed
-  // if (sentNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     sent: admin.firestore.FieldValue.delete()
-  //   });
-  // }
-  // if (failedNumbers.length === 0) {
-  //   await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
-  //     failed: admin.firestore.FieldValue.delete()
-  //   });
-  // }
 
   return {
     success: true,
@@ -2055,11 +2778,6 @@ function buildCustomParams(parameterConfig, profile, metadata, phoneNumber, exce
   return customParams;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// loadParticipantMetadata
-// Fetches participant metadata docs for all profileIds in the broadcast.
-// Populates mapMetadata[profileId] = { field: value, ... }
-// ────────────────────────────────────────────────────────────────────────────
 async function loadParticipantMetadata(profileIds, mapMetadata) {
   if (!profileIds || profileIds.length === 0) return;
 
@@ -2089,12 +2807,7 @@ async function loadParticipantMetadata(profileIds, mapMetadata) {
   console.log("Loaded metadata for", Object.keys(mapMetadata).length, "profiles");
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// processExcelFile
-// Downloads the Excel from Firebase Storage URL, parses it, and returns a
-// map of { cleanedPhoneNumber: { columnHeader: cellValue, ... } }
-// excelHeaders is passed from archive so we know the expected columns.
-// ────────────────────────────────────────────────────────────────────────────
+
 async function processExcelFile(downloadUrl, savedHeaders) {
   try {
     console.log("Fetching Excel file from:", downloadUrl);
@@ -2249,15 +2962,181 @@ async function sendWatiTemplateMsg(body, broadcastData) {
 }
 
 // ── Cloud Function trigger (unchanged entry point) ────────────────────────────
-
-exports.sendWhatsAppBroadcastCreated = onDocumentCreated({ document: 'wati archive/{docid}', region: 'us-central1', cors: true },async (change, context) => {
+exports.sendWhatsAppBroadcastCreated = onDocumentCreated(
+  { document: 'wati archive/{docid}', region: 'us-central1', cors: true },
+  async (change, context) => {
     const broadcastData = change.data?.data();
-    console.log("BROADCASTDATA", broadcastData);
-    if (broadcastData['validated'] == true && broadcastData['status'] != 'queued') {
+    console.log("BROADCASTDATA status:", broadcastData['status']);
+
+    if (broadcastData['status'] === 'scheduled') {
+      // ── Schedule via WATI API instead of sending immediately ──
+      console.log("Scheduled broadcast detected — calling WATI schedule API");
+      await sendWatiScheduledBroadcast(broadcastData['docid']);
+    } else if (broadcastData['validated'] == true && broadcastData['status'] !== 'queued') {
+      // ── Normal immediate send ──
       await sendWatiBroadCast(broadcastData['docid']);
+    } else {
+      console.log(`Skipping: status="${broadcastData['status']}", validated=${broadcastData['validated']}`);
     }
   }
 );
+
+async function sendWatiScheduledBroadcast(watiarchiveid) {
+
+  let broadCastData = {};
+  let mapProfile = {};
+  let mapMetadata = {};
+  let excelParameterMap = {};
+
+  // ── 1. Fetch archive document ──────────────────────────────────────
+  const archiveSnap = await admin.firestore().collection('wati archive').doc(watiarchiveid).get();
+  broadCastData = archiveSnap.data();
+
+  const templatename  = broadCastData['watitemplateid'];
+  const broadcastname = broadCastData['broadcastname'];
+  const scheduledISO  = broadCastData['scheduledDateISO'];
+
+  console.log("=== SCHEDULE BROADCAST START ===");
+  console.log("Archive ID:", watiarchiveid);
+  console.log("Template:", templatename);
+  console.log("Scheduled for:", scheduledISO);
+
+  // ── 2. Process Excel file if needed ────────────────────────────────
+  const hasExcelParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'excel');
+  if (hasExcelParams && broadCastData.excelFile && broadCastData.excelFile.downloadUrl) {
+    console.log("Processing Excel:", broadCastData.excelFile.originalName);
+    excelParameterMap = await processExcelFile(
+      broadCastData.excelFile.downloadUrl,
+      broadCastData.excelFile.headers || []
+    );
+  }
+
+  // ── 3. Load profile_data ───────────────────────────────────────────
+  const profileSnap = await admin.firestore().collection("profile_data").orderBy("name", "asc").get();
+  profileSnap.docs.forEach(doc => { mapProfile[doc.id] = doc.data(); });
+
+  // ── 4. Load participant metadata if needed ─────────────────────────
+  const hasMetadataParams = (broadCastData['parameterConfig'] || []).some(p => p.fillType === 'metadata');
+  if (hasMetadataParams) {
+    await loadParticipantMetadata(broadCastData['profileid'] || [], mapMetadata);
+  }
+
+  // ── 5. Get WATI API key ────────────────────────────────────────────
+  const watiDoc = await admin.firestore().collection('classify').doc('wati').get();
+  if (!watiDoc.exists) throw new Error('WATI configuration not found');
+
+  const watiConfig   = watiDoc.data();
+  const serverConfig = watiConfig[broadCastData['serverid']];
+  if (!serverConfig) throw new Error(`No config for server: ${broadCastData['serverid']}`);
+
+  const apiKey = serverConfig['watitoken'];
+  if (!apiKey) throw new Error(`No API key for server: ${broadCastData['serverid']}`);
+
+  // ── 6. Build receivers array ───────────────────────────────────────
+  const receivers = [];
+
+  for (let i = 0; i < broadCastData['numbers'].length; i++) {
+    const number    = broadCastData['numbers'][i];
+    const profileId = broadCastData['numbermap'][number];
+    const profile   = mapProfile[profileId] || {};
+    const metadata  = mapMetadata[profileId] || {};
+
+    const customParams = buildCustomParams(
+      broadCastData['parameterConfig'] || [],
+      profile, metadata, number,
+      excelParameterMap,
+      broadCastData['excelFile'] || null
+    );
+
+    // WATI v1 expects: { whatsappNumber, customParams: [{name, value}] }
+    receivers.push({
+      whatsappNumber: number,
+      customParams: customParams,
+    });
+  }
+
+  console.log("Total receivers:", receivers.length);
+  console.log("First receiver sample:", JSON.stringify(receivers[0]));
+
+  // ── 7. Build schedule payload (WATI v1 scheduleBroadcast format) ───
+  const schedulePayload = {
+    broadcastName: broadcastname + generateRandomId(),
+    templateName: templatename,
+    scheduledAt: new Date(scheduledISO).toISOString(),
+    receivers: receivers,
+  };
+
+  console.log("Payload broadcastName:", schedulePayload.broadcastName);
+  console.log("Payload templateName:", schedulePayload.templateName);
+  console.log("Payload scheduledAt:", schedulePayload.scheduledAt);
+  console.log("Payload receivers count:", schedulePayload.receivers.length);
+
+  const SCHEDULE_URL = `${serverConfig['endpoint']}/api/v1/broadcast/scheduleBroadcast`;
+
+  console.log("SCHEDULE_URL:", SCHEDULE_URL);
+  console.log("Final URL:", SCHEDULE_URL);
+
+  try {
+    const response = await axios.request({
+      method: 'POST',
+      url: SCHEDULE_URL,
+      headers: {
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'Content-Type': 'application/json',
+        'accept': 'application/json',
+      },
+      data: schedulePayload,
+      timeout: 60000,
+    });
+
+    console.log("WATI Schedule response:", JSON.stringify(response.data));
+
+    // ── 9. Update archive → sent ───────────────────────────────────
+    await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+      status: 'sent',
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      scheduleApiResponse: response.data || null,
+      scheduleSentViaApi: true,
+      scheduleUrl: SCHEDULE_URL,
+      scheduledBroadcastName: schedulePayload.broadcastName,
+      totalSent: broadCastData['numbers'].length,
+      totalFailed: 0,
+    });
+
+    console.log("=== SCHEDULE SUCCESS ===");
+    return {
+      success: true,
+      scheduled: true,
+      scheduledTime: scheduledISO,
+      broadcastName: schedulePayload.broadcastName,
+      totalRecipients: broadCastData['numbers'].length,
+    };
+
+  } catch (error) {
+    const errData   = error.response?.data;
+    const errStatus = error.response?.status;
+    const errMsg    = errData?.message || errData?.result || error.message || 'Unknown error';
+
+    console.error("=== SCHEDULE FAILED ===");
+    console.error("Status:", errStatus);
+    console.error("Response:", JSON.stringify(errData));
+    console.error("URL:", SCHEDULE_URL);
+    console.error("Payload sent:", JSON.stringify(schedulePayload));
+
+    await admin.firestore().collection('wati archive').doc(watiarchiveid).update({
+      status: 'schedule_failed',
+      scheduleError: {
+        status: errStatus,
+        message: errMsg,
+        data: errData || null,
+        url: SCHEDULE_URL,
+      },
+      scheduleFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    throw new Error(`WATI Schedule API failed (${errStatus}): ${errMsg}`);
+  }
+}
 
 exports.sendWhatsAppBroadcast = onRequest({region: "us-central1", cors:true},async (req, res) => {
   console.log("Function triggered");
@@ -3306,10 +4185,24 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profile = await getProfileData(data["profileid"]);
     if (!profile) return;
     const profilename = profile["name"];
+    const workshopDoc = await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get();
+    const workshopData = workshopDoc.data();
+    const workshopname = workshopData["detailpage"]["title"];
+    const slackChannel = workshopData["workshopactivitychannel"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
-    var workshopname = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["detailpage"]["title"];
-
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // var workshopname = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["detailpage"]["title"];
+    // var slackChannel = (await admin.firestore().collection("workshopconfiguration").doc(data["workshopId"]).get()).data()["workshopactivitychannel"];
+    let url;
+    if (slackChannel === 'workshop-subscriber-activity') {
+      url = commonService.production
+        ? commonService.slackWorkshopsubscribersactivity
+        : commonService.slackDevTest;
+    } else {
+      url = commonService.production
+        ? commonService.slackWorkshopQandA
+        : commonService.slackDevTest;
+    }
+    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
 
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -3321,8 +4214,10 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
       } else {
         const tagprofile = await getProfileData(data["tag"]);
         // var tagname = (await admin.firestore().collection("profile_data").doc(data["tag"]).get()).data()["name"];
-        var tagname = tagprofile["name"];
-        var repliedformessage = (await admin.firestore().collection("workshopQA").doc(data["replyid"]).get()).data()["question"];
+        // Guard nulls: a self-reply has no `tag`, and a deleted parent has no data.
+        var tagname = tagprofile ? tagprofile["name"] : "the discussion";
+        const repliedDoc = await admin.firestore().collection("workshopQA").doc(data["replyid"]).get();
+        var repliedformessage = repliedDoc.exists ? repliedDoc.data()["question"] : "";
 
         message = `💬 *${profilename}* replied to *${tagname}* in *${workshopname}*:\n\n📝 *${repliedformessage}*\n\n↪️ *${question}*`;
       }
@@ -3337,9 +4232,84 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         }
       });
     }
+
+    // ===== EiFlix push notifications (com.soe.eiflix only) =====
+    // Mirror the Slack alert as an FCM push to the workshop's EiFlix participants.
+    // Tokens live in the dedicated EIFLIX_FCM_token collection, so the sibling
+    // app com.soe.launchyourlegacy (which writes to FCM_token) is never targeted.
+    try {
+      const authorId = data["profileid"];
+      const isReply = data["replyid"] != null;
+
+      // Resolve recipient profile ids.
+      let recipientIds = [];
+      if (isReply) {
+        // A reply notifies just the thread: the question's author, the tagged
+        // person, and everyone who replied in the thread — minus the author.
+        const ids = new Set();
+        const questionDoc = await admin.firestore().collection("workshopQA").doc(data["replyid"]).get();
+        if (questionDoc.exists && questionDoc.data()["profileid"]) {
+          ids.add(questionDoc.data()["profileid"]);
+        }
+        if (data["tag"]) {
+          ids.add(data["tag"]);
+        }
+        const threadReplies = await admin.firestore().collection("workshopQA").where("replyid", "==", data["replyid"]).get();
+        threadReplies.docs.forEach(d => { const p = d.data()["profileid"]; if (p) ids.add(p); });
+        ids.delete(authorId);
+        recipientIds = [...ids];
+      } else {
+        // A new question notifies every enrolled participant — minus the author.
+        const enrolled = await admin.firestore().collection("workshop participant enrolled")
+          .where("workshopref", "==", admin.firestore().collection("workshopconfiguration").doc(data["workshopId"])).get();
+        const ids = new Set();
+        enrolled.docs.forEach(d => { const p = d.data()["profileid"]; if (p && p !== authorId) ids.add(p); });
+        recipientIds = [...ids];
+      }
+
+      if (recipientIds.length > 0) {
+        // Collect active EiFlix FCM tokens for those profiles (batched 'in' by 30).
+        const tokens = new Set();
+        for (let i = 0; i < recipientIds.length; i += 30) {
+          const refs = recipientIds.slice(i, i + 30).map(pid =>
+            admin.firestore().collection("profile_data").doc(pid));
+          const tokenSnap = await admin.firestore().collection("EIFLIX_FCM_token")
+            .where("profile_ref", "in", refs).where("active", "==", true).get();
+          tokenSnap.docs.forEach(t => { const id = t.data()["FCM_id"]; if (id) tokens.add(id); });
+        }
+        const tokenList = [...tokens];
+
+        if (tokenList.length > 0) {
+          const pushTitle = isReply ? `New reply in ${workshopname}` : `New question in ${workshopname}`;
+          const pushBody = isReply ? `${profilename} replied: ${question}` : `${profilename}: ${question}`;
+          const basePayload = {
+            notification: { title: pushTitle, body: pushBody },
+            data: {
+              type: "workshop_qa",
+              workshopId: `${data["workshopId"]}`,
+              workshopTitle: `${workshopname}`,
+              click_action: "FLUTTER_NOTIFICATION_CLICK",
+            },
+            android: { priority: "high", notification: { channelId: "eiflix_qa", sound: "default" } },
+            apns: { payload: { aps: { sound: "default", badge: 1 } } },
+          };
+          // sendEachForMulticast accepts up to 500 tokens per call.
+          for (let i = 0; i < tokenList.length; i += 500) {
+            const batch = tokenList.slice(i, i + 500);
+            await admin.messaging().sendEachForMulticast({ ...basePayload, tokens: batch })
+              .then(res => console.log(`EiFlix Q&A push: ${res.successCount} sent, ${res.failureCount} failed`))
+              .catch(err => console.log("EiFlix Q&A push send error:", err));
+          }
+        } else {
+          console.log("EiFlix Q&A push: no active EIFLIX_FCM_token for recipients");
+        }
+      }
+    } catch (pushErr) {
+      console.log("EiFlix Q&A push failed:", pushErr);
+    }
   });
 
-  exports.workshopFormsSubmission = onDocumentCreated("formsByClient/{docid}", async (document) => {
+  exports.workshopFormsSubmission = onDocumentCreated({document: "formsByClient/{docid}", database: "firestore-forms"}, async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();
     if (data["workshopref"] == null) {
@@ -3353,10 +4323,35 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     if (!profile) return;
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
-    var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
+    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    var url;
+    // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
+    // let activeworkshop = (await data["workshopref"].get()).data()["active"];
+    // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // const slackChannel = (await data["workshopref"].get()).data()["workshopactivitychannel"];
+    // const workshopDoc = await data["workshopref"].get();
+    const workshopDoc = await admin.firestore().doc(data["workshopref"].path).get();
+    if (!workshopDoc.exists) {
+      console.log(`Workshop document not found at path: ${data["workshopref"].path}, skipping.`);
+      return;
+    }
+    const workshopData = workshopDoc.data();
+    const workshopTitle = workshopData['detailpage']['title'] || "Unknown Workshop";
+    const activeworkshop = workshopData['active'] || false;
+    const slackChannel = workshopData['workshopactivitychannel'] || null;
+    if (slackChannel === 'workshop-subscriber-activity') {
+      url = commonService.production
+        ? commonService.slackWorkshopsubscribersactivity
+        : commonService.slackDevTest;
+    } else {
+      url = commonService.production
+        ? commonService.slackWorkshopQandA
+        : commonService.slackDevTest;
+    }
     // var url =  commonService.slackDevTest;
     if (url != null) {
+    // if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
       var formUrl = commonService.production 
       ? `https://breakthroughs.app/formtemplate?id=${formid}&type=form&patchdata=formsByClient%2F${docid}`
@@ -4040,149 +5035,7 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
   }
 });
 
-exports.workshopenrolledwatti = onDocumentCreated(
-  "workshop participant enrolled/{docid}",
-  async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) {
-      console.log("No data, exiting.");
-      return;
-    }
 
-    const newData = snapshot.data();
-
-    try {
-      const profile = await getProfileData(newData.profileid);
-      if (!profile) return;
-      // if (!newData['profileid']) {
-      //   console.log("profileid not found");
-      //   return;
-      // }
-      // const profileSnap = await admin.firestore()
-      //   .collection("profile_data")
-      //   .doc(newData['profileid'])
-      //   .get();
-
-      // if (!profileSnap.exists) {
-      //   console.log("Profile not found for:", newData['profileid']);
-      //   return;
-      // }
-
-      // const profile = profileSnap.data();
-      console.log("Profile console for mobile number",profile);
-      if (newData?.status === 'enrolled' || newData?.status === 'enrollednotstarted') {
-
-      var apikey = null;
-      var serverid = null;
-      await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
-        if(wati.exists) {
-          const watiData = wati.data()[commonService.eventWatiServerId];
-          apikey = watiData['watitoken'];
-          serverid = commonService.eventWatiServerId;
-        }
-      })
-
-        const WATI_BASE_URL = `https://live-mt-server.wati.io/${serverid}`;
-        const WATI_API_TOKEN = apikey;
-        let workshopName = "Workshop";
-        let messageText = "";
-        let workshopurl = "";
-        let mailsubject = "";
-        let maildescription = "";
-        let mailliveCallText = "";
-        let categorybased = false;
-        if (newData['workshopref']) {
-          const workshopSnap = await newData['workshopref'].get();
-          if (workshopSnap.exists) {
-            const workshopData = workshopSnap.data();
-            workshopName = workshopData?.detailpage?.title || "Workshop";
-            messageText = workshopData?.enrollwattimessage || "";
-            mailsubject = workshopData?.mailTemplate['subject'] || "";
-            maildescription = workshopData?.mailTemplate['description'] || "";  
-            mailliveCallText = workshopData?.mailTemplate['liveCallText'] || "";  
-            categorybased = workshopData?.categorybased || false;
-            workshopurl = commonService.production
-              ? `https://eiflix.com/workshop/${workshopData?.docid}`
-              : `https://eiflix-workshop.web.app/workshop/${workshopData?.docid}`;
-          }
-        }
-        let phonenumber = profile['number'] ?? profile['phonenumber']
-        const endpoint = `${WATI_BASE_URL}/api/v1/sendTemplateMessage?whatsappNumber=${phonenumber}`;
-        const headers = {
-          'Authorization': `Bearer ${WATI_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        };
-
-        const data = {
-          template_name: 'eiflixworkshopv7',
-          broadcast_name: 'Workshop Enrolled',
-          parameters: [
-            { name: 'name', value: profile['name'] || '' },
-            { name: 'workshopname', value: workshopName },
-            { name: 'link', value: workshopurl },
-            { name: '1', value: messageText },
-          ]
-        };
-        try {
-          const templateAlias = categorybased ? "WorkshopEnrolledMessage-1" : "WorkshopEnrolledMessage";
-          // const postmarktemplateId = categorybased ? '43859890' : '42135513';
-          await commonService.postmarkClient.sendEmailWithTemplate({
-            From: "starlabs@excellenceinstallation.com",
-            To: profile['email'],
-            TemplateAlias: templateAlias,
-            TemplateModel: {
-              name: profile['name'],
-              email: profile['email'],
-              subject: mailsubject,
-              workshopName:workshopName,
-              maildescription : maildescription,
-              mailliveCallText : mailliveCallText,
-              workshopurl : workshopurl,
-            },
-          });
-
-          // var dataModel = {
-          // name: profile['name'],
-          // email: profile['email'],
-          // subject: mailsubject,
-          // workshopName:workshopName,
-          // maildescription : maildescription,
-          // mailliveCallText : mailliveCallText,
-          // workshopurl : workshopurl,
-          // }
-          // await commonService.createEmailArchiveDocument({
-          //   emailData : dataModel,
-          //   datamodel : dataModel,
-          //   attachments : [],
-          //   emailTo : [profile['email']],
-          //   emailMap : [{[profile['email']] : }],
-          //   fileURL : '',
-          //   from:'starlabs@excellenceinstallation.com',
-          //   notes : '',
-          //   profileId : [],
-          //   postmarkTemplateId: postmarktemplateId,
-          //   templateAlias:templateAlias
-          // });
-
-        } catch (emailError) {
-          console.error('Error sending welcome email:', emailError);
-        }
-        console.log("endpoint", endpoint);
-        console.log("data", data);
-
-        const response = await axios.post(endpoint, data, { headers });
-        console.log('Message sent successfully:', response.data);
-        return response.data;
-      } else {
-        console.log("Document created but not 'enrolled' status — skipping message.");
-      }
-
-    } catch (error) {
-      console.error('Error sending WhatsApp message:', error.response?.data || error.message);
-      throw error;
-    }
-  }
-);
   exports.productenquiryfromeiflix = onDocumentCreated("productenquirylog/{docid}", async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();

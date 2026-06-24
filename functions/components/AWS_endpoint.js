@@ -35,7 +35,7 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
       });
 
       const command = new AWS_ClientS3.GetObjectCommand({
-        Bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-community-recording",
+        Bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-meet-recordings-test",
         Key: videoKey,
       });
 

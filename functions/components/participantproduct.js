@@ -364,151 +364,126 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
     }
     else if (deliveryData["type"] == "queue") {
       console.log("Delivery Type 2", deliveryData["type"]);
-    
+
       const queueTokenRef = admin.firestore().collection("queue_token");
       const profileRef = admin.firestore().collection("profile_data").doc(participantProductData['profileid']);
       const profileData = (await profileRef.get()).data();
       const queueRef = admin.firestore().doc(participantProductData['eventref'].path);
       const queueData = (await queueRef.get()).data();
-    
+
       eventTime.startdate = queueData["queuestartdate"].toDate();
       eventTime.enddate = queueData["queueenddate"].toDate();
-    
+
       const queueId = participantProductData['eventref'].id;
       const counterRef = admin.firestore().collection("queue_token_counter").doc(queueId);
-    
-      let tokenCreated = false;
-      let attempts = 0;
-      const maxAttempts = 10; 
-      const deliveryRef = newDocRef.path; 
-    
-      while (!tokenCreated && attempts < maxAttempts) {
-        attempts++;
-        console.log(`Token creation attempt ${attempts} for delivery: ${deliveryRef}`);
-        
-        try {
-          await admin.firestore().runTransaction(async (transaction) => {
-            // Check capacity first (most efficient)
-            const activeTokensSnap = await transaction.get(
-              queueTokenRef
-                .where("queueref", "==", participantProductData['eventref'])
-                .where("stagestatus", "==", "Approved")
-                .where("tokenstatus", "==", "Active")
-            );
-    
-            const totalActiveTokens = activeTokensSnap.size;
-            const queueCapacity = queueData["totalcapacity"] || 999;
-    
-            if (totalActiveTokens >= queueCapacity) {
-              console.log(`Queue capacity reached: ${totalActiveTokens}/${queueCapacity}`);
-              tokenCreated = true; 
-              return;
-            }
-    
-            // Get current counter
-            const counterSnap = await transaction.get(counterRef);
-            let currentValue = 0;
-    
-            if (counterSnap.exists) {
-              currentValue = counterSnap.data().value || 0;
-            } else {
-              console.log(`Initializing counter for queue: ${queueId}`);
-              // Initialize counter
-              const lastTokenSnap = await transaction.get(
-                queueTokenRef.orderBy("tokennumber", "desc").limit(1)
-              );
-              if (!lastTokenSnap.empty) {
-                currentValue = lastTokenSnap.docs[0].data().tokennumber || 0;
-              }
-              console.log(`Counter initialized with value: ${currentValue}`);
-            }
-    
-            const tokenno = currentValue + 1;
-            console.log(`Assigning token number: ${tokenno} to delivery: ${deliveryRef}`);
-    
-            // Update counter first
-            transaction.set(counterRef, { 
-              value: tokenno, 
-              lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-              lastDelivery: newDocRef 
-            }, { merge: true });
-    
-            // Create token
-            const newTokenRef = queueTokenRef.doc();
-            const firststage = queueData["stages"] && queueData["stages"].length > 0 ? queueData["stages"][0] : "default";
-            const profilename = profileData["name"] || "Unknown";
-            const productname = productData["product"] || "Unknown";
-            const queuename = queueData["queuename"] || "Unknown";
-    
-            const tokenData = {
-              docid: newTokenRef.id,
-              tokennumber: tokenno,
-              profile_name: profilename,
-              profile_id: participantProductData['profileid'],
-              currentstage: firststage,
-              quicknotes: null,
-              people_involved: null,
-              tokenstatus: 'Active',
-              productref: participantProductData['productref'],
-              productname: productname,
-              createdon: admin.firestore.Timestamp.now(),
-              queueref: participantProductData['eventref'],
-              queuename: queuename,
-              stagestatus: 'Approved',
-              denynote: null,
-              logdate: admin.firestore.Timestamp.now(),
-              variationid: participantProductData['queuevariationid'] || null,
-              deliveryRef: newDocRef, // For tracking
-              participantproductid: participantProductData["docid"], // For tracking
-              createdAttempt: attempts
-            };
+      const queueCapacity = queueData["totalcapacity"] || 999;
+      const deliveryRef = newDocRef.path;
 
-            if(participantProductData["requestedslot"]){
-              tokenData["selectedstageslot"] = {}
-              tokenData["selectedstageslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"]
+      // ── Pre-check capacity (best-effort, outside transaction) ───────────
+      const activeTokensSnap = await queueTokenRef
+        .where("queueref", "==", participantProductData['eventref'])
+        .where("stagestatus", "==", "Approved")
+        .where("tokenstatus", "==", "Active")
+        .get();
+
+      if (activeTokensSnap.size >= queueCapacity) {
+        console.log(`Queue capacity reached: ${activeTokensSnap.size}/${queueCapacity}. Skipping token creation for delivery: ${deliveryRef}`);
+      } else {
+
+        // ── Initialize counter if needed (outside transaction, idempotent) ─
+        const counterSnap = await counterRef.get();
+        if (!counterSnap.exists) {
+          const lastTokenSnap = await queueTokenRef
+            .where("queueref", "==", participantProductData['eventref'])
+            .orderBy("tokennumber", "desc")
+            .limit(1)
+            .get();
+          const lastValue = lastTokenSnap.empty ? 0 : (lastTokenSnap.docs[0].data().tokennumber || 0);
+          console.log(`Initializing counter for queue: ${queueId} with value: ${lastValue}`);
+          await counterRef.set({
+            value: lastValue,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+
+        // ── Transaction: ONLY increments counter, nothing else ─────────────
+        let tokenno = null;
+        let attempts = 0;
+        const maxAttempts = 15;
+
+        while (tokenno === null && attempts < maxAttempts) {
+          attempts++;
+          console.log(`Counter attempt ${attempts} for delivery: ${deliveryRef}`);
+
+          try {
+            await admin.firestore().runTransaction(async (transaction) => {
+              const snap = await transaction.get(counterRef);
+              const currentValue = snap.exists ? (snap.data().value || 0) : 0;
+              const next = currentValue + 1;
+
+              // ✅ Only 1 read + 1 write — minimal contention window
+              transaction.set(counterRef, {
+                value: next,
+                lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                lastDelivery: newDocRef
+              }, { merge: true });
+
+              tokenno = next;
+            });
+
+          } catch (error) {
+            console.log(`❌ Counter attempt ${attempts} failed for ${deliveryRef}:`, error.message);
+
+            if (attempts >= maxAttempts) {
+              console.error(`🚨 FAILED to acquire token number after ${maxAttempts} attempts for: ${deliveryRef}`);
+              break;
             }
-    
-            transaction.set(newTokenRef, tokenData);
-            fileRef = newTokenRef;
-            tokenCreated = true;
-    
-            console.log(`✅ Queue token ${tokenno} created successfully for delivery: ${deliveryRef}`);
-          });
-    
-        } catch (error) {
-          console.log(`❌ Transaction attempt ${attempts} failed for delivery ${deliveryRef}:`, error.message);
-          
-          if (attempts >= maxAttempts) {
-            console.error(`🚨 FAILED to create token after ${maxAttempts} attempts for delivery: ${deliveryRef}`);
-            
-            // Log the failure to a collection for debugging
-            // try {
-            //   await admin.firestore().collection("token_creation_failures").add({
-            //     deliveryRef: deliveryRef,
-            //     queueId: queueId,
-            //     participantId: participantProductData['profileid'],
-            //     error: error.message,
-            //     attempts: attempts,
-            //     timestamp: admin.firestore.FieldValue.serverTimestamp()
-            //   });
-            // } catch (logError) {
-            //   console.error("Failed to log error:", logError);
-            // }
-            break;
+
+            const delay = Math.min(50 * Math.pow(2, attempts) + Math.random() * 200, 5000);
+            console.log(`⏳ Retrying in ${delay.toFixed(0)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
-          
-          // Better exponential backoff with jitter
-          const baseDelay = 50; // Start with 50ms
-          const maxDelay = 3000; // Max 3 seconds
-          const jitter = Math.random() * 100; // Add randomness
-          const delay = Math.min(baseDelay * Math.pow(2, attempts) + jitter, maxDelay);
-          
-          console.log(`⏳ Retrying in ${delay.toFixed(0)}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        // ── Token doc creation OUTSIDE transaction (no contention) ──────────
+        if (tokenno !== null) {
+          const newTokenRef = queueTokenRef.doc();
+          const firststage = queueData["stages"]?.length > 0 ? queueData["stages"][0] : "default";
+
+          const tokenData = {
+            docid: newTokenRef.id,
+            tokennumber: tokenno,
+            profile_name: profileData["name"] || "Unknown",
+            profile_id: participantProductData['profileid'],
+            currentstage: firststage,
+            quicknotes: null,
+            people_involved: null,
+            tokenstatus: 'Active',
+            productref: participantProductData['productref'],
+            productname: productData["product"] || "Unknown",
+            createdon: admin.firestore.Timestamp.now(),
+            queueref: participantProductData['eventref'],
+            queuename: queueData["queuename"] || "Unknown",
+            stagestatus: 'Approved',
+            denynote: null,
+            logdate: admin.firestore.Timestamp.now(),
+            variationid: participantProductData['queuevariationid'] || null,
+            deliveryRef: newDocRef,
+            participantproductid: participantProductData["docid"],
+            createdAttempt: attempts
+          };
+
+          if (participantProductData["requestedslot"]) {
+            tokenData["selectedstageslot"] = {};
+            tokenData["selectedstageslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"];
+          }
+
+          await newTokenRef.set(tokenData);
+          fileRef = newTokenRef;
+          console.log(`✅ Queue token ${tokenno} created successfully for delivery: ${deliveryRef}`);
         }
       }
     }
-    
 
     // Update Event FileRef - Mode
     if(fileRef != null){
@@ -649,7 +624,6 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
     }
   }
 });
-
 
 exports.participantJourneyproductSocialcommitupdate = onRequest(async (req, res) => {
   console.log(req)

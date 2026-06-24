@@ -52,6 +52,8 @@ var slackAskAH = "https://hooks.slack.com/services/T1E57BR8F/B07D5PBTRSM/SQvlGwv
 var slackFirebaseBilling = "https://hooks.slack.com/services/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"
 var slackLogScheduling = "https://hooks.slack.com/services/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"
 var slackWorkshopQandA = "https://hooks.slack.com/services/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"
+var slackWorkshopsubscribers = "https://hooks.slack.com/services/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"
+var slackWorkshopsubscribersactivity = "https://hooks.slack.com/services/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"
 var hiddenSalesChannel = "https://hooks.slack.com/services/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"
 var queueSelectionLog = "https://hooks.slack.com/services/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"
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
@@ -907,6 +909,13 @@ async function sendSlotConfirmationToSlackChannel(value, status, profile) {
 					"text": `*Slot End Date* : ${slotdata['enddate']?.toDate ? slotdata['enddate'].toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : new Date(slotdata['enddate']).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}`,
 				}
 			},
+			...(slotdata['title'] ? [{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": `*Title* : ${slotdata['title']}`
+				}
+			}] : []),
 		]
 	}
 
@@ -951,7 +960,7 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 }
 
 module.exports = {
-	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,
+	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
 	postmarkClient,
 	monthName,
@@ -984,6 +993,8 @@ async function createEmailArchiveDocument({
 	profileId = '', // Array of String, Profile IDs
 	postmarkTemplateId = 0, // Number Postmark Template ID 
 	templateAlias = '', // String Postmark Template name
+	type = null, // type of message
+	metadata = null // metadata of individual message
 }){
 
 	console.log('Triggered Email Archive',{
@@ -1022,13 +1033,15 @@ async function createEmailArchiveDocument({
 			console.log('Email Template',templateData);
 
 			const docid = admin.firestore().collection('email archive').doc().id
-			await admin.firestore().collection('email archive').doc(docid).set({
+
+			var map = {
 				docid : docid,
 				body:templateData['htmlbody'],
 				broadcastname: broadcast_name,
 				createdby: 'automated',
 				datamodel: datamodel,
 				attachments: attachments,
+				postmarkAttachments: attachments,
 				date: new Date(),
 				emailid: emailTo,
 				emailmap: emailMap,
@@ -1039,11 +1052,16 @@ async function createEmailArchiveDocument({
 				profileid: profileId,
 				sent: [],
 				status:'send',
+				servername: templateData['servername'] || null,
 				subject: templateData['subject'],
 				templatedocid:templateData['docid'],
 				templateid:templateData['templateid'] || templateAlias || null,
 				variableoption:'automated',
-			}).then(()=>{
+			}
+			if(type) map['type'] = type;
+			if(metadata) map['metadata'] = metadata;
+
+			await admin.firestore().collection('email archive').doc(docid).set(map).then(()=>{
 				console.log('Email Archive Created Successfully');
 			}).catch((err)=>{
 				console.error('Oops Error while creating email archive',err);
@@ -1066,6 +1084,8 @@ async function createWatiArchiveDocument({
 	profileid = [], // Array of profileids
 	templateid = '', // template ID from wati 
 	watitemplateid = '', // String template name
+	type = null, // type of message
+	metadata = null // metadata of individual message
 }){
 	console.log('Started creating Wati Archive');
 	
@@ -1082,7 +1102,8 @@ async function createWatiArchiveDocument({
 	const docid = admin.firestore().collection('wati archive').doc().id;
 
 	try {
-		await admin.firestore().collection('wati archive').doc(docid).set({
+
+		var map = {
 			docid: docid,
 			body : null,
 			numbers: numbers,
@@ -1102,7 +1123,12 @@ async function createWatiArchiveDocument({
 			templatevalidated: true,
 			validated: true,
 			watitemplateid: watitemplateid
-		}).then(() => {
+		};
+
+		if(type) map['type'] = type;
+		if(metadata) map['metadata'] = metadata;
+		
+		await admin.firestore().collection('wati archive').doc(docid).set(map).then(() => {
 			console.log('Wati Archive Created Successfully');
 			return 'Wati Archive Created Successfully';
 		}).catch((err) => {

@@ -24,6 +24,10 @@ const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
 const voiptest = require("./components/voiptest")
+const runpodLLMRunning = require("./components/runpod_ai")
+const queue_atc_generation = require("./components/queue_atc_generation")
+const podWorker = require("./components/pod_worker")
+const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
 //voiptestcalls
 exports.testVoipCall = voiptest.testVoipCall;
@@ -57,6 +61,7 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
+exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -76,6 +81,11 @@ exports.ticketCreated = clientIssueSystem.ticketCreated // c - "clientissue/{id}
 exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/{id}"
 exports.autoCloseTickets = clientIssueSystem.autoCloseTickets
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
+
+// Negligence rating + CS coaching functions were EXTRACTED to the customer-support
+// repo and now deploy from there (project starlabs-test, codebase "cs-coaching").
+// Do NOT re-add the coaching exports here — they would collide with that codebase.
+// The original ticketing functions above (ticketfromwebsite … dashboardcustomersupport) stay here.
 
 //communication
 exports.notifyMobileApp = communication.notifyMobileApp // c - "/notificationrecord/{id}"
@@ -111,6 +121,7 @@ if (commonService.production) {
   exports.scheduledFirestoreExport = exportsAndAlerts.scheduledFirestoreExport // schedule "every 12 hours"
 }
 exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublished "Launch-Your-Legacy-budget-alert-slack"
+exports.dailyFirestoreAuditAnalysis = exportsAndAlerts.dailyFirestoreAuditAnalysis // Everyday firestore read & write count
 // 
 //interim report
 exports.slackInterimCrossOver = interimReportSystem.slackInterimCrossOver // c - "/interim crossover/{docid}"
@@ -207,10 +218,19 @@ exports.workshopFormsSubmission = communication.workshopFormsSubmission
 exports.workshopAssignment = communication.workshopAssignment
 
 //workshop communication
-exports.workshopenrolledwatti = communication.workshopenrolledwatti
+exports.workshopenrolledwatti = workshop.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
+exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
+
+//tvlogin
+exports.authorizeTvDevice = workshop.authorizeTvDevice
+
+
+//workshop payment razorpay
+// exports.createRazorpayOrder = workshop.createRazorpayOrder
+// exports.verifyRazorpayPayment = workshop.verifyRazorpayPayment
 
 //product enquiry
 exports.productenquiryfromeiflix = communication.productenquiryfromeiflix
@@ -226,10 +246,33 @@ exports.awsEventWebhook = openViduSystem.awsEventWebhook
 exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
 exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
 exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
+exports.muteParticipant = openViduSystem.muteParticipant
+exports.kickParticipant = openViduSystem.kickParticipant
+exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
+
+//runpod ai — ATC batch pipeline (external vLLM controller path)
+exports.atcJobWatchdog = runpodLLMRunning.atcJobWatchdog // schedule "every 10 minutes" — requeue stuck jobs
+exports.atcPodLifecycle = podWorker.atcPodLifecycle // schedule "every 2 minutes" — launch gate + LOADING→READY→drain
+exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drained" + ready/unhealthy pushes
+// LEGACY — the external controller path (launchPod/getPodBearer/terminatePod + Cloud Run drain Job)
+// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/runpod_ai.js
+// for rollback only; NOT deployed. Re-enable to fall back to the self-loop pod worker.
+// exports.run_jobrequest = runpodLLMRunning.run_jobrequest
+// exports.getJobRequest = runpodLLMRunning.getJobRequest
+// exports.submitJobResult = runpodLLMRunning.submitJobResult
+// exports.terminatePod = runpodLLMRunning.terminatePod
+// exports.atcPodScheduler = runpodLLMRunning.atcPodScheduler
+
+//queue_atc_generation
+exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
+exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
+
+//scope-enhancement-atc-pipeline — usage dashboard rollup
+exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup
 

@@ -11,8 +11,10 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
     var profileid = req.query.profileid
     var pp_totalpaid = req.query.pp_totalpaid
     var pp_totalpurchasevalue = req.query.pp_totalpurchasevalue
+    var currentemi = req.query.currentemi
     const mapDataParam = req.query.mapdata;
     let mapData = null;
+    console.log("query", req.query);
     console.log(lastpaymentdate);
     console.log("email", email, "paymentplan", paymentplan);
     if (profileid) {
@@ -25,6 +27,7 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
             if (lastpaymentdate) updates.lastpaymentdate = lastpaymentdate;
             if (pp_totalpaid) updates.pp_totalpaid = pp_totalpaid;
             if (pp_totalpurchasevalue) updates.pp_totalpurchasevalue = pp_totalpurchasevalue;
+            if (currentemi) updates.currentemi = currentemi;
 
             if (mapDataParam && mapDataParam !== 'null') {
                 try {
@@ -49,6 +52,7 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
                 res.status(200).send("Document updated successfully.");
 
                 let webhookUrl = "";
+                console.log("Updates", updates);
                 if (commonService.production) {
                  webhookUrl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
                 } else {
@@ -64,9 +68,9 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
                     });
 
                     console.log("Webhook sent successfully");
-                    }catch (webhookError) {
+                } catch (webhookError) {
                     console.error("Webhook failed:", webhookError.message);
-                    }
+                }
                     
             } else {
                 res.status(400).send("No valid fields provided for update.");
