@@ -127,7 +127,7 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
         var zoompassword = ""
     
         // Main EIS Roles
-        var mainRoles = ["eisroles/mz7tx7W02rx5VvaduaFT", "eisroles/IyvM6K3Sl90Tm5YZSp6W", "eisroles/f5wT99oyCANbIfXIfKCM", "eisroles/tUibFLhrQadcIT7FjENb"]
+        var mainRoles = ["eisroles/mz7tx7W02rx5VvaduaFT", "eisroles/IyvM6K3Sl90Tm5YZSp6W", "eisroles/f5wT99oyCANbIfXIfKCM", "eisroles/tUibFLhrQadcIT7FjENb", "eisroles/UKZxXJ2e4bCukSS5iUiO", "eisroles/hEWJOmfMaJf7agI68FuW", "eisroles/9SMxue8x0gxuhEDX8r7D"]
     
         await admin.firestore().doc(snapshot.data()["appointment"].path).get().then(appointmentDoc=>{
           var name = appointmentDoc.data()["appointmenttype"]
@@ -249,6 +249,9 @@ exports.resentAppointmentEmail = onRequest(async (req, res)=>{
           const hostName = hosts[i].name;
           names.push(hostName)
           if(hosts[i].role.includes("collaborator")){
+            dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
+          }
+          else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("wish")){
             dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
           }
           else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("implementation")){
@@ -463,7 +466,7 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     var zoompassword = ""
 
     // Main EIS Roles
-    var mainRoles = ["eisroles/mz7tx7W02rx5VvaduaFT", "eisroles/IyvM6K3Sl90Tm5YZSp6W", "eisroles/f5wT99oyCANbIfXIfKCM", "eisroles/tUibFLhrQadcIT7FjENb"]
+    var mainRoles = ["eisroles/mz7tx7W02rx5VvaduaFT", "eisroles/IyvM6K3Sl90Tm5YZSp6W", "eisroles/f5wT99oyCANbIfXIfKCM", "eisroles/tUibFLhrQadcIT7FjENb", "eisroles/UKZxXJ2e4bCukSS5iUiO", "eisroles/hEWJOmfMaJf7agI68FuW", "eisroles/9SMxue8x0gxuhEDX8r7D"]
 
     await admin.firestore().doc(snapshot.data()["appointment"].path).get().then(appointmentDoc=>{
       var name = appointmentDoc.data()["appointmenttype"]
@@ -594,6 +597,9 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
       const hostName = hosts[i].name;
       names.push(hostName)
       if(hosts[i].role.includes("collaborator")){
+        dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
+      }
+      else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("wish")){
         dataModel["implementation"] = dataModel["implementation"] == undefined ? ""+hostName : dataModel["implementation"] + ", " + hostName
       }
       else if(hosts[i].role.includes("shadow") && hosts[i].role.includes("implementation")){

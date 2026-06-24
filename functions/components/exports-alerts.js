@@ -23,61 +23,119 @@ const db = admin.firestore();
 
 // Backup Scheduler v2 chatgpt optimised
 exports.scheduledFirestoreExport = onSchedule({schedule: "every 12 hours", memory: "4GiB", timeoutSeconds: 540}, async (context) => {
-  let collectionIds = [];
-  let subCollectionsName = []; // Declare with let
-
-  // Get collections
-  const collectionsSnapshot = await admin.firestore().listCollections();
-  const filteredCollections = collectionsSnapshot.map(e => e["_queryOptions"].collectionId).filter(collectionId => collectionId !== 'notifications' && collectionId !== 'app exception log');
-
-  // const collectionListHasSubCollection = ['Achievements', 'Prescribers', 'atc_alpha', 'atc_to_validate', 'clientissue', 'issue_tracker', 'supportdesk', 'transcribed_atc', 'transcribed_atc_alpha', 'transcribed_atc_to_validate', 'triple atc', 'user', 'versioned_atc'];
-  // const filteredCollections2 = collectionsSnapshot.filter(col => collectionListHasSubCollection.includes(col.id));
-
-  // // Get subcollections
-  // subCollectionsName = await getSubCollections(filteredCollections2);
-  
-
-  collectionIds = Array.from(new Set([...filteredCollections, ...['blacklistrows','authors','corrections','procedures','messages','reports','adjustment','watchedVideos']]));
-  console.log("collectionIds",collectionIds.length);
-
-  const BATCH_SIZE = 50; // Adjust based on your system's capacity
-  const batches = [];
-
-  // Create batches for export
-  while (collectionIds.length > 0) {
-    batches.push(collectionIds.splice(0, BATCH_SIZE));
-  }
-
-  const bucket = commonService.production ? 'gs://firestore_schedule_backup' : 'gs://firestoretest_schedule_backup';
+  const BATCH_SIZE = 50;
   const projectId = process.env.GCP_PROJECT || process.env.GCLOUD_PROJECT;
-  const databaseName = client.databasePath(projectId, '(default)');
-	console.log("Projectid", projectId)
+  const bucket = commonService.production ? 'gs://firestore_schedule_backup' : 'gs://firestoretest_schedule_backup';
 
-	console.log("=== Environment Check ===");
-	console.log("GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS);
-	console.log("GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
-	console.log("GCP_PROJECT:", process.env.GCP_PROJECT);
-	console.log("GCLOUD_PROJECT:", process.env.GCLOUD_PROJECT);
+  // One shared timestamp for the whole run, reused across all databases.
+  // ISO format with colons, matching Firestore's own auto-generated folder format.
+  const runTimestamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
-	console.log("=== Bucket Info ===");
-	console.log("Database name:", databaseName);
-	console.log("Bucket:", bucket);
+  console.log("Projectid", projectId);
+  console.log("=== Environment Check ===");
+  console.log("GOOGLE_APPLICATION_CREDENTIALS:", process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  console.log("GOOGLE_CLOUD_PROJECT:", process.env.GOOGLE_CLOUD_PROJECT);
+  console.log("GCP_PROJECT:", process.env.GCP_PROJECT);
+  console.log("GCLOUD_PROJECT:", process.env.GCLOUD_PROJECT);
+  console.log("=== Run Info ===");
+  console.log("Run timestamp:", runTimestamp);
+  console.log("Bucket:", bucket);
 
-  // Export each batch
-  for (const batch of batches) {
-    try {
-      const response = await client.exportDocuments({
-        name: databaseName,
-        outputUriPrefix: bucket,
-        collectionIds: batch,
-      });
-      console.log(`Export operation for batch successful. Operation Name: ${response[0]['name']}`);
-    } catch (err) {
-      console.error('Error exporting batch: ', err);
-      throw new Error('Export operation failed');
+  // --- Build the (default) database collection list (dynamic discovery + extras) ---
+  let defaultCollectionIds = [];
+  try {
+    const collectionsSnapshot = await admin.firestore().listCollections();
+    const filteredCollections = collectionsSnapshot
+      .map(e => e["_queryOptions"].collectionId)
+      .filter(collectionId => collectionId !== 'notifications' && collectionId !== 'app exception log');
+
+    defaultCollectionIds = Array.from(new Set([
+      ...filteredCollections,
+      ...['blacklistrows', 'authors', 'corrections', 'procedures', 'messages', 'reports', 'adjustment', 'watchedVideos']
+    ]));
+  } catch (err) {
+    console.error('Error listing collections for (default) database:', err);
+    // Continue: other databases use hardcoded lists and are unaffected.
+  }
+  console.log("(default) collectionIds", defaultCollectionIds.length);
+
+  // --- Database configuration ---
+  // (default): discovered above.
+  // firestore-atc / firestore-forms: hardcoded lists only, no discovery.
+  const databases = [
+    {
+      id: '(default)',
+      collectionIds: defaultCollectionIds
+    },
+    {
+      id: 'firestore-atc',
+      collectionIds: [
+        'atc_alpha', 'atc_to_validate', 'triple atc', 'corrections', 'procedures',
+        'atc_notes', 'revision', 'temporary_ATC', 'temporary_edit_ATC',
+        'temporary_tripleatc', 'temporary_edit_tripleATC', 'ai_generated_atc_summary',
+        'ai_generated_atc_summary_backup', 'queue_atc_generation'
+      ]
+    },
+    {
+      id: 'firestore-forms',
+      collectionIds: [
+        'temporary_forms', 'formsByClient', 'formsByClient log'
+      ]
+    }
+  ];
+
+  const failedDatabases = [];
+
+  // --- Export loop: one database at a time ---
+  for (const db of databases) {
+    const databaseName = client.databasePath(projectId, db.id);
+    const outputUriPrefix = `${bucket}/${runTimestamp}_${db.id}`;
+
+    console.log(`=== Exporting database: ${db.id} ===`);
+    console.log("Database name:", databaseName);
+    console.log("Output prefix:", outputUriPrefix);
+    console.log("Collection count:", db.collectionIds.length);
+
+    if (db.collectionIds.length === 0) {
+      console.warn(`Skipping database ${db.id}: no collections to export.`);
+      continue;
+    }
+
+    // Copy so splice does not mutate the config.
+    const remaining = [...db.collectionIds];
+    const batches = [];
+    while (remaining.length > 0) {
+      batches.push(remaining.splice(0, BATCH_SIZE));
+    }
+
+    let dbHadError = false;
+    for (const batch of batches) {
+      try {
+        const response = await client.exportDocuments({
+          name: databaseName,
+          outputUriPrefix: outputUriPrefix,
+          collectionIds: batch,
+        });
+        console.log(`[${db.id}] Export batch successful. Operation: ${response[0]['name']}`);
+      } catch (err) {
+        dbHadError = true;
+        console.error(`[${db.id}] Error exporting batch: `, err);
+        // Log and continue: other batches and other databases still attempted.
+      }
+    }
+
+    if (dbHadError) {
+      failedDatabases.push(db.id);
     }
   }
 
+  // --- Final status ---
+  if (failedDatabases.length > 0) {
+    console.error('Databases with export failures:', failedDatabases);
+    throw new Error(`Export failed for databases: ${failedDatabases.join(', ')}`);
+  }
+
+  console.log('All database exports completed successfully.');
   return null;
 });
 

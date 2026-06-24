@@ -484,6 +484,35 @@ exports.sendSlackNotificationSaleRejection = onDocumentUpdated({document:'salesl
     });
   }
 
+  if (afterData && afterData['status'] == 'Approved') {
+    console.log("Sending Data to watson");
+
+    const watsonUrl = commonService.production
+      ? "https://us-central1-watsonproduction-becde.cloudfunctions.net/updateSalesleads"
+      : "https://us-central1-watson-test-19.cloudfunctions.net/updateSalesleads";
+
+    const postData = JSON.stringify(afterData);
+    const urlObj = new URL(watsonUrl);
+
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      console.log('Watson response status:', res.statusCode);
+    });
+
+    req.on('error', (err) => console.error('Watson call failed:', err));
+    req.write(postData);
+    req.end();
+  }
+
   // timeline log
   if(beforeData['status'] != afterData['status'] && afterData['status'] == 'Approved'){
     let touchpoint = "";
