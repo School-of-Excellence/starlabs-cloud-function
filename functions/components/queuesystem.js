@@ -115,6 +115,7 @@ exports.onQueueStageChange = onDocumentWritten({
         const isPrepStage = key === 'Evolution Prep Orientation';
         const isScopeEnhancement = key === 'Scope Enhancement';
         const isGuidedOrientation = key === 'Guided Self ATC Orientation';
+        const isDiagnostics = key === 'Ready for Diagnostics';
         const formattedTitle = getSlotTitle(addedValue, key);
 
         try {
@@ -136,11 +137,10 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
-        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation) {
+        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
-
         try {
           const startDate = addedValue['startdate'];
           const formattedDate = startDate._seconds
@@ -174,7 +174,7 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : isScopeEnhancement   ? 'se_slot_cofirmation_june_2026' : 'guided_ori_slot_confirmation_june_v1';
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
