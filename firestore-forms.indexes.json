@@ -1,0 +1,56 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "formid", "order": "ASCENDING" },
+        { "fieldPath": "profileid", "order": "ASCENDING" },
+        { "fieldPath": "queueref", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "formid", "order": "ASCENDING" },
+        { "fieldPath": "profileid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "formid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "formid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "profileid", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "formsByClient",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "queueref", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

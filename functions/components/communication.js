@@ -46,6 +46,8 @@ const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 const postmark = require("postmark");
 const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
 const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
+const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
+const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
 const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
 
 // Send Push Notification
@@ -55,7 +57,6 @@ const INVALID_TOKEN_ERRORS = [
   'messaging/invalid-argument',
   'messaging/unregistered'
 ];
-
 exports.notifyMobileApp = onDocumentCreated({
   document: "/notificationrecord/{id}", 
   timeoutSeconds: 540,
@@ -76,6 +77,13 @@ exports.notifyMobileApp = onDocumentCreated({
   const notificationImage = notificationData["notificationimage"] || null;
   const metaData = notificationData["metadata"] || {};
   const profileID = notificationData["profileid"] || [];
+
+  // receivingapp routing. Absent → current (breakthroughs) behaviour for
+  // backward compatibility. "eiflixapp" → only EiFlix (EIFLIX_FCM_token, no
+  // FCM_token/AHCRM). "all" → both apps.
+  const receivingApp = notificationData["receivingapp"] || "breakthroughsapp";
+  const sendBreakthroughs = receivingApp === "all" || receivingApp === "breakthroughsapp";
+  const sendEiflix = receivingApp === "all" || receivingApp === "eiflixapp";
 
   if (profileID.length === 0) {
     console.log("No profiles to notify");
@@ -176,27 +184,47 @@ exports.notifyMobileApp = onDocumentCreated({
     const fcmPromises = [];
     const AHCRMPromises = [];
 
-    for (let a = 0; a < profileID.length; a += 30) {
-      const profileList = profileID.slice(a, a + 30).map(e =>
-        admin.firestore().collection("profile_data").doc(e)
-      );
-      fcmPromises.push(
-        admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
-          console.error("FCM token fetch batch failed:", err);
-          return { docs: [] };
-        })
-      );
-    }
-
-    // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
-    if (notificationType === "supportticket") {
+    // Breakthroughs app tokens (current behaviour) — skipped for "eiflixapp".
+    if (sendBreakthroughs) {
       for (let a = 0; a < profileID.length; a += 30) {
         const profileList = profileID.slice(a, a + 30).map(e =>
           admin.firestore().collection("profile_data").doc(e)
         );
-        AHCRMPromises.push(
-          admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+        fcmPromises.push(
+          admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
             console.error("FCM token fetch batch failed:", err);
+            return { docs: [] };
+          })
+        );
+      }
+
+      // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
+      if (notificationType === "supportticket") {
+        for (let a = 0; a < profileID.length; a += 30) {
+          const profileList = profileID.slice(a, a + 30).map(e =>
+            admin.firestore().collection("profile_data").doc(e)
+          );
+          AHCRMPromises.push(
+            admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+              console.error("FCM token fetch batch failed:", err);
+              return { docs: [] };
+            })
+          );
+        }
+      }
+    }
+
+    // EiFlix app tokens (separate collection) — added for "eiflixapp" / "all".
+    // FCM routes each token to its own app, and the Firebase project's APNs key
+    // for com.soe.eiflix handles iOS delivery, so the existing send path is reused.
+    if (sendEiflix) {
+      for (let a = 0; a < profileID.length; a += 30) {
+        const profileList = profileID.slice(a, a + 30).map(e =>
+          admin.firestore().collection("profile_data").doc(e)
+        );
+        fcmPromises.push(
+          admin.firestore().collection("EIFLIX_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+            console.error("EIFLIX FCM token fetch batch failed:", err);
             return { docs: [] };
           })
         );
@@ -547,6 +575,498 @@ exports.notifyMobileApp = onDocumentCreated({
     }).catch(e => console.error("Failed to update error status:", e));
   }
 });
+
+// exports.notifyMobileApp = onDocumentCreated({
+//   document: "/notificationrecord/{id}", 
+//   timeoutSeconds: 540,
+//   memory: "512MiB",
+//   secrets: [APPLE_AUTHKEY_P8, APPLE_APN_KEYID, APPLE_TEAMID]
+//   }, async (snapshot) => {
+//   const notificationData = snapshot.data.data();
+
+//   if (!notificationData) {
+//     console.error("No notification data found");
+//     return;
+//   }
+
+//   const title = notificationData["title"] || "A&H Update";
+//   const message = notificationData["message"] || "You have a new notification!";
+//   const subtitle = notificationData["subtitle"] || null;
+//   const notificationType = notificationData["notificationtype"] || "ahupdate";
+//   const notificationImage = notificationData["notificationimage"] || null;
+//   const metaData = notificationData["metadata"] || {};
+//   const profileID = notificationData["profileid"] || [];
+
+//   if (profileID.length === 0) {
+//     console.log("No profiles to notify");
+//     await snapshot.data.ref.update({ success: true, profilesuccess: [], profilefailed: [], failedlist: {} });
+//     return;
+//   }
+
+//   console.log("Profile ID", profileID);
+//   console.log(`Starting notification for ${profileID.length} profiles`);
+
+//   const fcmTokens = [];
+//   const voipTokens = [];
+//   const mapTokenProfile = {};
+//   const mapVoipTokenProfile = {};
+//   const allUsersForLogs = [];
+//   const failedlist = {};
+//   const profilesWithUserRef = [];
+//   const profilesWithFCMToken = [];
+
+//   try {
+//     // ============ STEP 1: FETCH PROFILES TO GET USER_REF FOR LOGS ============
+//     const profilePromises = [];
+//     for (let a = 0; a < profileID.length; a += 30) {
+//       const profileBatch = profileID.slice(a, a + 30);
+//       profilePromises.push(
+//         admin.firestore().collection("profile_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+//           console.error("Profile fetch batch failed:", err);
+//           profileBatch.forEach(pid => {
+//             failedlist[pid] = `Profile fetch failed: ${err.message}`;
+//           });
+//           return { docs: [] };
+//         })
+//       );
+//       profilePromises.push(
+//         admin.firestore().collection("new_user_data").where(admin.firestore.FieldPath.documentId(), "in", profileBatch).get().catch(err => {
+//           console.error("new_user_data fetch batch failed:", err);
+//           return { docs: [] };
+//         })
+//       );
+//     }
+
+//     const profileResults = await Promise.all(profilePromises);
+//     const foundProfileIds = [];
+
+//     for (const result of profileResults) {
+//       for (const profileDoc of result.docs) {
+//         const profileData = profileDoc.data();
+//         const profileId = profileDoc.id;
+//         foundProfileIds.push(profileId);
+
+//         let userId = null;
+//         if (profileData["user_ref"]) {
+//           userId = profileData["user_ref"].id;
+//         } else if (profileData["uid"]) {
+//           userId = profileData["uid"];
+//         }
+
+//         if (userId) {
+//           if (!profilesWithUserRef.includes(profileId)) {
+//             profilesWithUserRef.push(profileId);
+//           }
+//           if (!allUsersForLogs.includes(userId)) {
+//             allUsersForLogs.push(userId);
+//           }
+//           delete failedlist[profileId];
+//         } else if (!profilesWithUserRef.includes(profileId)) {
+//           failedlist[profileId] = "No user_ref/uid found in profile";
+//         }
+//       }
+//     }
+
+//     profileID.forEach(pid => {
+//       if (!foundProfileIds.includes(pid) && !failedlist[pid]) {
+//         failedlist[pid] = "Profile not found in database";
+//       }
+//     });
+
+//     console.log("Users Found", allUsersForLogs);
+//     console.log(`Found ${allUsersForLogs.length} users with user_ref for logs`);
+
+//     // ============ STEP 2: CREATE NOTIFICATION LOGS (BEFORE FCM) ============
+//     if (notificationData["logged"] && allUsersForLogs.length > 0) {
+//       console.log(`Creating logs for ${allUsersForLogs.length} users`);
+//       await storeNotificationLogs(allUsersForLogs, {
+//         title,
+//         message,
+//         subtitle,
+//         notificationImage,
+//         notificationType,
+//         landingpage: notificationData["landingpage"],
+//         sticky: notificationData["sticky"],
+//         metaData,
+//         recordid: snapshot.data.id
+//       });
+//     }
+
+//     // ============ STEP 3: FETCH FCM TOKENS FOR PUSH NOTIFICATIONS ============
+//     const fcmPromises = [];
+//     const AHCRMPromises = [];
+
+//     for (let a = 0; a < profileID.length; a += 30) {
+//       const profileList = profileID.slice(a, a + 30).map(e =>
+//         admin.firestore().collection("profile_data").doc(e)
+//       );
+//       fcmPromises.push(
+//         admin.firestore().collection("FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+//           console.error("FCM token fetch batch failed:", err);
+//           return { docs: [] };
+//         })
+//       );
+//     }
+
+//     // CONDITIONAL: Query AHCRM_FCM_token ONLY for supportticket notifications
+//     if (notificationType === "supportticket") {
+//       for (let a = 0; a < profileID.length; a += 30) {
+//         const profileList = profileID.slice(a, a + 30).map(e =>
+//           admin.firestore().collection("profile_data").doc(e)
+//         );
+//         AHCRMPromises.push(
+//           admin.firestore().collection("AHCRM_FCM_token").where("profile_ref", "in", profileList).where("active", "==", true).get().catch(err => {
+//             console.error("FCM token fetch batch failed:", err);
+//             return { docs: [] };
+//           })
+//         );
+//       }
+//     }
+
+//     fcmPromises.push(...AHCRMPromises);
+//     console.log("ahcrm promises", AHCRMPromises.length);
+//     const fcmResults = await Promise.all(fcmPromises);
+
+//     for (const result of fcmResults) {
+//       for (const tokenDoc of result.docs) {
+//         const tokenData = tokenDoc.data();
+//         tokenData["path"] = tokenDoc.ref.path;
+//         const fcmToken = tokenData["FCM_id"];
+//         const profileId = tokenData["profile_ref"]?.id;
+//         const voipToken = tokenData["voipToken"]; 
+//         const platform = tokenData["device_os"]; 
+
+//         // console.log(`Token doc - platform: "${platform}", hasVoIP: ${voipToken}, profileId: ${profileId}`);
+
+//         if (fcmToken && profileId ) {
+//           fcmTokens.push(fcmToken);
+//           mapTokenProfile[fcmToken] = tokenData;
+//           if (!profilesWithFCMToken.includes(profileId)) {
+//             profilesWithFCMToken.push(profileId);
+//           }
+//         }
+
+//         //call kit for ios
+//         if (voipToken && profileId && platform == "ios") {          
+//           voipTokens.push(voipToken);
+//           console.log("voipTokens",voipToken);
+//           mapVoipTokenProfile[voipToken] = tokenData;
+//         }
+
+//       }
+//     }
+
+//     profilesWithUserRef.forEach(pid => {
+//       if (!profilesWithFCMToken.includes(pid)) {
+//         if (failedlist[pid]) {
+//           failedlist[pid] += "; No active FCM token found";
+//         } else {
+//           failedlist[pid] = "No active FCM token found";
+//         }
+//       }
+//     });
+
+//     if (notificationType === "supportticket") {
+//       console.log(`Found ${fcmTokens.length} FCM tokens (from FCM_token + AHCRM_FCM_token)`);
+//     } else {
+//       console.log(`Found ${fcmTokens.length} FCM tokens for push notifications`);
+//     }
+
+//     // ============ STEP 4: SEND PUSH NOTIFICATIONS ============
+//     const successfullProfileid = [];
+//     const failedFCM = [];
+//     const appFCMSuccess = [];
+//     const webFCMSuccess = [];
+//     const appFCMFailed = [];
+//     const webFCMFailed = [];
+//     const invalidTokenPaths = []; // Only invalid tokens to deactivate
+//     const voipResults = { success: [], failed: [], invalidTokens: [] }; 
+
+//     if (fcmTokens.length > 0) {
+//       const splitToken = commonService.chunkArray(fcmTokens, 500);
+
+//       for (let i = 0; i < splitToken.length; i++) {
+//         const tokenSet = splitToken[i];
+//         if (i > 0) {
+//           await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
+//         }
+//         let payload;
+//         if(notificationType === "studio invitation"){
+//           payload = {
+//             data: {
+//               type: "studio_invitation_call", 
+//               click_action: "FLUTTER_NOTIFICATION_CLICK",
+//               recordid: snapshot.data.id,
+//               title: title,
+//               body: message,
+//               stage: metaData?.stage || title,
+//               studioid: metaData?.studioid || "",
+//               docid: metaData?.docid || "",
+//               ...sanitizeDataPayload(metaData),
+//             },
+//             android: {
+//               priority: 'high',
+//               ttl: 0,
+//             },
+//             apns: {
+//               headers: {
+//                 'apns-priority': '10',
+//               },
+//               payload: {
+//                 aps: {
+//                   'content-available': 1,
+//                 },
+//               },
+//             },
+//             tokens: tokenSet,
+//           };
+
+//         }
+//         else{
+//           payload = {
+//             notification: {
+//               title: title,
+//               body: message,
+//             },
+//             data: {
+//               type: notificationType,
+//               click_action: "FLUTTER_NOTIFICATION_CLICK",
+//               recordid: snapshot.data.id,
+//               landingpage: notificationData["landingpage"] || "",
+//               sticky: String(notificationData["sticky"] || false),
+//               ...sanitizeDataPayload(metaData),
+//               // ...sanitizeDataPayload(notificationData),
+//             },
+//             android: {
+//               notification: {
+//                 channel_id: "default_channel",
+//                 sound: "default",
+//                 color: '#ffffff',
+//                 tag: snapshot.data.id,
+//               },
+//             },
+//             apns: {
+//               payload: {
+//                 aps: {
+//                   badge: 1,
+//                   sound: "default",
+//                   "mutable-content": 1,
+//                   'content-available': 1,
+//                 },
+//               },
+//               headers: {
+//                 'apns-collapse-id': snapshot.data.id,
+//               }
+//             },
+//             tokens: tokenSet,
+//           };
+//         }
+       
+//         // Old payload method
+//         // const payload = {
+//         //   notification: {
+//         //     title: title,
+//         //     body: message,
+//         //   },
+//         //   data: {
+//         //     type: notificationType,
+//         //     click_action: "FLUTTER_NOTIFICATION_CLICK",
+//         //     recordid: snapshot.data.id,
+//         //     ...sanitizeDataPayload(metaData),
+//         //     // ...sanitizeDataPayload(notificationData),
+//         //   },
+//         //   android: {
+//         //     notification: {
+//         //       color: '#ffffff',
+//         //       tag: snapshot.data.id,
+//         //       sound: "default",
+//         //     },
+//         //   },
+//         //   apns: {
+//         //     payload: {
+//         //       aps: {
+//         //         badge: 1,
+//         //         sound: "default",
+//         //         "mutable-content": 1
+//         //       },
+//         //     },
+//         //     headers: {
+//         //       'apns-collapse-id': snapshot.data.id,
+//         //     }
+//         //   },
+//         //   tokens: tokenSet,
+//         // }; 
+//         if (notificationImage) {
+//           payload.android.notification["imageUrl"] = notificationImage;
+//           payload.apns["fcm_options"] = { image: notificationImage };
+//         }
+
+//         try {
+//           const response = await sendWithRetry(payload);
+//           response.responses.forEach((res, j) => {
+//             const tokenid = tokenSet[j];
+//             const tokenData = mapTokenProfile[tokenid];
+
+//             if (!tokenData) return;
+
+//             const tokenProfileid = tokenData["profile_ref"]?.id;
+//             const deviceOS = tokenData["device_os"]?.toLowerCase();
+//             const isApp = deviceOS === "ios" || deviceOS === "android";
+//             const isWeb = deviceOS === "linux" || deviceOS === "windows" || deviceOS === "mac";
+
+//             if (res.success) {
+//               if (tokenProfileid && !successfullProfileid.includes(tokenProfileid)) {
+//                 successfullProfileid.push(tokenProfileid);
+//               }
+//               if (isApp && !appFCMSuccess.includes(tokenProfileid)) {
+//                 appFCMSuccess.push(tokenProfileid);
+//               } else if (isWeb && !webFCMSuccess.includes(tokenProfileid)) {
+//                 webFCMSuccess.push(tokenProfileid);
+//               }
+
+//               if (tokenProfileid && failedlist[tokenProfileid]) {
+//                 delete failedlist[tokenProfileid];
+//               }
+//             } else {
+//               failedFCM.push(tokenid);
+
+//               const errorCode = res.error?.code || "unknown";
+//               const errorMessage = res.error?.message || "FCM delivery failed";
+
+//               // Only mark token as invalid if error indicates token is invalid
+//               if (isInvalidTokenError(errorCode)) {
+//                 invalidTokenPaths.push(tokenData["path"]);
+//                 console.log(`Invalid token detected: ${tokenid}, error: ${errorCode}`);
+//               }
+
+//               if (tokenProfileid) {
+//                 const fcmError = `FCM failed: ${errorCode} - ${errorMessage}`;
+//                 if (failedlist[tokenProfileid]) {
+//                   failedlist[tokenProfileid] += `; ${fcmError}`;
+//                 } else {
+//                   failedlist[tokenProfileid] = fcmError;
+//                 }
+//               }
+
+//               if (isApp && !appFCMFailed.includes(tokenProfileid)) {
+//                 appFCMFailed.push(tokenProfileid);
+//               } else if (isWeb && !webFCMFailed.includes(tokenProfileid)) {
+//                 webFCMFailed.push(tokenProfileid);
+//               }
+//             }
+//           });
+
+//           console.log(`Batch ${i + 1}/${splitToken.length} completed: ${response.successCount} success, ${response.failureCount} failed`);
+
+//         } catch (err) {
+//           console.error(`Batch ${i + 1} failed after all retries:`, err);
+//           tokenSet.forEach(tokenid => {
+//             failedFCM.push(tokenid);
+//             if (mapTokenProfile[tokenid]) {
+//               const tokenProfileid = mapTokenProfile[tokenid]["profile_ref"]?.id;
+//               if (tokenProfileid) {
+//                 const batchError = `FCM batch failed: ${err.message}`;
+//                 if (failedlist[tokenProfileid]) {
+//                   failedlist[tokenProfileid] += `; ${batchError}`;
+//                 } else {
+//                   failedlist[tokenProfileid] = batchError;
+//                 }
+//               }
+//             }
+//           });
+//         }
+//       }
+
+
+//       // ============ STEP 4B: SEND VOIP NOTIFICATIONS FOR iOS ============
+//       if (voipTokens.length > 0 && notificationType === "studio invitation") {
+//         console.log(`Sending VoIP to ${voipTokens.length} iOS devices`);
+
+//         const apnToken = {
+//           key: APPLE_AUTHKEY_P8.value(),
+//           keyId: APPLE_APN_KEYID.value(),
+//           teamId: APPLE_TEAMID.value(),
+//         };
+//         const voipResult = await sendVoipNotifications({
+//           apnToken: apnToken,
+//           voipTokens: voipTokens,
+//           mapVoipTokenProfile: mapVoipTokenProfile,
+//           notificationData: {
+//             title,
+//             message,
+//             notificationType,
+//             recordid: snapshot.data.id,
+//             metaData,
+//           }
+//         });
+
+//         voipResults.success = voipResult.success;
+//         voipResults.failed = voipResult.failed;
+        
+//         // Add invalid VoIP tokens to deactivation list
+//         voipResult.invalidTokens.forEach(path => {
+//           if (path && !invalidTokenPaths.includes(path)) {
+//             invalidTokenPaths.push(path);
+//           }
+//         });
+
+//         console.log(`VoIP: ${voipResult.success.length} success, ${voipResult.failed.length} failed`);
+//       }
+
+    
+
+//       // ============ STEP 5: CLEANUP ONLY INVALID FCM TOKENS ============
+//       if (invalidTokenPaths.length > 0) {
+//         console.log(`Deactivating ${invalidTokenPaths.length} invalid tokens`);
+//         const invalidChunks = commonService.chunkArray(invalidTokenPaths, 500);
+//         for (const chunk of invalidChunks) {
+//           const batch = admin.firestore().batch();
+//           chunk.forEach(path => {
+//             batch.update(admin.firestore().doc(path), { active: false });
+//           });
+//           await batch.commit().catch(err => {
+//             console.error("Failed to deactivate invalid FCM tokens:", err);
+//           });
+//         }
+//       }
+//     } else {
+//       console.log("No FCM tokens found, skipping push notifications");
+//     }
+
+//     // ============ STEP 6: UPDATE FINAL RESULT ============
+//     const failedProfile = profileID.filter(e => !successfullProfileid.includes(e));
+
+//     await snapshot.data.ref.update({
+//       profilesuccess: successfullProfileid,
+//       profilefailed: failedProfile,
+//       appFCMSuccess: appFCMSuccess,
+//       webFCMSuccess: webFCMSuccess,
+//       appFCMFailed: appFCMFailed,
+//       voipSuccess: voipResults.success,
+//       voipFailed: voipResults.failed,
+//       webFCMFailed: webFCMFailed,
+//       failedlist: failedlist,
+//       success: true
+//     });
+
+//     console.log(`Completed: ${successfullProfileid.length} FCM success, ${failedProfile.length} FCM failed, ${invalidTokenPaths.length} tokens deactivated`);
+
+//   } catch (err) {
+//     console.error("Critical error in notifyMobileApp:", err);
+
+//     profileID.forEach(pid => {
+//       if (!failedlist[pid]) {
+//         failedlist[pid] = `Critical error: ${err.message}`;
+//       }
+//     });
+
+//     await snapshot.data.ref.update({
+//       success: false,
+//       error: err.message || "Unknown error",
+//       failedlist: failedlist
+//     }).catch(e => console.error("Failed to update error status:", e));
+//   }
+// });
 
 async function sendVoipNotifications({voipTokens, mapVoipTokenProfile, notificationData, apnToken}) {
 
@@ -1190,6 +1710,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },
@@ -1204,6 +1726,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
       const serversMap = {
         POSTMARK_STARLABS_V1,
         POSTMARK_STARLABS_V2,
+        POSTMARK_STARLABS_V3,
+        POSTMARK_STARLABS_V4,
         POSTMARK_STARLABS_TEST,
       };
  
@@ -1221,6 +1745,8 @@ exports.sendBatchEmail = onRequest({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },async (req, res) => {
@@ -1231,6 +1757,8 @@ exports.sendBatchEmail = onRequest({
   const serversMap = {
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   };
 
@@ -1909,6 +2437,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },async (change) => {
@@ -1919,6 +2449,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   const serversMap = {
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   };
 
@@ -3696,8 +4228,10 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
       } else {
         const tagprofile = await getProfileData(data["tag"]);
         // var tagname = (await admin.firestore().collection("profile_data").doc(data["tag"]).get()).data()["name"];
-        var tagname = tagprofile["name"];
-        var repliedformessage = (await admin.firestore().collection("workshopQA").doc(data["replyid"]).get()).data()["question"];
+        // Guard nulls: a self-reply has no `tag`, and a deleted parent has no data.
+        var tagname = tagprofile ? tagprofile["name"] : "the discussion";
+        const repliedDoc = await admin.firestore().collection("workshopQA").doc(data["replyid"]).get();
+        var repliedformessage = repliedDoc.exists ? repliedDoc.data()["question"] : "";
 
         message = `💬 *${profilename}* replied to *${tagname}* in *${workshopname}*:\n\n📝 *${repliedformessage}*\n\n↪️ *${question}*`;
       }
@@ -3711,6 +4245,81 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
           console.log("Received", statusCode, "from Slack");
         }
       });
+    }
+
+    // ===== EiFlix push notifications (com.soe.eiflix only) =====
+    // Mirror the Slack alert as an FCM push to the workshop's EiFlix participants.
+    // Tokens live in the dedicated EIFLIX_FCM_token collection, so the sibling
+    // app com.soe.launchyourlegacy (which writes to FCM_token) is never targeted.
+    try {
+      const authorId = data["profileid"];
+      const isReply = data["replyid"] != null;
+
+      // Resolve recipient profile ids.
+      let recipientIds = [];
+      if (isReply) {
+        // A reply notifies just the thread: the question's author, the tagged
+        // person, and everyone who replied in the thread — minus the author.
+        const ids = new Set();
+        const questionDoc = await admin.firestore().collection("workshopQA").doc(data["replyid"]).get();
+        if (questionDoc.exists && questionDoc.data()["profileid"]) {
+          ids.add(questionDoc.data()["profileid"]);
+        }
+        if (data["tag"]) {
+          ids.add(data["tag"]);
+        }
+        const threadReplies = await admin.firestore().collection("workshopQA").where("replyid", "==", data["replyid"]).get();
+        threadReplies.docs.forEach(d => { const p = d.data()["profileid"]; if (p) ids.add(p); });
+        ids.delete(authorId);
+        recipientIds = [...ids];
+      } else {
+        // A new question notifies every enrolled participant — minus the author.
+        const enrolled = await admin.firestore().collection("workshop participant enrolled")
+          .where("workshopref", "==", admin.firestore().collection("workshopconfiguration").doc(data["workshopId"])).get();
+        const ids = new Set();
+        enrolled.docs.forEach(d => { const p = d.data()["profileid"]; if (p && p !== authorId) ids.add(p); });
+        recipientIds = [...ids];
+      }
+
+      if (recipientIds.length > 0) {
+        // Collect active EiFlix FCM tokens for those profiles (batched 'in' by 30).
+        const tokens = new Set();
+        for (let i = 0; i < recipientIds.length; i += 30) {
+          const refs = recipientIds.slice(i, i + 30).map(pid =>
+            admin.firestore().collection("profile_data").doc(pid));
+          const tokenSnap = await admin.firestore().collection("EIFLIX_FCM_token")
+            .where("profile_ref", "in", refs).where("active", "==", true).get();
+          tokenSnap.docs.forEach(t => { const id = t.data()["FCM_id"]; if (id) tokens.add(id); });
+        }
+        const tokenList = [...tokens];
+
+        if (tokenList.length > 0) {
+          const pushTitle = isReply ? `New reply in ${workshopname}` : `New question in ${workshopname}`;
+          const pushBody = isReply ? `${profilename} replied: ${question}` : `${profilename}: ${question}`;
+          const basePayload = {
+            notification: { title: pushTitle, body: pushBody },
+            data: {
+              type: "workshop_qa",
+              workshopId: `${data["workshopId"]}`,
+              workshopTitle: `${workshopname}`,
+              click_action: "FLUTTER_NOTIFICATION_CLICK",
+            },
+            android: { priority: "high", notification: { channelId: "eiflix_qa", sound: "default" } },
+            apns: { payload: { aps: { sound: "default", badge: 1 } } },
+          };
+          // sendEachForMulticast accepts up to 500 tokens per call.
+          for (let i = 0; i < tokenList.length; i += 500) {
+            const batch = tokenList.slice(i, i + 500);
+            await admin.messaging().sendEachForMulticast({ ...basePayload, tokens: batch })
+              .then(res => console.log(`EiFlix Q&A push: ${res.successCount} sent, ${res.failureCount} failed`))
+              .catch(err => console.log("EiFlix Q&A push send error:", err));
+          }
+        } else {
+          console.log("EiFlix Q&A push: no active EIFLIX_FCM_token for recipients");
+        }
+      }
+    } catch (pushErr) {
+      console.log("EiFlix Q&A push failed:", pushErr);
     }
   });
 
@@ -3729,7 +4338,8 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    var url;
     // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
     // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
