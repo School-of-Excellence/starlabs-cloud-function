@@ -30,6 +30,7 @@ const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
 //voiptestcalls
 exports.testVoipCall = appointmentSystem.testVoipCall;
+exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
