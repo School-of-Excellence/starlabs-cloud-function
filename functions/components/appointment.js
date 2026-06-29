@@ -1698,23 +1698,6 @@ exports.testVoipCallnew = onRequest(async (req, res) => {
   const action = req.query.action || req.body.action || 'trigger';
   const stage  = req.query.stage  || req.body.stage  || 'Test Stage';
 
-  // Handle client accept/decline response — no storage, just respond
-  if (action === 'clientresponse') {
-    const docid          = req.query.docid     || req.body.docid;
-    const clientresponse = req.query.response  || req.body.response;
-    const profileid      = req.query.profileid || req.body.profileid;
-
-    console.log('Client Response Received:', { docid, clientresponse, profileid, email });
-
-    res.json({
-      success: true,
-      message: `Client ${clientresponse} the call`,
-      docid,
-      clientresponse,
-    });
-    return;
-  }
-
   if (!email) {
     res.status(400).json({ error: 'email is required' });
     return;
@@ -1753,5 +1736,49 @@ exports.testVoipCallnew = onRequest(async (req, res) => {
       ? 'Call triggered to ' + email
       : 'Call cut for ' + email,
     docid,
+  });
+});
+
+exports.cutStudioCall = onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+
+  const profileid = req.query.profileid || req.body.profileid;
+
+  if (!profileid) {
+    res.status(400).json({ error: 'profileid is required' });
+    return;
+  }
+
+  const profileRef = admin.firestore().collection('profile_data').doc(profileid);
+
+  const tokenSnap = await admin.firestore().collection('FCM_token')
+    .where('profile_ref', '==', profileRef)
+    .where('active', '==', true)
+    .get();
+
+  if (tokenSnap.empty) {
+    res.status(404).json({ error: 'No active FCM token found for profileid ' + profileid });
+    return;
+  }
+
+  const sendPromises = tokenSnap.docs.map(tokenDoc => {
+    const fcmToken = tokenDoc.data().FCM_id;
+    return admin.messaging().send({
+      token: fcmToken,
+      android: { priority: 'high' },
+      data: {
+        type:   'studio_invitation_call',
+        action: 'cut',
+      }
+    }).catch(err => {
+      console.error('Failed to send cut to token', fcmToken, err);
+    });
+  });
+
+  await Promise.all(sendPromises);
+
+  res.json({
+    success: true,
+    message: 'Call cut for profileid ' + profileid,
   });
 });
