@@ -27,10 +27,12 @@ const runpodLLMRunning = require("./components/runpod_ai")
 const queue_atc_generation = require("./components/queue_atc_generation")
 const podWorker = require("./components/pod_worker")
 const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
+const StudioCall = require("./components/cutStudiocall")
 
-//voiptestcalls
-exports.testVoipCall = appointmentSystem.testVoipCall;
-exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
+//Voipcalls
+// exports.testVoipCall = appointmentSystem.testVoipCall;
+// exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
+exports.cutStudioCall = StudioCall.cutStudioCall
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
