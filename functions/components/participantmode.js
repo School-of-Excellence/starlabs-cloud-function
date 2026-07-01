@@ -19,6 +19,13 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
   var beforeData = change.before.exists ? change.before.data() : {}
   var afterData = change.after.exists ? change.after.data() : {}
 
+  // A DELETED participantsproduct has no `after` snapshot — there is nothing to compute. Without this
+  // guard the CF dereferences afterData.productref.path below and throws on every delete. In the cloud
+  // each invocation is isolated so that throw is harmless, but the Firebase emulator runs all invocations
+  // in ONE shared runtime, where the crash starves the very next (e.g. completion) invocation and its
+  // mode/checklist side-effect never lands. Return early on delete.
+  if (!change.after.exists) { return null; }
+
   if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
     return null;
   }
