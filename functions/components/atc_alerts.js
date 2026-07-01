@@ -29,8 +29,16 @@ function resolveWebhook(webhookUrl) {
   return webhookUrl || process.env.ATC_PIPELINE_SLACK_WEBHOOK || DEFAULT_WEBHOOK;
 }
 
+// When ATC_ALERTS_SILENT is truthy, suppress the Slack POST (alerts still go to
+// Cloud Logging via alertAtc's logger.* mirror). Used by offline backfills/replays
+// so a one-off run can't flood the pipeline channel. Unset in the cloud => no-op.
+function alertsSilenced() {
+  return /^(1|true|yes|on)$/i.test(process.env.ATC_ALERTS_SILENT || "");
+}
+
 // Raw poster. `body` is `{text, attempts?}` or a string.
 async function notifySlack(webhookUrl, body) {
+  if (alertsSilenced()) return;
   const url = resolveWebhook(webhookUrl);
   if (!url) return;
   try {

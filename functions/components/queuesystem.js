@@ -4,6 +4,7 @@ const { getFirestore } = require("firebase-admin/firestore");
 const commonService = require('./service');
 const { alertAtc } = require('./atc_alerts');
 const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
+const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -3525,6 +3526,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
         stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
       });
+      await recordDropoff("S0", "no_form_submission", { profileid, queueTokenId, stage: currentStage });
       return console.log(`no form doc for stage ${currentStage}`);
     }
     const formDoc = snap.docs[0];
@@ -3556,6 +3558,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
       });
+      await recordDropoff("S0", "no_studio_session", { profileid, queueTokenId, stage: currentStage });
       return console.log(`no queue stage log for ${currentStage}`);
     }
     const logDoc = logSnap.docs[0];
@@ -3564,6 +3567,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
       });
+      await recordDropoff("S0", "no_liveassignment", { profileid, queueTokenId, stage: currentStage });
       return console.log("no live assignment id");
     }
 
@@ -3574,6 +3578,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
       });
+      await recordDropoff("S0", "no_zoom_meeting", { profileid, queueTokenId, stage: currentStage });
       return console.log("no zoom meeting id");
     }
 
@@ -3585,12 +3590,14 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
       });
+      await recordDropoff("S0", "transcript_fetch_failed", { profileid, queueTokenId, stage: currentStage });
       return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
     }
     if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
       await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
       });
+      await recordDropoff("S0", "empty_transcript", { profileid, queueTokenId, stage: currentStage });
       return console.log(`empty transcript for ${currentStage}`);
     }
     data = {
@@ -3601,6 +3608,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       zoom_duration: transcript.duration,
     };
   } else {
+    await recordDropoff("S0", "unknown_stage_type", { profileid, queueTokenId, stage: currentStage });
     return console.log(`unknown stage type ${stageCfg.type}`);
   }
 

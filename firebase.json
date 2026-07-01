@@ -16,7 +16,9 @@
         "docs",
         "jest.integration.config.js",
         "firebase.throwaway.json",
-        "workflow.json"
+        "workflow.json",
+        "Dockerfile",
+        ".dockerignore"
       ]
     }
   ],

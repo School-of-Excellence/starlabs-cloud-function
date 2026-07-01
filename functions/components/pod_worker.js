@@ -322,7 +322,7 @@ async function terminateAndReset(cfg, podid, collectionName, finalState = STATES
 // ── atcPodLifecycle — the state-machine clock ────────────────────────────────
 // every 2 min: IDLE→launch gate (batched), LOADING→ready poll (+ load timeout).
 exports.atcPodLifecycle = onSchedule(
-  { schedule: "every 2 minutes", secrets: [sharedSecret] },
+  { schedule: "every 10 minutes", secrets: [sharedSecret] },
   async () => {
     const cfg = await loadWorker();
     const collectionName = cfg.FIREBASE_COLLECTION_NAME || DEFAULT_COLLECTION;
