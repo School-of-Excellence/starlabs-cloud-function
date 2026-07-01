@@ -28,6 +28,10 @@ const queue_atc_generation = require("./components/queue_atc_generation")
 const podWorker = require("./components/pod_worker")
 const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
+//voiptestcalls
+exports.testVoipCall = appointmentSystem.testVoipCall;
+exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
+
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
 exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification
@@ -77,7 +81,7 @@ exports.ticketMsgNotification = clientIssueSystem.ticketMsgNotification // c - '
 exports.slackCustomerSupport = clientIssueSystem.slackCustomerSupport // w - "clientissue/{id}"
 exports.ticketCreated = clientIssueSystem.ticketCreated // c - "clientissue/{id}"
 exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/{id}"
-exports.autoCloseTickets = clientIssueSystem.autoCloseTickets 
+exports.autoCloseTickets = clientIssueSystem.autoCloseTickets
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
 
 // Negligence rating + CS coaching functions were EXTRACTED to the customer-support
@@ -115,7 +119,7 @@ exports.uploadContentToPublitio = contentSystem.uploadContentToPublitio
 exports.totalparticipant_tierupdate = eiflixTierSystem.totalparticipant_tierupdate // w - "/tier access config/{docid}"
 
 // exports & alerts
-if(commonService.production){
+if (commonService.production) {
   exports.scheduledFirestoreExport = exportsAndAlerts.scheduledFirestoreExport // schedule "every 12 hours"
 }
 exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublished "Launch-Your-Legacy-budget-alert-slack"

@@ -46,6 +46,8 @@ const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 const postmark = require("postmark");
 const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
 const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
+const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
+const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
 const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
 
 // Send Push Notification
@@ -1708,6 +1710,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },
@@ -1722,6 +1726,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
       const serversMap = {
         POSTMARK_STARLABS_V1,
         POSTMARK_STARLABS_V2,
+        POSTMARK_STARLABS_V3,
+        POSTMARK_STARLABS_V4,
         POSTMARK_STARLABS_TEST,
       };
  
@@ -1739,6 +1745,8 @@ exports.sendBatchEmail = onRequest({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },async (req, res) => {
@@ -1749,6 +1757,8 @@ exports.sendBatchEmail = onRequest({
   const serversMap = {
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   };
 
@@ -2427,6 +2437,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   secrets: [
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   ]
 },async (change) => {
@@ -2437,6 +2449,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   const serversMap = {
     POSTMARK_STARLABS_V1,
     POSTMARK_STARLABS_V2,
+    POSTMARK_STARLABS_V3,
+    POSTMARK_STARLABS_V4,
     POSTMARK_STARLABS_TEST
   };
 
