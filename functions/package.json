@@ -22,7 +22,8 @@
     "atc:backfill-missing-jobs": "node scripts/atc-backfill-missing-jobs.js",
     "atc:test-harness": "node scripts/atc-test-harness.js",
     "atc:monitor": "node scripts/atc-live-monitor.js",
-    "atc:archive-onhold": "node scripts/archive-onhold-docs.js"
+    "atc:archive-onhold": "node scripts/archive-onhold-docs.js",
+    "atc:pairing-audit": "node scripts/atc-pairing-crossqueue-audit.js"
   },
   "engines": {
     "node": "22"

@@ -444,28 +444,28 @@ exports.onQueueStageChange = onDocumentWritten({
     }
 
     // creating queue_atc_generation document where atc is created from ai
-    try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
-        await processStage({
-          queueData,
-          queueRef: queueDocSnap.ref,
-          tokenData: afterData,
-          queueTokenId,
-          currentStage: previousStage,
-        });
-      }
-    }catch (error){
-      console.log("queue_atc_genration collection creation error",error.toString())
-      await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
-        stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
-      }).catch(() => {});
-    }
+    // try{
+    //   const previousStage = await resolvePreviousStage({
+    //     queueData,
+    //     tokenData: afterData,
+    //     currentStage: afterData["currentstage"],
+    //   });
+    //   if (!previousStage){console.log("no previous stage resolved")}
+    //   else{
+    //     await processStage({
+    //       queueData,
+    //       queueRef: queueDocSnap.ref,
+    //       tokenData: afterData,
+    //       queueTokenId,
+    //       currentStage: previousStage,
+    //     });
+    //   }
+    // }catch (error){
+    //   console.log("queue_atc_genration collection creation error",error.toString())
+    //   await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+    //     stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+    //   }).catch(() => {});
+    // }
   }
 
   // Send Wati Update
