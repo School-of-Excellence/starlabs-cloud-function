@@ -1,4 +1,14 @@
 const admin = require('firebase-admin');
+// Import FieldValue from the modular `firebase-admin/firestore` subpath rather than the
+// `admin.firestore.FieldValue` namespace. Under the Firebase Functions emulator, firebase-tools
+// stubs the top-level `firebase-admin` module and returns `admin.firestore` via `value.bind(target)`
+// (functionsEmulatorRuntime.js Proxied.getOriginal). Because `admin.firestore` has no prototype,
+// bind() produces a fresh function that DROPS the static namespace members — so
+// `admin.firestore.FieldValue` is `undefined` in the emulator and `.serverTimestamp()` throws,
+// killing the trigger before it writes its mode. The subpath module is not proxied, so its
+// `FieldValue` resolves normally; it is the identical class in production. (Mirrors service.js,
+// which already imports `{ Timestamp }` from this subpath.)
+const { FieldValue } = require('firebase-admin/firestore');
 const commonService = require('./service');
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -56,14 +66,14 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
       var initiatedDate = (afterData["statusdate"] || {})["initiated"]
       if([null, undefined].includes(initiatedDate)){
         change.after.ref.update({
-          "statusdate.initiated": admin.firestore.FieldValue.serverTimestamp(),
+          "statusdate.initiated": FieldValue.serverTimestamp(),
         })
       }
       await commonService.updateParticipantTouchPoint({
         label: `${productData["product"]} Initiated`,
         notes: "",
         touchpoint: "Product Initiated",
-        touchpointdate: initiatedDate ? initiatedDate.toDate() : admin.firestore.FieldValue.serverTimestamp(),
+        touchpointdate: initiatedDate ? initiatedDate.toDate() : FieldValue.serverTimestamp(),
         profileid: afterData["profileid"],
         parentreference: snap.data.after.ref,
         metadata: {
@@ -78,7 +88,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
         mode: "Priority Mode",
         nextmode: "Integration Mode",
         nextmodedate: null,
-        "statusdate.prioritymode": admin.firestore.FieldValue.serverTimestamp()
+        "statusdate.prioritymode": FieldValue.serverTimestamp()
       })
     }
   }
@@ -143,7 +153,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
           nextmode: nextmode,
           nextmodedate: nextmodedate,
         }
-        nextModeData[`statusdate.${mode.replaceAll(" ", "").toLowerCase()}`] = admin.firestore.FieldValue.serverTimestamp()
+        nextModeData[`statusdate.${mode.replaceAll(" ", "").toLowerCase()}`] = FieldValue.serverTimestamp()
         await change.after.ref.update(nextModeData)
       }
       else{
@@ -156,7 +166,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
       label: `${productData["product"]} Completed`,
       notes: "",
       touchpoint: "Product Completed",
-      touchpointdate: completedTimestamp ? completedTimestamp.toDate() : admin.firestore.FieldValue.serverTimestamp(),
+      touchpointdate: completedTimestamp ? completedTimestamp.toDate() : FieldValue.serverTimestamp(),
       profileid: afterData["profileid"],
       parentreference: snap.data.after.ref,
       metadata: {
@@ -174,7 +184,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
     }
     var changedStatusDate = (afterData["statusdate"] || {})[afterData["status"]]
     if(changedStatusDate == null || changedStatusDate == undefined){
-      newModeData[`statusdate.${afterData["status"]}`] = admin.firestore.FieldValue.serverTimestamp()
+      newModeData[`statusdate.${afterData["status"]}`] = FieldValue.serverTimestamp()
     }
     await change.after.ref.update(newModeData)
 
@@ -182,7 +192,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
       label: `${productData["product"]} ${afterData["status"] == "cancelled" ? "Cancelled" : "Shifted"}`,
       notes: "",
       touchpoint: afterData["status"] == "cancelled" ? "Product Cancelled" : "Product Shifted",
-      touchpointdate: changedStatusDate ? changedStatusDate.toDate() : admin.firestore.FieldValue.serverTimestamp(),
+      touchpointdate: changedStatusDate ? changedStatusDate.toDate() : FieldValue.serverTimestamp(),
       profileid: afterData["profileid"],
       parentreference: snap.data.after.ref,
       metadata: {
@@ -276,7 +286,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
       var currentModeDate = (afterData["statusdate"] || {})[afterData["mode"].replaceAll(" ", "").toLowerCase()]
       if(currentModeDate == null || currentModeDate == undefined){
         var newDate = {}
-        newDate[`statusdate.${afterData["mode"].replaceAll(" ", "").toLowerCase()}`] = admin.firestore.FieldValue.serverTimestamp()
+        newDate[`statusdate.${afterData["mode"].replaceAll(" ", "").toLowerCase()}`] = FieldValue.serverTimestamp()
         await change.after.ref.update(newDate)
       }
 
@@ -285,7 +295,7 @@ exports.calculateParticipantMode = onDocumentWritten('/participantsproduct/{id}'
         label: `${productData["product"]}: ${afterData["mode"]}`,
         notes: `Moved from ${beforeData["mode"]}`,
         touchpoint: "Product Mode Update",
-        touchpointdate: currentModeDate ? currentModeDate.toDate() : admin.firestore.FieldValue.serverTimestamp(),
+        touchpointdate: currentModeDate ? currentModeDate.toDate() : FieldValue.serverTimestamp(),
         profileid: afterData["profileid"],
         parentreference: snap.data.after.ref,
         metadata: {
