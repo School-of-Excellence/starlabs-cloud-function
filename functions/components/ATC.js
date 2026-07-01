@@ -10,6 +10,7 @@ const fs = require('fs');
 const { onDocumentWritten, onDocumentUpdated } = require("firebase-functions/v2/firestore")
 //components imports
 const commonService = require('./service');
+const { alertAtc } = require('./atc_alerts');
 //slack
 var IncomingWebhook = require('@slack/client').IncomingWebhook;
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
@@ -524,6 +525,11 @@ exports.onAtcAlphaCreate = onDocumentCreated(
   }
 );
 
+// Exposed (not a deployed function — index.js does not re-export it) so the
+// generation side (queue_atc_generation.js) can trigger rubrics scoring when
+// the AI pipeline finishes *after* a specialist ATC already exists in atc_alpha.
+exports.processAtcAlphaDoc = processAtcAlphaDoc;
+
 // ---------- Shared processor ----------
 async function processAtcAlphaDoc(atcRef, atc) {
   const queueid = atc.queueid;
@@ -585,9 +591,14 @@ async function processAtcAlphaDoc(atcRef, atc) {
   // 5. Locate the existing queue_atc_generation doc whose output holds the
   //    generated ATC content for this profile/queue/stage.
   const profileid = atc.profileid;
+  // queueSnap.ref is a default-DB reference, but queue_atc_generation docs store
+  // `queueref` as a firestore-atc reference (adminATC.doc(...)). A cross-database
+  // reference never matches in a query, so convert to the firestore-atc ref —
+  // same expression used when writing the rubrics doc below.
+  const queueRefATC = adminATC.doc(queueSnap.ref.path);
   const genSnap = await adminATC.collection("queue_atc_generation")
     .where("profileid", "==", profileid)
-    .where("queueref", "==", queueSnap.ref)
+    .where("queueref", "==", queueRefATC)
     .where("stage", "==", stagename)
     .get();
 
@@ -600,12 +611,20 @@ async function processAtcAlphaDoc(atcRef, atc) {
     }
   }
   if (!sourceGenDoc) {
+    await alertAtc("warn", `No queue_atc_generation with output for stage "${stagename}" — cannot create rubrics scoring.`, {
+      stage: "Stage 3 rubrics",
+      extra: { atcId: atcRef.id, queueid, stagename, profileid },
+    });
     return console.log(`no queue_atc_generation with output for stage ${stagename}`);
   }
   const sourceGenData = sourceGenDoc.data();
   const queueTokenId = sourceGenData.queue_token_id;
   const generatedAtcContent = sourceGenData.output || "";
   if (!generatedAtcContent || (typeof generatedAtcContent === "string" && generatedAtcContent.trim() === "")) {
+    await alertAtc("warn", `Generated ATC content empty for stage "${stagename}" — skipping rubrics scoring.`, {
+      stage: "Stage 3 rubrics",
+      extra: { atcId: atcRef.id, queueid, stagename, profileid },
+    });
     return console.log(`generatedAtcContent empty for stage ${stagename}`);
   }
 
@@ -670,12 +689,22 @@ async function processAtcAlphaDoc(atcRef, atc) {
     }
   }
   if (!checkpointReport) {
+    await alertAtc("warn", `No checkpoint report for sourceGenDoc ${sourceGenDoc.id} — rubrics scoring proceeding with empty CHECKPOINT_REPORT.`, {
+      stage: "Stage 3 rubrics",
+      extra: { atcId: atcRef.id, stagename, profileid },
+    });
     console.log(`no checkpoint report found for sourceGenDoc ${sourceGenDoc.id} — proceeding with empty CHECKPOINT_REPORT`);
   }
 
   // 8. Read rubrics prompt config (for systemprompt + podtemplateid).
   const promptSnap = await adminDefault.collection("classify").doc(RUBRICS_PROMPT_DOCID).get();
-  if (!promptSnap.exists) return console.log(`classify/${RUBRICS_PROMPT_DOCID} missing`);
+  if (!promptSnap.exists) {
+    await alertAtc("critical", `classify/${RUBRICS_PROMPT_DOCID} config doc missing — rubrics scoring cannot run.`, {
+      stage: "Stage 3 rubrics",
+      extra: { atcId: atcRef.id, stagename },
+    });
+    return console.log(`classify/${RUBRICS_PROMPT_DOCID} missing`);
+  }
   const promptCfg = promptSnap.data();
 
   // 9. Compose the analysis prompt using prompt_3_analysis.md.
@@ -699,10 +728,30 @@ async function processAtcAlphaDoc(atcRef, atc) {
 
   // 8. Create the new queue_atc_generation doc for rubrics scoring.
   const rubricsStageName = `rubrics_scoring_${stagename}`;
+
+  // Dedup guard: atc_alpha writes re-fire this processor (validateATCtoAlpha
+  // copies atc_to_validate → atc_alpha on every validation). Don't create a
+  // duplicate rubrics doc if one already exists for this token/stage.
+  const existingRubrics = await adminATC.collection("queue_atc_generation")
+    .where("queueref", "==", queueRefATC)
+    .where("profileid", "==", profileid)
+    .where("queue_token_id", "==", queueTokenId)
+    .where("stage", "==", rubricsStageName)
+    .where("type", "==", RUBRICS_TYPE)
+    .limit(1)
+    .get();
+  if (!existingRubrics.empty) {
+    await alertAtc("info", `Rubrics scoring doc already exists for "${rubricsStageName}" — skipping duplicate.`, {
+      stage: "Stage 3 rubrics",
+      extra: { atcId: atcRef.id, existingDocId: existingRubrics.docs[0].id, profileid, queueTokenId },
+    });
+    return console.log(`rubrics scoring already exists for ${rubricsStageName} — skipping (existing ${existingRubrics.docs[0].id})`);
+  }
+
   const docid = adminATC.collection("queue_atc_generation").doc().id;
   const payload = {
     docid: docid,
-    queueref: adminATC.doc(queueSnap.ref.path),
+    queueref: queueRefATC,
     profileid: profileid,
     queue_token_id: queueTokenId,
     stage: rubricsStageName,

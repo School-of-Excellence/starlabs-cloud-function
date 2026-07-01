@@ -8,6 +8,8 @@ const fs = require('fs');
 //components imports
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
+const { alertAtc } = require("./atc_alerts");
+const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 
 const CLASSIFY_PROMPT_DOCID = "atcprompts";
 const RUN_JOBREQUEST_URL = "https://us-central1-fir-sample-aae4a.cloudfunctions.net/run_jobrequest";
@@ -58,8 +60,64 @@ exports.onQueueAtcGenerationUpdate = onDocumentUpdated(
     ) {
       await extractAndSaveOverallVerdict(change.after.id, after);
     }
+
+    // --- Vice-versa rubrics trigger ---
+    // The AI pipeline (gen + checkpoint) and the specialist ATC (atc_alpha) can
+    // finish in EITHER order. onAtcAlphaCreate covers "atc_alpha finishes last".
+    // This covers "AI pipeline finishes last": when the checkpoint report
+    // completes, pull any atc_alpha already waiting for that stage and create
+    // rubrics. The rubrics dedup guard makes double-firing safe.
+    if (
+      after.type === "checkpoint report" &&
+      before["status"] !== after["status"] &&
+      after["status"] === "completed"
+    ) {
+      await maybeTriggerRubricsFromGeneration(after);
+    }
   }
 );
+
+// When the AI pipeline finishes, look for a specialist ATC already submitted for
+// the same stage and kick off rubrics scoring for it (reusing ATC.js's
+// processAtcAlphaDoc, which re-validates and dedups internally).
+async function maybeTriggerRubricsFromGeneration(checkpointDoc) {
+  try {
+    const sourceRef = checkpointDoc.sourceref;
+    if (!sourceRef || typeof sourceRef.get !== "function") {
+      return console.log("vice-versa rubrics: checkpoint has no resolvable sourceref");
+    }
+    const genSnap = await sourceRef.get();
+    if (!genSnap.exists) return console.log("vice-versa rubrics: source gen doc missing");
+    const gen = genSnap.data();
+
+    const rawStage = gen.stage;
+    const profileid = gen.profileid;
+    const queueid = gen.queueref && gen.queueref.id ? gen.queueref.id : null;
+    if (!rawStage || !profileid || !queueid) {
+      return console.log("vice-versa rubrics: gen doc missing stage/profileid/queueid");
+    }
+
+    // Any specialist ATC already waiting in atc_alpha for this stage?
+    const alphaSnap = await adminATC.collection("atc_alpha")
+      .where("queueid", "==", queueid)
+      .where("profileid", "==", profileid)
+      .where("stagename", "==", rawStage)
+      .get();
+    if (alphaSnap.empty) {
+      return console.log(`vice-versa rubrics: no atc_alpha waiting for stage "${rawStage}" — will fire on atc_alpha create`);
+    }
+
+    const { processAtcAlphaDoc } = require("./ATC");
+    for (const alphaDoc of alphaSnap.docs) {
+      await processAtcAlphaDoc(alphaDoc.ref, alphaDoc.data());
+    }
+  } catch (err) {
+    await alertAtc("warn", `Vice-versa rubrics trigger failed: ${err.message}`, {
+      stage: "Stage 3 rubrics",
+      extra: { checkpointDocId: checkpointDoc.docid, stack: err.stack },
+    });
+  }
+}
 
 // ---------- Shared processor ----------
 // async function processAtcGenerationDoc(docid, docData) {
@@ -126,7 +184,10 @@ exports.onQueueAtcGenerationUpdate = onDocumentUpdated(
 //   await callRunJobRequest({ docid, promptCfg });
 // }
 async function processAtcGenerationDoc(docid, docData) {
-  if (!docData.generateatc) return console.log(`generateatc=false, skipping ${docid}`);
+  if (!docData.generateatc) {
+    await recordDropoff("S1", "generateatc_false", { docid });
+    return console.log(`generateatc=false, skipping ${docid}`);
+  }
   if (!['form','zoom'].includes(docData.type)) {
     return console.log(`type=${docData.type}, handled by rubrics pipeline — skipping ${docid}`);
   }
@@ -135,7 +196,13 @@ async function processAtcGenerationDoc(docid, docData) {
 
   // 1. Read prompt config from classify (written by update_classify_config.js).
   const promptSnap = await adminDefault.collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
-  if (!promptSnap.exists) return console.log("classify/atcprompts missing");
+  if (!promptSnap.exists) {
+    await recordDropoff("S1", "atcprompts_missing", { docid });
+    await alertAtc("critical", "classify/atcprompts config doc missing — ATC generation prompt cannot be built.", {
+      stage: "Stage 1 generate", extra: { docid },
+    });
+    return console.log("classify/atcprompts missing");
+  }
   const promptCfg = promptSnap.data();
 
   // 2. Find sibling docs for the same participant/token/queue and pick the
@@ -163,7 +230,14 @@ async function processAtcGenerationDoc(docid, docData) {
     if (!pd) { missing.push(stage); continue; }
     allDocs.push(pd);
   }
-  if (missing.length) console.log(`${docid} missing pairing stages ${JSON.stringify(missing)} — proceeding with available data only`);
+  if (missing.length) {
+    console.log(`${docid} missing pairing stages ${JSON.stringify(missing)} — proceeding with available data only`);
+    if (allDocs.length === 1 && pairingstages.length) {
+      await alertAtc("warn", `All pairing stages missing for ${docid} — ATC generated from own data only.`, {
+        stage: "Stage 1 generate", extra: { docid, missing, pairingstages },
+      });
+    }
+  }
 
   const formDocs = allDocs.filter((d) => d.type === "form");
   const zoomDocs = allDocs.filter((d) => d.type === "zoom");
@@ -216,12 +290,20 @@ async function processAtcGenerationDoc(docid, docData) {
 async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData) {
   const atcToVerify = triggeredDocData.output;
   if (!atcToVerify || (typeof atcToVerify === "string" && atcToVerify.trim() === "")) {
+    await alertAtc("warn", `Checkpoint: source doc ${triggeredDocId} has no output to verify — skipping.`, {
+      stage: "Stage 2 checkpoint", extra: { sourceDocId: triggeredDocId },
+    });
     return console.log(`checkpoint: triggered doc ${triggeredDocId} has no output — skipping`);
   }
 
   // 1. Read prompt config from classify (same source as the generator).
   const promptSnap = await adminDefault.collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
-  if (!promptSnap.exists) return console.log("classify/atcprompts missing");
+  if (!promptSnap.exists) {
+    await alertAtc("critical", "classify/atcprompts config doc missing — checkpoint verification cannot run.", {
+      stage: "Stage 2 checkpoint", extra: { sourceDocId: triggeredDocId },
+    });
+    return console.log("classify/atcprompts missing");
+  }
   const promptCfg = promptSnap.data();
 
   // 2. Find sibling docs for the same participant/token/queue and pick the
@@ -286,6 +368,23 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
   const prompt = `${CHECKPOINT_PROMPT}\n\n${participantBlock}`;
 
   // 5. Create a new queue_atc_generation doc for the checkpoint report.
+  // Dedup guard: the update trigger can re-fire (any write that keeps
+  // status=completed & checkpoint=true). The checkpoint report is 1:1 with its
+  // source gen doc, so key on sourceref + type and skip if it already exists.
+  const sourceGenRef = adminATC.collection("queue_atc_generation").doc(triggeredDocId);
+  const existingCheckpoint = await adminATC.collection("queue_atc_generation")
+    .where("sourceref", "==", sourceGenRef)
+    .where("type", "==", "checkpoint report")
+    .limit(1)
+    .get();
+  if (!existingCheckpoint.empty) {
+    await alertAtc("info", `Checkpoint report already exists for source ${triggeredDocId} — skipping duplicate.`, {
+      stage: "Stage 2 checkpoint",
+      extra: { sourceDocId: triggeredDocId, existingDocId: existingCheckpoint.docs[0].id },
+    });
+    return console.log(`checkpoint report already exists for source ${triggeredDocId} — skipping (existing ${existingCheckpoint.docs[0].id})`);
+  }
+
   const newDocId = adminATC.collection("queue_atc_generation").doc().id;
   const checkpointStage = `${triggeredDocData.stage} checkpoint report`;
   const payload = {
@@ -297,7 +396,7 @@ async function processCheckpointVerificationDoc(triggeredDocId, triggeredDocData
     generateatc: true,
     type: 'checkpoint report',
     pairingstages: pairingstages,
-    sourceref: adminATC.collection("queue_atc_generation").doc(triggeredDocId),
+    sourceref: sourceGenRef,
     data:atcToVerify,
     prompt: prompt,
     systemprompt: promptCfg.systemprompt,
@@ -342,43 +441,16 @@ async function extractAndSaveOverallVerdict(docId, docData) {
   );
   console.log(`rubrics verdict: doc ${docId} — saved overall_verdict="${verdict}"`);
 }
+// Exposed for integration tests (not deployed functions). The onDocument
+// triggers drive these internally; tests call them directly to exercise the
+// Stage-1/Stage-2 and vice-versa-rubrics logic deterministically.
+exports.processAtcGenerationDoc = processAtcGenerationDoc;
+exports.processCheckpointVerificationDoc = processCheckpointVerificationDoc;
+exports.maybeTriggerRubricsFromGeneration = maybeTriggerRubricsFromGeneration;
+exports.extractAndSaveOverallVerdict = extractAndSaveOverallVerdict;
+
 // ---------- Extract assistant final JSON from raw output ----------
-function extractAssistantFinalJson(raw) {
-  if (typeof raw !== 'string') return raw;
-  const marker = /assistantfinal/i;
-  const m = raw.match(marker);
-  const tail = m ? raw.slice(m.index + m[0].length) : raw;
-
-  const start = tail.indexOf('{');
-  if (start === -1) return raw;
-
-  let depth = 0;
-  let inStr = false;
-  let escape = false;
-  for (let i = start; i < tail.length; i++) {
-    const ch = tail[i];
-    if (escape) { escape = false; continue; }
-    if (inStr) {
-      if (ch === '\\') escape = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') { inStr = true; continue; }
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        const jsonStr = tail.slice(start, i + 1);
-        try {
-          return JSON.parse(jsonStr);
-        } catch {
-          return jsonStr;
-        }
-      }
-    }
-  }
-  return raw;
-}
+const { extractAssistantFinalJson } = require("./atc_helpers");
 // ---------- run_jobrequest invocation ----------
 async function callRunJobRequest({ docid, promptCfg }) {
   const podtemplateid = promptCfg.podtemplateid;

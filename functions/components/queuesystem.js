@@ -1,6 +1,10 @@
 const admin = require('firebase-admin');
+const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
+const { alertAtc } = require('./atc_alerts');
+const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
+const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -28,7 +32,7 @@ const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
 
-exports.onQueueStageChange = onDocumentWritten( {
+exports.onQueueStageChange = onDocumentWritten({
     document: "queue_token/{id}",
     secrets: [zoomAccountId, zoomClientId, zoomClientSecret],
   }, async (change) =>{
@@ -55,160 +59,252 @@ exports.onQueueStageChange = onDocumentWritten( {
     });
   }
 
+  // get slot title if variation id exists
+  let getSlotTitle = () => null;
+
+  if (afterData['variationid']) {
+    const queuePlanningSnap = await admin.firestore()
+      .collection('queue planning')
+      .where('queueref', '==', afterData['queueref'])
+      .where('variationlist', 'array-contains', afterData['variationid'])
+      .get();
+
+    const planDoc = queuePlanningSnap.docs[0];
+
+    if (planDoc) {
+      const planning = planDoc.data()['planning'] || [];
+      
+      const slots = planning.flatMap(plan =>
+        (plan['segments'] || []).flatMap(segment =>
+          (segment['slots'] || []).map(slot => ({
+            ...slot,
+            segmentid: segment['segmentid']  
+          }))
+        )
+      );
+
+      getSlotTitle = (slotValue, stageName) => {
+        const matchedSlot = slots.find(slot =>
+          slot['segmentid'] === slotValue['segmentid'] &&
+          slot['stagename'] === stageName &&
+          slot['startdate']?.seconds === slotValue['startdate']?.seconds &&
+          slot['enddate']?.seconds === slotValue['enddate']?.seconds
+        );
+        return matchedSlot?.['title'];
+      };
+    }
+  }
+
   try {
-    let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
-    let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+      let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
+      let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
 
-    const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
-    const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
+      const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
+      const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
 
-    let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+      let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
 
-    // Process added keys
-    for (const key of addedKeys) {
-      const addedValue = afterData['selectedstageslot'][key];
+      // Process added keys
+      for (const key of addedKeys) {
+        const addedValue = afterData['selectedstageslot'][key];
 
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
-      }
-
-      // Only Scope Enhancement and Evolution Prep Orientation slots send a WATI
-      // confirmation — decided by the added slot's stage (key).
-      const isPrepStage = key === 'Evolution Prep Orientation';
-      const isScopeEnhancement = key === 'Scope Enhancement';
-      if (!isPrepStage && !isScopeEnhancement) {
-        console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
-        continue;
-      }
-
-      try {
-        const startDate = addedValue['startdate'];
-        const formattedDate = startDate._seconds
-          ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
-            dateStyle: 'medium',
-            timeStyle: 'short',
-            timeZone: 'Asia/Kolkata'
-          }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
-
-        // const phoneNumber = `${countrycode}${profiledata['number']}`;
-        const phoneNumber = `${profiledata['number']}`;
-
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'date_time_slot', value: formattedDate },
-            ]
-          }
-        };
-
-        // await commonService.sendToWhatsappViaWati(waticontent);
-        
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
-
-        const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : 'se_slot_cofirmation_june_2026';
-
-        var map = {
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-          broadcastname: 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: templateId,
-          type: 'queue',
-          metadata: { ...afterData }
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
         }
 
-        console.log("Added Slot", map);
-        const response = await commonService.createWatiArchiveDocument(map);
-        console.log('WATI ARCHIVE RESPONSE', response);
+        // Only Scope Enhancement and Evolution Prep Orientation slots send a WATI
+        // confirmation — decided by the added slot's stage (key).
+        const isPrepStage = key === 'Evolution Prep Orientation';
+        const isScopeEnhancement = key === 'Scope Enhancement';
+        const isGuidedOrientation = key === 'Guided Pre ATC Orientation';
+        const isDiagnostics = key === 'Diagnostics';
+        const formattedTitle = getSlotTitle(addedValue, key);
 
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
+        try {
+          await commonService.saveNotificationRecord({
+            title: 'Slot Confirmed',
+            message: `✅ Your ${key} slot has been confirmed for ${formattedTitle}`,
+            subtitle: null,
+            date: admin.firestore.FieldValue.serverTimestamp(),
+            landingpage: null,
+            logged: true,
+            profileid: [profileid],
+            sticky: false,
+            notificationtype: 'queue',
+            notificationimage: null,
+            metadata: { ...afterData }
+          });
+          console.log(`Push notification sent for confirmed slot | key: ${key}`);
+        } catch (pushError) {
+          console.error(`Push notification failed for key ${key}:`, pushError.message);
+        }
+
+        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+          console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
+          continue;
+        }
+        try {
+          const startDate = addedValue['startdate'];
+          const formattedDate = startDate._seconds
+            ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+              timeZone: 'Asia/Kolkata'
+            }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', {   dateStyle: 'medium',   timeStyle: 'short',   timeZone: 'Asia/Kolkata' }) : String(startDate);
+
+          // const phoneNumber = `${countrycode}${profiledata['number']}`;
+          const phoneNumber = `${profiledata['number']}`;
+          let waticontent = null;
+
+          if(isDiagnostics) {
+            waticontent = {
+              phonenumber: phoneNumber,
+              body: {
+                parameters: [
+                  { name: 'name', value: profiledata['name'] },
+                  { name: 'date_time_slot_title', value: formattedTitle },
+                ]
+              }
+            };
+          } else {
+            waticontent = {
+              phonenumber: phoneNumber,
+              body: {
+                parameters: [
+                  { name: 'name', value: profiledata['name'] },
+                  { name: 'date_time_slot', value: formattedTitle },
+                ]
+              }
+            };
+          }
+          // await commonService.sendToWhatsappViaWati(waticontent);
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+
+          var map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: templateId,
+            type: 'queue',
+            metadata: { ...afterData }
+          }
+
+          console.log("Added Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
+        }
       }
-    }
 
-    // Process removed keys
-    for (const key of removedKeys) {
-      const removedValue = beforeData['selectedstageslot'][key];
-      try {
-        commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
-      } catch (slackError) {
-        console.error(`Slack notification failed for key ${key}:`, slackError.message);
-      }
+      // Process removed keys
+      for (const key of removedKeys) {
+        const removedValue = beforeData['selectedstageslot'][key];
+        try {
+          commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
+        } catch (slackError) {
+          console.error(`Slack notification failed for key ${key}:`, slackError.message);
+        }
 
-      try {
-        const startDate = removedValue['startdate'];
-        const formattedDate = startDate._seconds
+        try {
+          const startDate = removedValue['startdate'];
+          const formattedDate = startDate._seconds
           ? new Date(startDate._seconds * 1000).toLocaleString('en-IN', {
             dateStyle: 'medium',
             timeStyle: 'short',
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-        const phoneNumber = `${profiledata['number']}`;
+          const formattedTitle = getSlotTitle(removedValue, key);
 
-        const waticontent = {
-          phonenumber: phoneNumber,
-          body: {
-            parameters: [
-              { name: 'name', value: profiledata['name'] },
-              { name: 'date_time_slot', value: formattedDate },
-            ]
+          // push notification for revert slot
+          try {
+            await commonService.saveNotificationRecord({
+              title: 'Slot Reverted',
+              message: `Your ${key} slot has been reverted for ${formattedTitle}`,
+              subtitle: null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: null,
+              logged: true,
+              profileid: [profileid],
+              sticky: false,
+              notificationtype: 'queue',
+              notificationimage: null,
+              metadata: { ...afterData }
+            });
+            console.log(`Push notification sent for reverted slot | key: ${key}`);
+          } catch (pushError) {
+            console.error(`Push notification failed for key ${key}:`, pushError.message);
           }
-        };
 
-        // await commonService.sendToWhatsappViaWati(waticontent);
+          const phoneNumber = `${profiledata['number']}`;
 
-        const parameterConfig = waticontent['body']['parameters'].map(param => ({
-          excelColumn: null,
-          fillType: 'static',
-          metadataField: null,
-          name: param.name,
-          staticValue: param.value
-        }));
-        console.log('Triggered Wati Archive Creation');
+          const waticontent = {
+            phonenumber: phoneNumber,
+            body: {
+              parameters: [
+                { name: 'name', value: profiledata['name'] },
+                { name: 'date_time_slot', value: formattedTitle },
+              ]
+            }
+          };
 
-        map = {
-          numbers: [parseInt(waticontent['phonenumber'])],
-          numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-          broadcastname: 'Individual',
-          paramFillMode: 'static',
-          parameterConfig: parameterConfig,
-          params: [],
-          profileid: [profileid],
-          templateid: null,
-          watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
-          type: 'queue',
-          metadata: {...afterData}
+          // await commonService.sendToWhatsappViaWati(waticontent);
+
+          const parameterConfig = waticontent['body']['parameters'].map(param => ({
+            excelColumn: null,
+            fillType: 'static',
+            metadataField: null,
+            name: param.name,
+            staticValue: param.value
+          }));
+          console.log('Triggered Wati Archive Creation');
+
+          map = {
+            numbers: [parseInt(waticontent['phonenumber'])],
+            numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: 'app_slot_revert_automate_app_to_wati_v1',
+            type: 'queue',
+            metadata: {...afterData}
+          }
+
+          console.log("Reverted Slot", map);
+          const response = await commonService.createWatiArchiveDocument(map);
+          console.log('WATI ARCHIVE RESPONSE', response);
+
+          console.log(`WATI sent for key ${key} | Date: ${formattedTitle} | Phone: ${phoneNumber}`);
+
+        } catch (watiError) {
+          console.error(`WATI failed for key ${key}:`, watiError.message);
         }
-
-        console.log("Reverted Slot", map);
-        const response = await commonService.createWatiArchiveDocument(map);
-        console.log('WATI ARCHIVE RESPONSE', response);
-
-        console.log(`WATI sent for key ${key} | Date: ${formattedDate} | Phone: ${phoneNumber}`);
-
-      } catch (watiError) {
-        console.error(`WATI failed for key ${key}:`, watiError.message);
+        console.log('Removed:', key, removedValue);
       }
-      console.log('Removed:', key, removedValue);
-    }
-  } catch (error) {
+    } catch (error) {
     console.log('Error processing slot changes:', error);
   }
 
@@ -348,25 +444,28 @@ exports.onQueueStageChange = onDocumentWritten( {
     }
 
     // creating queue_atc_generation document where atc is created from ai
-    try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
-        await processStage({
-          queueData,
-          queueRef: queueDocSnap.ref,
-          tokenData: afterData,
-          queueTokenId,
-          currentStage: previousStage,
-        });
-      }
-    }catch (error){
-      console.log("queue_atc_genration collection creation error",error.toString())
-    }
+    // try{
+    //   const previousStage = await resolvePreviousStage({
+    //     queueData,
+    //     tokenData: afterData,
+    //     currentStage: afterData["currentstage"],
+    //   });
+    //   if (!previousStage){console.log("no previous stage resolved")}
+    //   else{
+    //     await processStage({
+    //       queueData,
+    //       queueRef: queueDocSnap.ref,
+    //       tokenData: afterData,
+    //       queueTokenId,
+    //       currentStage: previousStage,
+    //     });
+    //   }
+    // }catch (error){
+    //   console.log("queue_atc_genration collection creation error",error.toString())
+    //   await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+    //     stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+    //   }).catch(() => {});
+    // }
   }
 
   // Send Wati Update
@@ -1923,7 +2022,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
 
   // Migrate AEL Form
   var aelFormID = ["KqHfM292QPXRLpv9RQNi", "xGhIkwZfSjhUC1sv1tlw"]
-  if(aelFormID.includes(data["formid"]) && data["queueref"]){
+  if(aelFormID.includes(data["formid"])){
     var formData = data;
     const formDoc = snapshot.data.ref
 
@@ -1948,7 +2047,7 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
       "crossovermetric": {},
       "reallifesituation": null,
       // "rsvpid": mapRSVP[data["profile_id"]]["docid"]
-      "queueid": data["queueref"].id
+      "queueid": data["queueref"]?.id ?? null
     }
     var crossoverid = admin.firestore().collection("interim crossover").doc().id;
     var crossoverdata = {
@@ -1978,10 +2077,11 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
     var batch = admin.firestore().batch()
     batch.set(admin.firestore().collection("participant AEL").doc(aelid), aeldata)
     batch.set(admin.firestore().collection("interim crossover").doc(crossoverid), crossoverdata)
-    batch.update(formDoc, {
-      aelid: aelid
+    await batch.commit().then(async() =>{
+      await formDoc.update({
+        aelid: aelid
+      })
     })
-    await batch.commit()
   }
 })
 
@@ -3407,14 +3507,13 @@ async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
       stages = variationSnap.data()["stages"] || stages;
     }
   }
-  const idx = stages.findIndex((s) => s === currentStage);
-  if (idx <= 0) return null;
-  return stages[idx - 1];
+  return pickPreviousStage(stages, currentStage);
 }
 
 // ---------- Shared stage processor ----------
 async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
   const adminATC = getFirestore("firestore-atc");
+  const adminForms = getFirestore("firestore-forms");
   const atcrequiredstages = queueData["atcrequiredstages"] || [];
   const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
   if (!stageCfg) return;
@@ -3426,14 +3525,22 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   if (stageCfg.type === "form") {
     const formref = queueData["stageproperty"][currentStage]["actionresource"];
     if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    const snap = await adminATC.collection("formsByClient")
+    // formsByClient lives in the firestore-forms database (its queueref is stored
+    // as a firestore-forms ref), so query + match there — not firestore-atc.
+    const snap = await adminForms.collection("formsByClient")
       .where("profileid", "==", profileid)
       .where("formid", "==", formref.id)
-      .where("queueref", "==", adminATC.doc(queueRef.path))
+      .where("queueref", "==", adminForms.doc(queueRef.path))
       .orderBy("date", "desc")
       .get();
 
-    if (snap.docs.length === 0) return console.log(`no form doc for stage ${currentStage}`);
+    if (snap.docs.length === 0) {
+      await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
+      });
+      await recordDropoff("S0", "no_form_submission", { profileid, queueTokenId, stage: currentStage });
+      return console.log(`no form doc for stage ${currentStage}`);
+    }
     const formDoc = snap.docs[0];
     sourceref = formDoc.ref;
 
@@ -3459,18 +3566,52 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       .orderBy("logdate", "desc")
       .get();
 
-    if (logSnap.docs.length === 0) return console.log(`no queue stage log for ${currentStage}`);
+    if (logSnap.docs.length === 0) {
+      await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      await recordDropoff("S0", "no_studio_session", { profileid, queueTokenId, stage: currentStage });
+      return console.log(`no queue stage log for ${currentStage}`);
+    }
     const logDoc = logSnap.docs[0];
     const logData = logDoc.data();
-    if (!logData["liveassignmentid"]) return console.log("no live assignment id");
+    if (!logData["liveassignmentid"]) {
+      await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
+      });
+      await recordDropoff("S0", "no_liveassignment", { profileid, queueTokenId, stage: currentStage });
+      return console.log("no live assignment id");
+    }
 
     const liveSnap = await admin.firestore().collection("live assignment")
       .doc(logData["liveassignmentid"]).get();
     const liveData = liveSnap.data();
-    if (!liveData || !liveData["zoomdata"]?.["id"]) return console.log("no zoom meeting id");
+    if (!liveData || !liveData["zoomdata"]?.["id"]) {
+      await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
+      });
+      await recordDropoff("S0", "no_zoom_meeting", { profileid, queueTokenId, stage: currentStage });
+      return console.log("no zoom meeting id");
+    }
 
     sourceref = liveSnap.ref;
-    const transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    let transcript;
+    try {
+      transcript = await getTranscript(liveData["zoomdata"]["id"]);
+    } catch (err) {
+      await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      await recordDropoff("S0", "transcript_fetch_failed", { profileid, queueTokenId, stage: currentStage });
+      return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
+    }
+    if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
+      await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
+        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
+      });
+      await recordDropoff("S0", "empty_transcript", { profileid, queueTokenId, stage: currentStage });
+      return console.log(`empty transcript for ${currentStage}`);
+    }
     data = {
       transcript_text: transcript.transcript_text,
       transcript_raw: transcript.transcript_raw,
@@ -3479,10 +3620,10 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       zoom_duration: transcript.duration,
     };
   } else {
+    await recordDropoff("S0", "unknown_stage_type", { profileid, queueTokenId, stage: currentStage });
     return console.log(`unknown stage type ${stageCfg.type}`);
   }
 
-  const { getFirestore } = require("firebase-admin/firestore");
   const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
@@ -3516,21 +3657,13 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
   console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
 }
 
-// ---------- Helpers ----------
-async function buildUpLifeAspirationReport(data, formname) {
-  const formdata = [];
-  data.forEach((item) => {
-    const q = item.questions.trim();
-    if (typeof item.answer === "string") {
-      formdata.push(`${q}: ${item.answer.trim()}`);
-    }
-    if (Array.isArray(item.answer) && item.answer.length > 0) {
-      formdata.push(`${q}: ${JSON.stringify(item.answer)}`);
-    }
-  });
-  return `What did the person come for in the ${formname}? : \n\n${JSON.stringify(formdata)}`;
-}
+// Exposed for integration tests (not deployed functions). onQueueStageChange
+// drives these internally; tests call them directly to exercise the Stage-0
+// ATC logic without the surrounding WATI/Zoom/Slack side effects.
+exports.processStage = processStage;
+exports.resolvePreviousStage = resolvePreviousStage;
 
+// ---------- Helpers ----------
 async function getTranscript(meetingId) {
   if (!meetingId) throw new Error("meetingId is required");
   const accountId =  zoomAccountId.value();

@@ -4,3 +4,18 @@ node_modules/
 # emulator). NEVER commit (the prod equivalent would hold real credentials).
 .secret.local
 *.local
+
+# Local development & testing — NOT deployed to prod
+test/
+docs/
+jest.integration.config.js
+firebase.throwaway.json
+workflow.json
+scripts/
+
+# Claude Code local tooling — not part of the codebase
+CLAUDE.md
+.claude/
+
+# on-hold doc backups (prod data dumps — do not commit)
+atc-onhold-backup-*/
