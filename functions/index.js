@@ -28,10 +28,6 @@ const queue_atc_generation = require("./components/queue_atc_generation")
 const podWorker = require("./components/pod_worker")
 const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
-//voiptestcalls
-exports.testVoipCall = appointmentSystem.testVoipCall;
-exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
-
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
 exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification
