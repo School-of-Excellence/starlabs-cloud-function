@@ -24,6 +24,7 @@ const queueSystem = require("./components/queuesystem");
 const bigAssignmentSystem = require("./components/big-assignment");
 const participantModeSystem = require("./components/participantmode");
 const participantMetaDataSystem = require("./components/participantmetadata");
+const wishlistSystem = require("./components/wishlist"); // App-Engagement: evolutionwishlistlog onWrite (modes PM-09). Module-load safe (no ATC bind); postmark client is construct-only.
 
 // --- queue system (11) ---
 exports.onQueueStageChange = queueSystem.onQueueStageChange;                                   // w - "queue_token/{id}"
@@ -48,3 +49,9 @@ exports.calculateParticipantMode = participantModeSystem.calculateParticipantMod
 exports.profiledata_to_participantmetadata = participantMetaDataSystem.profiledata_to_participantmetadata; // w - profile_data
 exports.journey_to_pmd = participantMetaDataSystem.journey_to_pmd;                             // w - "participantjourneyproduct/{docid}"
 exports.productsdata_to_pmd = participantMetaDataSystem.productsdata_to_pmd;                   // w - "participantsproduct/{docid}"
+
+// --- app-engagement wishlist (1) — modes PM-09 (evolutionFamilyWishlistOnWrite) ---
+// onWrite "evolutionwishlistlog/{docid}": on all-contacts-received (status 'sended') → status 'completed'.
+// SAFE in the emulator: the modes suite NEVER writes status 'sent' (seed-modes.js / modes.ts / wishlist-form.spec
+// are designed to avoid it), so the CF's Postmark/WATI send branch is never entered — no external network / 60s hang.
+exports.evolutionFamilyWishlistOnWrite = wishlistSystem.evolutionFamilyWishlistOnWrite;        // w - "evolutionwishlistlog/{docid}"
