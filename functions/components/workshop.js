@@ -445,14 +445,16 @@ async function sendWatiWorkshopMessage({ profileID, profileName, workshopName, w
     'Content-Type': 'application/json',
   };
   const data = {
-    template_name: 'vantage__poin_confirmation_message',
-    broadcast_name: 'Workshop Evergreen',
+    // template_name: 'vantage__poin_confirmation_message',
+    template_name : 'workshop_team_5_variable',
+    broadcast_name: 'WorkshopEvergreen2',
     parameters: [
       { name: 'name', value: profileName || '' },
       { name: 'message', value: workshopName },
       { name: '1', value: message },
       { name: '2', value: workshopurl },
       { name: '3', value: 'https://breakthroughs.app/home' },
+      { name: '4', value: message },
     ]
   };
 
