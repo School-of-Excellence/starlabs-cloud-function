@@ -2,9 +2,10 @@ const admin = require('firebase-admin');
 const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
-const { alertAtc } = require('./atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
-const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
+const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
+const { buildUpLifeAspirationReport, pickPreviousStage } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -443,29 +444,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai
-    // try{
-    //   const previousStage = await resolvePreviousStage({
-    //     queueData,
-    //     tokenData: afterData,
-    //     currentStage: afterData["currentstage"],
-    //   });
-    //   if (!previousStage){console.log("no previous stage resolved")}
-    //   else{
-    //     await processStage({
-    //       queueData,
-    //       queueRef: queueDocSnap.ref,
-    //       tokenData: afterData,
-    //       queueTokenId,
-    //       currentStage: previousStage,
-    //     });
-    //   }
-    // }catch (error){
-    //   console.log("queue_atc_genration collection creation error",error.toString())
-    //   await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
-    //     stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
-    //   }).catch(() => {});
-    // }
+    // creating queue_atc_generation document where atc is created from ai.
+    // Triggered for the stage that JUST completed (the previous stage). processStage
+    // gates internally on that stage's atcrequiredstages entry having generateatc===true.
+    try{
+      const previousStage = await resolvePreviousStage({
+        queueData,
+        tokenData: afterData,
+        currentStage: afterData["currentstage"],
+      });
+      if (!previousStage){console.log("no previous stage resolved")}
+      else{
+        await processStage({
+          queueData,
+          queueRef: queueDocSnap.ref,
+          tokenData: afterData,
+          queueTokenId,
+          currentStage: previousStage,
+        });
+      }
+    }catch (error){
+      console.log("queue_atc_genration collection creation error",error.toString())
+      await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+        stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+      }).catch(() => {});
+    }
   }
 
   // Send Wati Update
@@ -3510,131 +3513,73 @@ async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
   return pickPreviousStage(stages, currentStage);
 }
 
+// Map a resolver own-source failure reason to a telemetry drop-off reason key
+// (se_atc_telemetry recordDropoff / DASHBOARD-DATA-CONTRACT reason set).
+function ownFailureDropoffReason(reason) {
+  const r = String(reason || "");
+  if (r.startsWith("NO_FORM_SUBMISSION") || r.startsWith("NO_ACTIONRESOURCE")) return "no_form_submission";
+  if (r.startsWith("NO_STUDIO_SESSION")) return "no_studio_session";
+  if (r.startsWith("NO_LIVEASSIGNMENT")) return "no_liveassignment";
+  if (r.startsWith("NO_ZOOM_MEETING") || r.startsWith("LIVEASSIGNMENT_NOT_FOUND")) return "no_zoom_meeting";
+  if (r.startsWith("TRANSCRIPT_NOT_YET_CAPTURED")) return "transcript_fetch_failed";
+  return "unknown_stage_type";
+}
+
 // ---------- Shared stage processor ----------
+// Redesigned workflow (see atc_generation_resolver.js + functions/CLAUDE.md):
+//   * gate on the stage's atcrequiredstages entry having generateatc===true
+//   * resolve own + all pairing sources into a stagedata map (level-by-level
+//     across the transferredfrom chain; zoom transcripts read off live assignment)
+//   * OWN source unresolvable  → drop-off, NO doc (nothing to generate from)
+//   * mandatory pairing missing → create a "dataincomplete" doc (button can retry)
+//   * complete                  → create doc with NO status; S1 builds prompt + sets pending
+// Every downstream field the pod claim-loop / dashboard / rollup depends on
+// (camelCase createdAt/type/queue_token_id/queueref/data/sourceref) is preserved;
+// `stagedata` is added.
 async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
   const adminATC = getFirestore("firestore-atc");
   const adminForms = getFirestore("firestore-forms");
+  const defaultDb = admin.firestore();
   const atcrequiredstages = queueData["atcrequiredstages"] || [];
   const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
   if (!stageCfg) return;
 
   const profileid = tokenData["profile_id"];
-  let sourceref = null;
-  let data = null;
 
-  if (stageCfg.type === "form") {
-    const formref = queueData["stageproperty"][currentStage]["actionresource"];
-    if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    // formsByClient lives in the firestore-forms database (its queueref is stored
-    // as a firestore-forms ref), so query + match there — not firestore-atc.
-    const snap = await adminForms.collection("formsByClient")
-      .where("profileid", "==", profileid)
-      .where("formid", "==", formref.id)
-      .where("queueref", "==", adminForms.doc(queueRef.path))
-      .orderBy("date", "desc")
-      .get();
-
-    if (snap.docs.length === 0) {
-      await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
-        stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
-      });
-      await recordDropoff("S0", "no_form_submission", { profileid, queueTokenId, stage: currentStage });
-      return console.log(`no form doc for stage ${currentStage}`);
-    }
-    const formDoc = snap.docs[0];
-    sourceref = formDoc.ref;
-
-    const element = formDoc.data();
-    const formData = [];
-    for (const formelement of element["formarray"] || []) {
-      if (["label", "video", "audio"].includes(formelement["type"])) continue;
-      if (!formelement["value"]) continue;
-      formData.push({
-        questions: formelement["fieldname"],
-        answer: formelement["type"] === "date"
-          ? new Date(formelement["value"].toDate()).toISOString().substring(0, 10)
-          : formelement["value"],
-      });
-    }
-    data = await buildUpLifeAspirationReport(formData, element["formname"]);
-  } else if (stageCfg.type === "zoom") {
-    const logSnap = await admin.firestore().collection("queue stage log")
-      .where("currentstage", "==", currentStage)
-      .where("status", "==", "instudio")
-      .where("profile_id", "==", profileid)
-      .where("queueref", "==", queueRef)
-      .orderBy("logdate", "desc")
-      .get();
-
-    if (logSnap.docs.length === 0) {
-      await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
-      });
-      await recordDropoff("S0", "no_studio_session", { profileid, queueTokenId, stage: currentStage });
-      return console.log(`no queue stage log for ${currentStage}`);
-    }
-    const logDoc = logSnap.docs[0];
-    const logData = logDoc.data();
-    if (!logData["liveassignmentid"]) {
-      await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
-      });
-      await recordDropoff("S0", "no_liveassignment", { profileid, queueTokenId, stage: currentStage });
-      return console.log("no live assignment id");
-    }
-
-    const liveSnap = await admin.firestore().collection("live assignment")
-      .doc(logData["liveassignmentid"]).get();
-    const liveData = liveSnap.data();
-    if (!liveData || !liveData["zoomdata"]?.["id"]) {
-      await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
-      });
-      await recordDropoff("S0", "no_zoom_meeting", { profileid, queueTokenId, stage: currentStage });
-      return console.log("no zoom meeting id");
-    }
-
-    sourceref = liveSnap.ref;
-    let transcript;
-    try {
-      transcript = await getTranscript(liveData["zoomdata"]["id"]);
-    } catch (err) {
-      await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
-      });
-      await recordDropoff("S0", "transcript_fetch_failed", { profileid, queueTokenId, stage: currentStage });
-      return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
-    }
-    if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
-      await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
-      });
-      await recordDropoff("S0", "empty_transcript", { profileid, queueTokenId, stage: currentStage });
-      return console.log(`empty transcript for ${currentStage}`);
-    }
-    data = {
-      transcript_text: transcript.transcript_text,
-      transcript_raw: transcript.transcript_raw,
-      zoom_topic: transcript.topic,
-      zoom_start_time: transcript.start_time,
-      zoom_duration: transcript.duration,
-    };
-  } else {
-    await recordDropoff("S0", "unknown_stage_type", { profileid, queueTokenId, stage: currentStage });
-    return console.log(`unknown stage type ${stageCfg.type}`);
+  // Gate: only generateatc===true stages produce a gen doc.
+  if (stageCfg.generateatc !== true) {
+    await recordDropoff("S0", "generateatc_false", { profileid, queueTokenId, stage: currentStage });
+    return console.log(`generateatc!=true for stage ${currentStage} — no gen doc`);
   }
 
+  // Resolve own + pairing sources (shared resolver — parity with the preview).
+  const resolved = await resolveStageData({
+    queueData, queueRef, tokenData, queueTokenId, profileid,
+    stage: currentStage, stageCfg, defaultDb, formsDb: adminForms,
+  });
+
+  // Own-stage source unresolvable → no doc (drop-off), same as old behaviour.
+  if (!resolved.ok) {
+    const dropReason = ownFailureDropoffReason(resolved.reason);
+    await alertAtc("warn", `Own-stage source unresolvable for "${currentStage}" (${resolved.reason}) — ATC job not created.`, {
+      stage: "Stage 0", extra: { profileid, queueTokenId, reason: resolved.reason },
+    });
+    await recordDropoff("S0", dropReason, { profileid, queueTokenId, stage: currentStage });
+    return console.log(`own source unresolvable for ${currentStage}: ${resolved.reason}`);
+  }
+
+  const { stagedata, status, ownSourceref, ownType } = resolved;
+
+  // Dedup: same profile+token+queue+stage with the same own sourceref already exists.
   const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
     .where("queue_token_id", "==", queueTokenId)
     .where("stage", "==", currentStage)
     .get();
-
   if (!existingSnap.empty) {
-    const existingDoc = existingSnap.docs[0];
-    const existingSourceRef = existingDoc.data()["sourceref"];
-    if (existingSourceRef && sourceref && existingSourceRef.path === sourceref.path) {
+    const existingSourceRef = existingSnap.docs[0].data()["sourceref"];
+    if (existingSourceRef && ownSourceref && existingSourceRef.path === ownSourceref.path) {
       return console.log(`queue_atc_generation already exists for ${currentStage}`);
     }
   }
@@ -3647,14 +3592,20 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     queue_token_id: queueTokenId,
     stage: currentStage,
     generateatc: stageCfg.generateatc,
-    type: stageCfg.type,
-    pairingstages: stageCfg.pairingstages || [],
-    sourceref: sourceref,
-    data: data,
+    type: ownType,                              // own-stage type (form|zoom) — byType rollup
+    pairingstages: stageCfg.pairingstages || [], // stored as-is (object/array); read via stagedata, not .includes
+    sourceref: ownSourceref,
+    data: stagedata[currentStage].data,          // own-stage data (backward-compat)
+    stagedata: stagedata,                        // NEW: full resolved own+pairing map
     createdAt: new Date(),
   };
+  // "dataincomplete" blocks S1 + the pod loop until the button completes it.
+  // When complete, leave status UNSET so onQueueAtcGenerationCreate (S1) builds
+  // the prompt and sets "pending" — preserving the create⇒S1⇒(pending⇔prompt) invariant.
+  if (status === "dataincomplete") payload.status = "dataincomplete";
+
   await adminATC.collection("queue_atc_generation").doc(docid).set(payload);
-  console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
+  console.log(`queue_atc_generation created ${docid} for stage ${currentStage} (status=${status})`);
 }
 
 // Exposed for integration tests (not deployed functions). onQueueStageChange

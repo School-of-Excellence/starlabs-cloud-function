@@ -4,11 +4,11 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { getFirestore } = require("firebase-admin/firestore");
 //components imports
-const { notifySlack, alertAtc } = require("./atc_alerts");
-const { shouldStartPod } = require("./atc_helpers");
+const { notifySlack, alertAtc } = require("../queue-required-stage-aiatc-creation/atc_alerts");
+const { shouldStartPod } = require("../queue-required-stage-aiatc-creation/atc_helpers");
 const { claimNextJob, writeJobResult, DEFAULT_MAX_ATTEMPTS } = require("./pod_jobs");
-const { classifyFailure } = require("../scope-enhancement-atc-pipeline/se_atc_failure_classifier");
-const { writeBacklogGauge } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
+const { classifyFailure } = require("../../queue-aiatc-generation-pipeline/se_atc_failure_classifier");
+const { writeBacklogGauge } = require("../../queue-aiatc-generation-pipeline/se_atc_telemetry");
 
 const cors = require("cors");
 const corsHandler = cors({origin: true});
@@ -590,6 +590,7 @@ exports.atcJobWatchdog = onSchedule(
     try {
       let pendingCount = 0;
       let processingCount = 0;
+      let dataincompleteCount = 0;
       try {
         const pendingAgg = await atcDb.collection(collectionName)
           .where("status", "==", "pending").count().get();
@@ -597,6 +598,12 @@ exports.atcJobWatchdog = onSchedule(
         const processingAgg = await atcDb.collection(collectionName)
           .where("status", "==", "processing").count().get();
         processingCount = processingAgg.data().count;
+        // Redesigned workflow: docs created with missing mandatory pairing data
+        // sit in "dataincomplete" until the regenerate button completes them.
+        // They never reach pending/processing, so gauge them explicitly.
+        const dataincompleteAgg = await atcDb.collection(collectionName)
+          .where("status", "==", "dataincomplete").count().get();
+        dataincompleteCount = dataincompleteAgg.data().count;
       } catch (_) { /* best-effort count */ }
       // Resolve podState if the backlog branch didn't read pod_worker above.
       if (podState === "") {
@@ -608,6 +615,7 @@ exports.atcJobWatchdog = onSchedule(
       await writeBacklogGauge({
         pendingCount,
         processingCount,
+        dataincompleteCount,
         stuckCount: stuckSnap.size,
         oldestPendingAgeMin,
         collectionName,
