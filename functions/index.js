@@ -201,6 +201,8 @@ exports.evolutionFamilyWishlistOnWrite = wishlist.evolutionFamilyWishlistOnWrite
 
 // Watson
 exports.dashboardPaymentplanWatsonRequest = watsonUpdates.dashboardPaymentplanWatsonRequest
+exports.watsonEventParticipation = watsonUpdates.watsonEventParticipation // onRequest — Watson venue-fee screen: events + confirmed participation
+exports.syncETicketEligibility = watsonUpdates.syncETicketEligibility // onRequest — mirror e-ticket eligibility from Watson (same collection+id)
 
 // Chat
 exports.ChatxNotification = communication.ChatxNotification
