@@ -3578,8 +3578,12 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     .where("stage", "==", currentStage)
     .get();
   if (!existingSnap.empty) {
-    const existingSourceRef = existingSnap.docs[0].data()["sourceref"];
-    if (existingSourceRef && ownSourceref && existingSourceRef.path === ownSourceref.path) {
+    // sourceref is a path STRING now (was a cross-DB DocumentReference); normalize
+    // so dedup still works against any legacy ref-shaped doc too.
+    const srPath = (r) => (typeof r === "string" ? r : (r && r.path) || null);
+    const existingSourceRef = srPath(existingSnap.docs[0].data()["sourceref"]);
+    const ownPath = srPath(ownSourceref);
+    if (existingSourceRef && ownPath && existingSourceRef === ownPath) {
       return console.log(`queue_atc_generation already exists for ${currentStage}`);
     }
   }

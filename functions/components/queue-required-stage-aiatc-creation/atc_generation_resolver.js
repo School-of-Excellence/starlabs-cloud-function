@@ -102,7 +102,11 @@ async function resolveStageSource({ stageName, stageType, queueData, queueRef, p
       });
     }
     const data = await buildUpLifeAspirationReport(formData, element.formname);
-    return { ok: true, type: "form", sourceref: snap.docs[0].ref, data, detail: `formid=${formref.id}` };
+    // Store the source as a PATH STRING, not a DocumentReference: this doc lives
+    // in firestore-atc but the form lives in firestore-forms, and a cross-database
+    // DocumentReference is unsupported (Firestore mis-resolves it to the current
+    // DB + warns). The path string is all any consumer (dedup) needs.
+    return { ok: true, type: "form", sourceref: snap.docs[0].ref.path, data, detail: `formid=${formref.id}` };
   }
 
   if (stageType === "zoom") {
@@ -129,7 +133,9 @@ async function resolveStageSource({ stageName, stageType, queueData, queueRef, p
     return {
       ok: true,
       type: "zoom",
-      sourceref: liveSnap.ref,
+      // path string, not a cross-database DocumentReference (live assignment
+      // lives in the default DB, this doc in firestore-atc) — see form branch.
+      sourceref: liveSnap.ref.path,
       detail: `liveassignmentid=${logData.liveassignmentid}`,
       data: {
         transcript_text: liveData.transcript_text,
