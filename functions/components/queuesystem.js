@@ -118,7 +118,7 @@ exports.onQueueStageChange = onDocumentWritten({
         // confirmation — decided by the added slot's stage (key).
         const isPrepStage = key === 'Evolution Prep Orientation';
         const isScopeEnhancement = key === 'Scope Enhancement';
-        const isGuidedOrientation = key === 'Guided Pre ATC Orientation';
+        const isGuidedOrientation = key === 'Guided Pre ATC Orientation' || key === 'Guided Self ATC Orientation';
         const isDiagnostics = key === 'Diagnostics';
         const formattedTitle = getSlotTitle(addedValue, key);
 
@@ -190,7 +190,7 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
