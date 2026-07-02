@@ -9,6 +9,7 @@ const fs = require('fs');
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { alertAtc } = require("./atc_alerts");
+const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 
 const CLASSIFY_PROMPT_DOCID = "atcprompts";
 const RUN_JOBREQUEST_URL = "https://us-central1-fir-sample-aae4a.cloudfunctions.net/run_jobrequest";
@@ -183,7 +184,10 @@ async function maybeTriggerRubricsFromGeneration(checkpointDoc) {
 //   await callRunJobRequest({ docid, promptCfg });
 // }
 async function processAtcGenerationDoc(docid, docData) {
-  if (!docData.generateatc) return console.log(`generateatc=false, skipping ${docid}`);
+  if (!docData.generateatc) {
+    await recordDropoff("S1", "generateatc_false", { docid });
+    return console.log(`generateatc=false, skipping ${docid}`);
+  }
   if (!['form','zoom'].includes(docData.type)) {
     return console.log(`type=${docData.type}, handled by rubrics pipeline — skipping ${docid}`);
   }
@@ -193,6 +197,7 @@ async function processAtcGenerationDoc(docid, docData) {
   // 1. Read prompt config from classify (written by update_classify_config.js).
   const promptSnap = await adminDefault.collection("classify").doc(CLASSIFY_PROMPT_DOCID).get();
   if (!promptSnap.exists) {
+    await recordDropoff("S1", "atcprompts_missing", { docid });
     await alertAtc("critical", "classify/atcprompts config doc missing — ATC generation prompt cannot be built.", {
       stage: "Stage 1 generate", extra: { docid },
     });
