@@ -7,6 +7,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 const { notifySlack, alertAtc } = require("./atc_alerts");
 const { shouldStartPod } = require("./atc_helpers");
 const { claimNextJob, writeJobResult, DEFAULT_MAX_ATTEMPTS } = require("./pod_jobs");
+const { classifyFailure } = require("../scope-enhancement-atc-pipeline/se_atc_failure_classifier");
+const { writeBacklogGauge } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 
 const cors = require("cors");
 const corsHandler = cors({origin: true});
@@ -502,7 +504,7 @@ exports.atcPodScheduler = onSchedule(
 // and alert when a pending backlog is not draining (no live pod).
 // =============================================================================
 exports.atcJobWatchdog = onSchedule(
-  {schedule: "every 10 minutes", secrets: [runpodApiKey, sharedSecret]},
+  {schedule: "every 1 hours", secrets: [runpodApiKey, sharedSecret]},
   async () => {
     const cfgSnap = await db.collection("classify").doc(SCHEDULER_CONFIG_DOCID).get();
     const cfg = cfgSnap.exists ? cfgSnap.data() : {};
@@ -533,6 +535,8 @@ exports.atcJobWatchdog = onSchedule(
             claimedBy: FieldValue.delete(),
             startedAt: FieldValue.delete(),
             lastupdatedat: FieldValue.serverTimestamp(),
+            finalizedAt: FieldValue.serverTimestamp(),
+            failureCategory: classifyFailure({ reason: `stuck > ${stuckMin}m`, error: `stuck > ${stuckMin}m (attempts=${attempts})` }),
           });
           errored++;
         } else {
@@ -554,6 +558,8 @@ exports.atcJobWatchdog = onSchedule(
     }
 
     // 2. Non-draining backlog: oldest pending past flush window with no live pod.
+    let oldestPendingAgeMin = 0;
+    let podState = "";
     const oldestPending = await atcDb.collection(collectionName)
       .where("status", "==", "pending")
       .orderBy("createdAt", "asc")
@@ -562,12 +568,14 @@ exports.atcJobWatchdog = onSchedule(
     if (!oldestPending.empty) {
       const ms = toMillis(oldestPending.docs[0].data().createdAt);
       const ageMin = ms ? (Date.now() - ms) / 60000 : 0;
+      oldestPendingAgeMin = ageMin;
+      // Pod liveness now lives in classify/pod_worker (controller path), not
+      // llmmodels. A backlog with no live (LOADING/READY) pod — or a HALTED
+      // pod — needs attention.
+      const pwSnap = await db.collection("classify").doc("pod_worker").get();
+      const state = (pwSnap.exists ? pwSnap.data().state : "") || "IDLE";
+      podState = state;
       if (ageMin >= flushWaitMinutes) {
-        // Pod liveness now lives in classify/pod_worker (controller path), not
-        // llmmodels. A backlog with no live (LOADING/READY) pod — or a HALTED
-        // pod — needs attention.
-        const pwSnap = await db.collection("classify").doc("pod_worker").get();
-        const state = (pwSnap.exists ? pwSnap.data().state : "") || "IDLE";
         const live = state === "LOADING" || state === "READY";
         if (!live) {
           await alertAtc("critical", `Pending ATC backlog not draining — oldest job is ${Math.round(ageMin)}m old and pod state is ${state}.`, {
@@ -576,6 +584,36 @@ exports.atcJobWatchdog = onSchedule(
         }
       }
     }
+
+    // 3. Point-in-time backlog gauge — persist a snapshot for telemetry.
+    //    Count queries are guarded; the helper itself also swallows errors.
+    try {
+      let pendingCount = 0;
+      let processingCount = 0;
+      try {
+        const pendingAgg = await atcDb.collection(collectionName)
+          .where("status", "==", "pending").count().get();
+        pendingCount = pendingAgg.data().count;
+        const processingAgg = await atcDb.collection(collectionName)
+          .where("status", "==", "processing").count().get();
+        processingCount = processingAgg.data().count;
+      } catch (_) { /* best-effort count */ }
+      // Resolve podState if the backlog branch didn't read pod_worker above.
+      if (podState === "") {
+        try {
+          const pwSnap = await db.collection("classify").doc("pod_worker").get();
+          podState = (pwSnap.exists ? pwSnap.data().state : "") || "";
+        } catch (_) { /* best-effort */ }
+      }
+      await writeBacklogGauge({
+        pendingCount,
+        processingCount,
+        stuckCount: stuckSnap.size,
+        oldestPendingAgeMin,
+        collectionName,
+        podState,
+      });
+    } catch (_) { /* gauge is best-effort; never break the watchdog */ }
   }
 );
 

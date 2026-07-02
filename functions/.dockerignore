@@ -1,0 +1,14 @@
+# Build context excludes for the drain-worker Dockerfile (gcloud run jobs deploy).
+# Keeps the 449MB node_modules out of COPY (npm ci installs fresh inside the image).
+node_modules
+.git
+.gitignore
+.gcloudignore
+npm-debug.log
+*.local
+firebase-debug.log
+firebase-debug.*.log
+test
+docs
+scripts/.harness-runs
+scripts/.stage-test-runs

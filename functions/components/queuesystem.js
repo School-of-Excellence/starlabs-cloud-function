@@ -4,6 +4,7 @@ const { getFirestore } = require("firebase-admin/firestore");
 const commonService = require('./service');
 const { alertAtc } = require('./atc_alerts');
 const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
+const { recordDropoff } = require("../scope-enhancement-atc-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -117,7 +118,8 @@ exports.onQueueStageChange = onDocumentWritten({
         // confirmation — decided by the added slot's stage (key).
         const isPrepStage = key === 'Evolution Prep Orientation';
         const isScopeEnhancement = key === 'Scope Enhancement';
-        const isGuidedOrientation = key === 'Guided Self ATC Orientation';
+        const isGuidedOrientation = key === 'Guided Pre ATC Orientation';
+        const isDiagnostics = key === 'Diagnostics';
         const formattedTitle = getSlotTitle(addedValue, key);
 
         try {
@@ -139,11 +141,10 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
-        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation) {
+        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
-
         try {
           const startDate = addedValue['startdate'];
           const formattedDate = startDate._seconds
@@ -155,17 +156,29 @@ exports.onQueueStageChange = onDocumentWritten({
 
           // const phoneNumber = `${countrycode}${profiledata['number']}`;
           const phoneNumber = `${profiledata['number']}`;
+          let waticontent = null;
 
-          const waticontent = {
-            phonenumber: phoneNumber,
-            body: {
-              parameters: [
-                { name: 'name', value: profiledata['name'] },
-                { name: 'date_time_slot', value: formattedTitle },
-              ]
-            }
-          };
-
+          if(isDiagnostics) {
+            waticontent = {
+              phonenumber: phoneNumber,
+              body: {
+                parameters: [
+                  { name: 'name', value: profiledata['name'] },
+                  { name: 'date_time_slot_title', value: formattedTitle },
+                ]
+              }
+            };
+          } else {
+            waticontent = {
+              phonenumber: phoneNumber,
+              body: {
+                parameters: [
+                  { name: 'name', value: profiledata['name'] },
+                  { name: 'date_time_slot', value: formattedTitle },
+                ]
+              }
+            };
+          }
           // await commonService.sendToWhatsappViaWati(waticontent);
 
           const parameterConfig = waticontent['body']['parameters'].map(param => ({
@@ -177,7 +190,7 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_oriention_confirmation_june2026' : isScopeEnhancement   ? 'se_slot_cofirmation_june_2026' : 'guided_ori_slot_confirmation_june_v1';
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
@@ -431,28 +444,28 @@ exports.onQueueStageChange = onDocumentWritten({
     }
 
     // creating queue_atc_generation document where atc is created from ai
-    try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
-        await processStage({
-          queueData,
-          queueRef: queueDocSnap.ref,
-          tokenData: afterData,
-          queueTokenId,
-          currentStage: previousStage,
-        });
-      }
-    }catch (error){
-      console.log("queue_atc_genration collection creation error",error.toString())
-      await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
-        stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
-      }).catch(() => {});
-    }
+    // try{
+    //   const previousStage = await resolvePreviousStage({
+    //     queueData,
+    //     tokenData: afterData,
+    //     currentStage: afterData["currentstage"],
+    //   });
+    //   if (!previousStage){console.log("no previous stage resolved")}
+    //   else{
+    //     await processStage({
+    //       queueData,
+    //       queueRef: queueDocSnap.ref,
+    //       tokenData: afterData,
+    //       queueTokenId,
+    //       currentStage: previousStage,
+    //     });
+    //   }
+    // }catch (error){
+    //   console.log("queue_atc_genration collection creation error",error.toString())
+    //   await alertAtc("critical", `queue_atc_generation creation failed for token ${queueTokenId}: ${error.message}`, {
+    //     stage: "Stage 0", extra: { queueTokenId, currentstage: afterData["currentstage"], stack: error.stack },
+    //   }).catch(() => {});
+    // }
   }
 
   // Send Wati Update
@@ -3525,6 +3538,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
         stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
       });
+      await recordDropoff("S0", "no_form_submission", { profileid, queueTokenId, stage: currentStage });
       return console.log(`no form doc for stage ${currentStage}`);
     }
     const formDoc = snap.docs[0];
@@ -3556,6 +3570,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
       });
+      await recordDropoff("S0", "no_studio_session", { profileid, queueTokenId, stage: currentStage });
       return console.log(`no queue stage log for ${currentStage}`);
     }
     const logDoc = logSnap.docs[0];
@@ -3564,6 +3579,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
       });
+      await recordDropoff("S0", "no_liveassignment", { profileid, queueTokenId, stage: currentStage });
       return console.log("no live assignment id");
     }
 
@@ -3574,6 +3590,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
       });
+      await recordDropoff("S0", "no_zoom_meeting", { profileid, queueTokenId, stage: currentStage });
       return console.log("no zoom meeting id");
     }
 
@@ -3585,12 +3602,14 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
       });
+      await recordDropoff("S0", "transcript_fetch_failed", { profileid, queueTokenId, stage: currentStage });
       return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
     }
     if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
       await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
         stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
       });
+      await recordDropoff("S0", "empty_transcript", { profileid, queueTokenId, stage: currentStage });
       return console.log(`empty transcript for ${currentStage}`);
     }
     data = {
@@ -3601,6 +3620,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
       zoom_duration: transcript.duration,
     };
   } else {
+    await recordDropoff("S0", "unknown_stage_type", { profileid, queueTokenId, stage: currentStage });
     return console.log(`unknown stage type ${stageCfg.type}`);
   }
 

@@ -16,12 +16,19 @@
     "verify:live": "node scripts/verify-live-pipeline.js",
     "verify:indexes": "bash scripts/verify-indexes.sh",
     "stage-test": "node scripts/stage-test.js",
-    "test:invariants": "node test/invariants.js"
+    "test:invariants": "node test/invariants.js",
+    "atc:validate-s1": "node scripts/validate-stage1-pending.js",
+    "atc:report": "node scripts/atc-queue-report.js",
+    "atc:backfill-missing-jobs": "node scripts/atc-backfill-missing-jobs.js",
+    "atc:test-harness": "node scripts/atc-test-harness.js",
+    "atc:monitor": "node scripts/atc-live-monitor.js",
+    "atc:archive-onhold": "node scripts/archive-onhold-docs.js",
+    "atc:pairing-audit": "node scripts/atc-pairing-crossqueue-audit.js"
   },
   "engines": {
     "node": "22"
   },
-  "main": "index.emulator.js",
+  "main": "index.js",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.958.0",
     "@aws-sdk/s3-request-presigner": "^3.958.0",

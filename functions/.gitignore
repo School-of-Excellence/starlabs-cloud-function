@@ -16,3 +16,6 @@ scripts/
 # Claude Code local tooling — not part of the codebase
 CLAUDE.md
 .claude/
+
+# on-hold doc backups (prod data dumps — do not commit)
+atc-onhold-backup-*/

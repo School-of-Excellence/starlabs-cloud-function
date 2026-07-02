@@ -28,9 +28,6 @@ const queue_atc_generation = require("./components/queue_atc_generation")
 const podWorker = require("./components/pod_worker")
 const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
 
-//voiptestcalls
-exports.testVoipCall = appointmentSystem.testVoipCall;
-
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
 exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification
@@ -60,7 +57,9 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
-exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
+// ON HOLD (2026-06-23 scope-down): rubrics scoring (S3) put on hold. onAtcAlphaCreate
+// only calls processAtcAlphaDoc (creates "rubrics scoring" docs). Re-export + redeploy to restore.
+// exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -269,8 +268,12 @@ exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drai
 // exports.atcPodScheduler = runpodLLMRunning.atcPodScheduler
 
 //queue_atc_generation
-exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
-exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
+exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate // S1 generation — STAYS
+// ON HOLD (2026-06-23 scope-down): checkpoint report (S2) + rubrics verdict (S3) put on hold.
+// onQueueAtcGenerationUpdate is the ONLY entry for processCheckpointVerificationDoc (S2),
+// extractAndSaveOverallVerdict + the vice-versa rubrics bridge (S3). It contains NO S1 logic and
+// nothing the pod loop / usage rollup depend on. Re-export + redeploy to restore S2/S3.
+// exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
 
 //scope-enhancement-atc-pipeline — usage dashboard rollup
 exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup

@@ -77,11 +77,16 @@ function aggToIncrement(a) {
 
 // ---------- core rollup (callable directly in tests) ----------
 
-async function runUsageRollup(now = new Date()) {
+async function runUsageRollup(now = new Date(), opts = {}) {
+  const sourceCollection = opts.sourceCollection || SOURCE_COLLECTION;
+  const dailyCollection = opts.dailyCollection || DAILY_COLLECTION;
+  const lifetimeCollection = opts.lifetimeCollection || LIFETIME_COLLECTION;
+  const stateCollection = opts.stateCollection || STATE_COLLECTION;
+
   const { start, end, dateStr } = istDayWindow(now);
 
   const snap = await atcDb
-    .collection(SOURCE_COLLECTION)
+    .collection(sourceCollection)
     .where("finalizedAt", ">=", start)
     .where("finalizedAt", "<", end)
     .get();
@@ -103,7 +108,7 @@ async function runUsageRollup(now = new Date()) {
   const profiles = Object.keys(byProfile);
 
   // 1) Daily docs — idempotent overwrite.
-  const dailyCol = defaultDb.collection(DAILY_COLLECTION);
+  const dailyCol = defaultDb.collection(dailyCollection);
   const batch = defaultDb.batch();
   for (const pid of profiles) {
     batch.set(dailyCol.doc(`${dateStr}_${pid}`), aggToDaily(byProfile[pid], dateStr, pid));
@@ -112,8 +117,8 @@ async function runUsageRollup(now = new Date()) {
   await batch.commit();
 
   // 2) Lifetime increments — applied exactly once per date (marker-guarded).
-  const lifeCol = defaultDb.collection(LIFETIME_COLLECTION);
-  const markerRef = defaultDb.collection(STATE_COLLECTION).doc(dateStr);
+  const lifeCol = defaultDb.collection(lifetimeCollection);
+  const markerRef = defaultDb.collection(stateCollection).doc(dateStr);
   const lifeRefs = profiles.map((p) => lifeCol.doc(p)).concat([lifeCol.doc(ALL_KEY)]);
 
   const lifetimeApplied = await defaultDb.runTransaction(async (tx) => {
