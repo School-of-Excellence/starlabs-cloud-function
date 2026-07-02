@@ -192,6 +192,10 @@ async function resolveStageData({
   };
 
   const remaining = new Set(categoryOf.keys());
+  // For a stage that type-matches at a level but whose SOURCE isn't there, we
+  // keep walking and remember the last level's type/reason so a never-resolved
+  // stage still finalizes as `missing` with useful context.
+  const lastMiss = new Map();
   let levelQueueData = queueData, levelQueueRef = queueRef, levelTokenData = tokenData, levelTokenId = queueTokenId, levelLabel = queueRef.id;
   let hops = 0;
   const visitedTokenIds = new Set([queueTokenId]);
@@ -205,10 +209,17 @@ async function resolveStageData({
       const src = await resolveStageSource({
         stageName: pStage, stageType: typeMatch.type, queueData: levelQueueData, queueRef: levelQueueRef, profileid, defaultDb, formsDb,
       });
-      stagedata[pStage] = src.ok
-        ? { queuetokenid: levelTokenId, queueid: levelLabel, data: src.data, category, status: "resolved", type: src.type, sourceref: src.sourceref }
-        : { queuetokenid: levelTokenId, queueid: levelLabel, data: null, category, status: "missing", type: typeMatch.type, sourceref: null };
-      remaining.delete(pStage);
+      if (src.ok) {
+        stagedata[pStage] = { queuetokenid: levelTokenId, queueid: levelLabel, data: src.data, category, status: "resolved", type: src.type, sourceref: src.sourceref };
+        remaining.delete(pStage);
+      } else {
+        // Type-matched here (this level's config lists the stage — often leftover
+        // template config) but the participant's actual source isn't at THIS
+        // level. Do NOT finalize as missing: the real submission may live deeper
+        // on the transferredfrom lineage (e.g. a form submitted under an ancestor
+        // queue). Keep it in `remaining` and retry at the next level back.
+        lastMiss.set(pStage, { type: typeMatch.type, reason: src.reason, queueid: levelLabel });
+      }
     }
     if (remaining.size === 0) break;
 
@@ -223,9 +234,11 @@ async function resolveStageData({
     levelQueueData = aq.data(); levelQueueRef = ancestorQueueRef; levelTokenData = at.data(); levelTokenId = ancestorTokenRef.id; levelLabel = ancestorQueueRef.id;
   }
 
-  // stages never located at any level → mark missing
+  // Stages never resolved at any level on the chain → finalize as missing,
+  // carrying the last level's type/queue context when we had a type-match.
   for (const pStage of remaining) {
-    stagedata[pStage] = { queuetokenid: null, queueid: null, data: null, category: categoryOf.get(pStage), status: "missing", type: null, sourceref: null };
+    const lm = lastMiss.get(pStage) || {};
+    stagedata[pStage] = { queuetokenid: null, queueid: lm.queueid || null, data: null, category: categoryOf.get(pStage), status: "missing", type: lm.type || null, sourceref: null };
   }
 
   return { ok: true, ownType: ownSrc.type, ownSourceref: ownSrc.sourceref, stagedata, status: computeStatus(stagedata, norm), norm };
