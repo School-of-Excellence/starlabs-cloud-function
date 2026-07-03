@@ -634,7 +634,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
     }
   }
 );
-exports.workshopautocommunicationschedule = onSchedule({schedule : "00 15 * * *", region: "asia-south1", timeZone: "Asia/Kolkata"},async (context)=>{
+exports.workshopautocommunicationschedule = onSchedule({schedule : "00 17 * * *", region: "asia-south1", timeZone: "Asia/Kolkata"},async (context)=>{
   try {
     console.log('started');
     const snapshot = await admin.firestore().collection("workshopconfiguration").where('evergreenWorkshop','==',true).get();
