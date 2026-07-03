@@ -67,9 +67,4 @@ node_modules/
 # CI/CD hooks config (per-developer: hub path + ingest token) — never commit
 .env.cicd
 
-# Scripts (local scratch): exclude the CHILDREN (/scripts/*), never the directory itself —
-# an excluded DIRECTORY can't have anything re-included beneath it (git rule). This is what
-# lets the committed CI/CD hooks below stay in git (firebase.json + CI reference them).
-/scripts/*
-!/scripts/cicd/
 *.csv

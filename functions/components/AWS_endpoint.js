@@ -42,7 +42,7 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
       const url = await AWS_S3Request.getSignedUrl(s3, command, { expiresIn: 300 }); // 5 min
       res.status(200).json({ url });
     } catch (error) {
-      console.error("unable to Get Signed URL:", error);
+      console.error("Unable to Get Signed URL:", error);
       return res.status(500).json({ error: error.message || error.toString() });
     }
   })

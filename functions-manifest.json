@@ -59,14 +59,14 @@
     {
       "name": "atcJobWatchdog",
       "type": "onSchedule",
-      "file": "components/runpod_ai.js",
+      "file": "components/pod-execution-pipeline/runpod_ai.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
     {
       "name": "atcPodLifecycle",
       "type": "onRequest",
-      "file": "components/pod_worker.js",
+      "file": "components/pod-execution-pipeline/pod_worker.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -401,7 +401,7 @@
     {
       "name": "onQueueAtcGenerationCreate",
       "type": "onDocumentCreated",
-      "file": "components/queue_atc_generation.js",
+      "file": "components/queue-required-stage-aiatc-creation/queue_atc_generation.js",
       "triggerPath": "queue_atc_generation/{id}",
       "database": "firestore-atc",
       "emulatorLoaded": false,
@@ -511,7 +511,7 @@
     {
       "name": "podWorkerUpdate",
       "type": "onRequest",
-      "file": "components/pod_worker.js",
+      "file": "components/pod-execution-pipeline/pod_worker.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -525,7 +525,7 @@
     {
       "name": "procedureOnWrite",
       "type": "onDocumentWritten",
-      "file": "components/ATC.js",
+      "file": "components/queue-required-stage-aiatc-creation/ATC.js",
       "triggerPath": "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}",
       "database": "firestore-atc",
       "emulatorLoaded": false,
@@ -603,10 +603,24 @@
       "codebase": "default"
     },
     {
+      "name": "rebuildAtcPrompt",
+      "type": "onCall",
+      "file": "components/queue-required-stage-aiatc-creation/atc_ondemand.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "RecommendedPlaylistTrigger_to_pmd",
       "type": "onDocumentCreated",
       "file": "components/participantmetadata.js",
       "triggerPath": "recommended mix playlist/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "regenerateAtcDoc",
+      "type": "onCall",
+      "file": "components/queue-required-stage-aiatc-creation/atc_ondemand.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -680,7 +694,7 @@
     {
       "name": "seAtcUsageRollup",
       "type": "onSchedule",
-      "file": "scope-enhancement-atc-pipeline/se_atc_usage.js",
+      "file": "queue-aiatc-generation-pipeline/se_atc_usage.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -900,8 +914,8 @@
     },
     {
       "name": "updateAuthorUIDInAtcAlpha",
-      "type": "onDocumentCreated",
-      "file": "components/ATC.js",
+      "type": "onDocumentWritten",
+      "file": "components/queue-required-stage-aiatc-creation/ATC.js",
       "triggerPath": "atc_alpha/{atcalphaid}",
       "database": "firestore-atc",
       "emulatorLoaded": false,
@@ -956,8 +970,8 @@
     },
     {
       "name": "validateATCtoAlpha",
-      "type": "onDocumentCreated",
-      "file": "components/ATC.js",
+      "type": "onDocumentUpdated",
+      "file": "components/queue-required-stage-aiatc-creation/ATC.js",
       "triggerPath": "atc_to_validate/{id}",
       "database": "firestore-atc",
       "emulatorLoaded": false,
