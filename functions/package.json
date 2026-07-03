@@ -23,7 +23,10 @@
     "atc:test-harness": "node scripts/atc-test-harness.js",
     "atc:monitor": "node scripts/atc-live-monitor.js",
     "atc:archive-onhold": "node scripts/archive-onhold-docs.js",
-    "atc:pairing-audit": "node scripts/atc-pairing-crossqueue-audit.js"
+    "atc:pairing-audit": "node scripts/atc-pairing-crossqueue-audit.js",
+    "atc:generation-preview": "node scripts/atc-generation-doc-preview.js",
+    "graph:refresh": "$(cat graphify-out/.graphify_python) scripts/graphify-refresh.py",
+    "graph:query": "graphify query"
   },
   "engines": {
     "node": "22"
