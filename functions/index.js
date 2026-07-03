@@ -29,10 +29,6 @@ const podWorker = require("./components/pod-execution-pipeline/pod_worker")
 const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
 const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
 
-//voiptestcalls
-exports.testVoipCall = appointmentSystem.testVoipCall;
-exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
-
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
 exports.onTicketChanged = ticketSystem.onTicketChanged; //ticket notification

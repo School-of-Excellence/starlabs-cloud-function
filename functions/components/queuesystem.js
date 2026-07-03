@@ -32,6 +32,7 @@ const zoomSDkClientId = defineSecret("ZOOM_SDK_CLIENTID");
 const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
+const crypto = require("crypto");
 
 exports.onQueueStageChange = onDocumentWritten({
     document: "queue_token/{id}",
