@@ -13,9 +13,9 @@
 "use strict";
 
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-// scope-enhancement-atc-pipeline (usage dashboard): normalize the failure reason
+// queue-aiatc-generation-pipeline (usage dashboard): normalize the failure reason
 // so the nightly rollup can chart *why* reports fail. Pure helper, no side effects.
-const { classifyFailure } = require("../scope-enhancement-atc-pipeline/se_atc_failure_classifier");
+const { classifyFailure } = require("../../queue-aiatc-generation-pipeline/se_atc_failure_classifier");
 
 const atcDb = getFirestore("firestore-atc");
 
@@ -86,7 +86,7 @@ async function writeJobResult({ result, podId, modelName }) {
       error: result.error || null,
       model: modelName || "unknown",
       completedAt: FieldValue.serverTimestamp(),
-      // scope-enhancement-atc-pipeline: single terminal timestamp the usage rollup
+      // queue-aiatc-generation-pipeline: single terminal timestamp the usage rollup
       // windows on (covers BOTH success and failure). failureCategory is the
       // chartable reason (null on success).
       finalizedAt: FieldValue.serverTimestamp(),
@@ -138,7 +138,7 @@ async function requeueJob({ collectionName, path, reason, podId, maxAttempts = D
         attempts,
         claimedBy: FieldValue.delete(),
         startedAt: FieldValue.delete(),
-        // scope-enhancement-atc-pipeline: terminal failure — stamp the same
+        // queue-aiatc-generation-pipeline: terminal failure — stamp the same
         // finalizedAt the usage rollup windows on, plus the chartable reason.
         finalizedAt: FieldValue.serverTimestamp(),
         failureCategory: classifyFailure({

@@ -3,7 +3,7 @@ const commonService = require("./components/service");
 const ticketSystem = require("./components/ticketsystem");
 const achievementSystem = require("./components/achievements");
 const appointmentSystem = require("./components/appointment");
-const atcSystem = require("./components/ATC");
+const atcSystem = require("./components/queue-required-stage-aiatc-creation/ATC");
 const bigAssignmentSystem = require("./components/big-assignment");
 const bigLevelAggregate = require("./components/big-level-aggregate");
 const clientIssueSystem = require("./components/clientissue");
@@ -23,10 +23,11 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
-const runpodLLMRunning = require("./components/runpod_ai")
-const queue_atc_generation = require("./components/queue_atc_generation")
-const podWorker = require("./components/pod_worker")
-const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
+const runpodLLMRunning = require("./components/pod-execution-pipeline/runpod_ai")
+const queue_atc_generation = require("./components/queue-required-stage-aiatc-creation/queue_atc_generation")
+const podWorker = require("./components/pod-execution-pipeline/pod_worker")
+const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
+const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -57,9 +58,9 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
-// ON HOLD (2026-06-23 scope-down): rubrics scoring (S3) put on hold. onAtcAlphaCreate
-// only calls processAtcAlphaDoc (creates "rubrics scoring" docs). Re-export + redeploy to restore.
-// exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
+// REMOVED (2026-07-01 scope-down): rubrics scoring (S3) — onAtcAlphaCreate +
+// processAtcAlphaDoc were deleted from ATC.js entirely, not just unwired. Restore
+// from backup/s2-s3-code-removed-2026-07-01T12-42-21Z/ATC.js.pre-removal if needed.
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -175,7 +176,7 @@ exports.inviteToStudio = queueSystem.inviteToStudio // c - "studioinvitation/{do
 exports.onQueueTokenCreateUpdateProductMode = queueSystem.onQueueTokenCreateUpdateProductMode // c -"queue_token/{docid}"
 exports.onQueueDateChange = queueSystem.onQueueDateChange // u - "queue generation/{docid}"
 exports.onEventDateChange = queueSystem.onEventDateChange // u - "event collection/{docid}"
-exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest
+exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest — includes inline recording.transcript_completed handling (handleRecordingTranscriptCompleted)
 exports.bulkReadyInvitation = queueSystem.bulkReadyInvitation // c - "bulk invitation/{docid}"
 exports.invitationAccepted = queueSystem.invitationAccepted // u - "studioinvitation/{docid}"
 exports.queueavtest = queueSystem.queueavtest //  c - "queue avtest/{docid}"
@@ -259,7 +260,7 @@ exports.atcJobWatchdog = runpodLLMRunning.atcJobWatchdog // schedule "every 10 m
 exports.atcPodLifecycle = podWorker.atcPodLifecycle // schedule "every 2 minutes" — launch gate + LOADING→READY→drain
 exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drained" + ready/unhealthy pushes
 // LEGACY — the external controller path (launchPod/getPodBearer/terminatePod + Cloud Run drain Job)
-// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/runpod_ai.js
+// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/pod-execution-pipeline/runpod_ai.js
 // for rollback only; NOT deployed. Re-enable to fall back to the self-loop pod worker.
 // exports.run_jobrequest = runpodLLMRunning.run_jobrequest
 // exports.getJobRequest = runpodLLMRunning.getJobRequest
@@ -269,12 +270,15 @@ exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drai
 
 //queue_atc_generation
 exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate // S1 generation — STAYS
-// ON HOLD (2026-06-23 scope-down): checkpoint report (S2) + rubrics verdict (S3) put on hold.
-// onQueueAtcGenerationUpdate is the ONLY entry for processCheckpointVerificationDoc (S2),
-// extractAndSaveOverallVerdict + the vice-versa rubrics bridge (S3). It contains NO S1 logic and
-// nothing the pod loop / usage rollup depend on. Re-export + redeploy to restore S2/S3.
-// exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
+// on-demand dashboard actions (callable, Firebase-Auth gated)
+exports.regenerateAtcDoc = atcOnDemand.regenerateAtcDoc // onCall — re-resolve a dataincomplete doc → pending when complete
+exports.rebuildAtcPrompt = atcOnDemand.rebuildAtcPrompt // onCall — rebuild prompt from existing stagedata (pending doc)
+// REMOVED (2026-07-01 scope-down): checkpoint report (S2) + rubrics verdict (S3).
+// onQueueAtcGenerationUpdate, processCheckpointVerificationDoc, extractAndSaveOverallVerdict,
+// and the vice-versa rubrics bridge (maybeTriggerRubricsFromGeneration) were deleted from
+// queue_atc_generation.js entirely, not just unwired. Nothing the pod loop / usage rollup
+// depends on. Restore from backup/s2-s3-code-removed-2026-07-01T12-42-21Z/ if needed.
 
-//scope-enhancement-atc-pipeline — usage dashboard rollup
+//queue-aiatc-generation-pipeline — usage dashboard rollup
 exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup
 
