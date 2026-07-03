@@ -3,7 +3,10 @@
     {
       "source": "functions",
       "predeploy": [
-        "node \"$RESOURCE_DIR/loopDetector.js\" \"$RESOURCE_DIR/index.js\""
+        "node scripts/cicd/predeploy.js"
+      ],
+      "postdeploy": [
+        "node scripts/cicd/postdeploy.js"
       ],
       "codebase": "default",
       "ignore": [

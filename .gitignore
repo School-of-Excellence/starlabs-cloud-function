@@ -64,7 +64,11 @@ node_modules/
 
 # dotenv environment variables file
 .env
+# CI/CD hooks config (per-developer: hub path + ingest token) — never commit
+.env.cicd
 
-# Scripts
+# Scripts (local scratch) — EXCEPT the committed CI/CD hooks (firebase.json + CI reference them)
 /scripts
+!/scripts/cicd
+!/scripts/cicd/**
 *.csv

@@ -1,0 +1,1057 @@
+{
+  "version": 1,
+  "functions": [
+    {
+      "name": "aggregateBigLevelFromActivityLog",
+      "type": "onDocumentCreated",
+      "file": "components/big-level-aggregate.js",
+      "triggerPath": "queue activity log/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "appointmentbooked",
+      "type": "onDocumentCreated",
+      "file": "components/appointment.js",
+      "triggerPath": "/appointments/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "appointmentcancelled",
+      "type": "onDocumentUpdated",
+      "file": "components/appointment.js",
+      "triggerPath": "/appointments/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "appointmentremainder",
+      "type": "onSchedule",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "approveOfftime",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "atcdata_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "/participant AEL/{docid}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ATCevolutionProgress",
+      "type": "onDocumentUpdated",
+      "file": "components/interimreport.js",
+      "triggerPath": "/interimreport log/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "atcJobWatchdog",
+      "type": "onSchedule",
+      "file": "components/runpod_ai.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "atcPodLifecycle",
+      "type": "onRequest",
+      "file": "components/pod_worker.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "authorizeTvDevice",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "autoCloseTickets",
+      "type": "onSchedule",
+      "file": "components/clientissue.js",
+      "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "availabilityScheduler",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "awsEventWebhook",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "bigAggregateLevelUpdate_to_pmd",
+      "type": "onSchedule",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "/big aggregate level/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "bigAssignmentParticipantConfirmation",
+      "type": "onRequest",
+      "file": "components/big-assignment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "biginvitationAccepted",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "biginvitation/{id}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "bigLevelProfileReset",
+      "type": "onRequest",
+      "file": "components/big-level-aggregate.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "buffermixToRecommendedPlaylist",
+      "type": "onSchedule",
+      "file": "components/content.js",
+      "triggerPath": "buffermix archive/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "bulkReadyInvitation",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "bulk invitation/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "calculateParticipantMode",
+      "type": "onDocumentWritten",
+      "file": "components/participantmode.js",
+      "triggerPath": "/participantsproduct/{id}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "ChatxNotification",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "supportchat/{chatid}/messages/{msgid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "CheckMasternodeStatus",
+      "type": "onSchedule",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "communityPostHLS",
+      "type": "onDocumentCreated",
+      "file": "components/content.js",
+      "triggerPath": "content analytics/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "computeSlot",
+      "type": "onDocumentCreated",
+      "file": "components/appointment.js",
+      "triggerPath": "/availability/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ConvertUrltoHLS",
+      "type": "onRequest",
+      "file": "components/content.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "createBigParticipantAssignment",
+      "type": "onDocumentCreated",
+      "file": "components/big-assignment.js",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "createOpenViduToken",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "createPostMarkEmailTemplate",
+      "type": "onDocumentUpdated",
+      "file": "components/communication.js",
+      "triggerPath": "email templates/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "createProfile_registeredUser",
+      "type": "onCall",
+      "file": "components/user_registration.js",
+      "triggerPath": "user_data/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "CreateQueueActivityLogV2",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "live assignment/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "dailyFirestoreAuditAnalysis",
+      "type": "onSchedule",
+      "file": "components/exports-alerts.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "dashboardcustomersupport",
+      "type": "onDocumentWritten",
+      "file": "components/clientissue.js",
+      "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "dashboardPaymentplanWatsonRequest",
+      "type": "onRequest",
+      "file": "components/watson-updates.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "deliveryhoursCreate",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "triggerPath": "/deliverytime/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "eventparticipationdata_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "event participation request/{docid}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "evolutionFamilyWishlistOnWrite",
+      "type": "onDocumentWritten",
+      "file": "components/wishlist.js",
+      "triggerPath": "/evolutionwishlistlog/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "flushOpenviduCallQuality",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "generalContentUpdate",
+      "type": "onRequest",
+      "file": "components/content.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "getSignedUrlAWS",
+      "type": "onRequest",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "invitationAccepted",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "studioinvitation/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "inviteToStudio",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "studioinvitation/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "journey_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "participantjourneyproduct/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "kickParticipant",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livechangeworkadjustment",
+      "type": "onDocumentCreated",
+      "file": "components/achievements.js",
+      "triggerPath": "livechangework/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "muteParticipant",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "myOperatorCalls",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "triggerPath": "email templates/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "newuserjoinedslackintegration",
+      "type": "onDocumentCreated",
+      "file": "components/user_registration.js",
+      "triggerPath": "new_user_data/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "notifyMobileApp",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "/notificationrecord/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onBreakthroughsPosted",
+      "type": "onDocumentCreated",
+      "file": "components/achievements.js",
+      "triggerPath": "/Achievements/posts/postcollection/{postid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventApprovalProductMode",
+      "type": "onDocumentWritten",
+      "file": "components/participantmode.js",
+      "triggerPath": "event participation request/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventDateChange",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "triggerPath": "event collection/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventOpenVidu",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onQueueAtcGenerationCreate",
+      "type": "onDocumentCreated",
+      "file": "components/queue_atc_generation.js",
+      "triggerPath": "queue_atc_generation/{id}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onQueueDateChange",
+      "type": "onDocumentUpdated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue generation/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onQueueStageChange",
+      "type": "onDocumentWritten",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue_token/{id}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "onQueueTokenCreateUpdateProductMode",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue_token/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "onTicketChanged",
+      "type": "onDocumentWritten",
+      "file": "components/ticketsystem.js",
+      "triggerPath": "tickets/{ticketId}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onUpdateBigAssignment",
+      "type": "onDocumentUpdated",
+      "file": "components/big-assignment.js",
+      "triggerPath": "big assignment/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "openViduCloseRoom",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "openViduStartRecording",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "openViduStopRecording",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "participantAELData_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "/participant AEL/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "participantJourneyproductSocialcommitupdate",
+      "type": "onRequest",
+      "file": "components/participantproduct.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "participantsely_to_pmd",
+      "type": "onSchedule",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "/participants ely/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "participantsproductinitiated",
+      "type": "onDocumentWritten",
+      "file": "components/participantproduct.js",
+      "triggerPath": "/participantsproduct/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "particpantFormSubmit_SlackIntegration",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "formsByClient/{id}",
+      "database": "firestore-forms",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "podWorkerUpdate",
+      "type": "onRequest",
+      "file": "components/pod_worker.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "postmarkResponseCapture",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "procedureOnWrite",
+      "type": "onDocumentWritten",
+      "file": "components/ATC.js",
+      "triggerPath": "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "productenquiryfromeiflix",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "productenquirylog/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "productNextModeUpdate",
+      "type": "onSchedule",
+      "file": "components/participantmode.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "productsdata_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "participantsproduct/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "profileAvailability",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "profiledata_to_participantmetadata",
+      "type": "onDocumentCreated",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "profile_data/{id}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "purchaselabel_to_pmd",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "journeyproductpurchase/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "queueavtest",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue avtest/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "queueParticipantPositionUpdate",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue stage log/{queueStageLogId}",
+      "database": "firestore-forms",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "queueParticipantTransfer",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "triggerPath": "queue participant transfer/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "RecommendedPlaylistTrigger_to_pmd",
+      "type": "onDocumentCreated",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "recommended mix playlist/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "requestApptCancel",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "triggerPath": "/deliverytime/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "requestScheduling",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "resendEmailOTPNewUsers",
+      "type": "onCall",
+      "file": "components/user_registration.js",
+      "triggerPath": "new_user_data/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "resentAppointmentEmail",
+      "type": "onRequest",
+      "file": "components/appointment.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "salesCaptureSlackIntegration",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "salesleads/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "salesCRMConvertedLeads",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "journey/{journeyid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "salesCRMProfilestatus",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "scaleMediaNodes",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "scheduledFirestoreExport",
+      "type": "onSchedule",
+      "file": "components/exports-alerts.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "seAtcUsageRollup",
+      "type": "onSchedule",
+      "file": "scope-enhancement-atc-pipeline/se_atc_usage.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendBatchEmail",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "triggerPath": "email archive/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendBatchEmailTest",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "triggerPath": "email archive/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendEmailOTPNewUsers",
+      "type": "onCall",
+      "file": "components/user_registration.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendSlackNotificationSaleRejection",
+      "type": "onDocumentUpdated",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "salesleads/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendWhatsAppBroadcast",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "wati archive/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "sendWhatsAppBroadcastCreated",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "wati archive/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackAskAH",
+      "type": "onDocumentCreated",
+      "file": "components/interimreport.js",
+      "triggerPath": "/ask AH/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackBudgetAlert",
+      "type": "onMessagePublished",
+      "file": "components/exports-alerts.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackContentConsumption",
+      "type": "onSchedule",
+      "file": "components/content.js",
+      "triggerPath": "content analytics/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackCustomerSupport",
+      "type": "onDocumentCreated",
+      "file": "components/clientissue.js",
+      "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackInterimCrossOver",
+      "type": "onDocumentCreated",
+      "file": "components/interimreport.js",
+      "triggerPath": "/interim crossover/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackLoginEvent",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "loginlog/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackLoveLetter",
+      "type": "onDocumentCreated",
+      "file": "components/interimreport.js",
+      "triggerPath": "/love letter/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "startMasterNodeHTTP",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "startParticipantNextDeliverySequence",
+      "type": "onDocumentUpdated",
+      "file": "components/participantproduct.js",
+      "triggerPath": "deliverables/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "stopMasterNodeHTTP",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "studioZoomLink",
+      "type": "onDocumentCreated",
+      "file": "components/queuesystem.js",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "studioZoomLinkDeactivate",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "triggerPath": "live assignment/{id}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "studioZoomLinkRegenerate",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "subscriptionend_JourneystatusUpdate",
+      "type": "onSchedule",
+      "file": "components/participantmetadata.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "SupportDeskToSlack",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "triggerPath": "/supportdesk/{docid}/messages/{messageid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ticketCreated",
+      "type": "onDocumentCreated",
+      "file": "components/clientissue.js",
+      "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "TicketCreatedSlackNotification",
+      "type": "UNKNOWN",
+      "file": "components/ticketsystem.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ticketCreatedV2",
+      "type": "onSchedule",
+      "file": "components/clientissue.js",
+      "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ticketfromwebsite",
+      "type": "onRequest",
+      "file": "components/clientissue.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ticketMsgNotification",
+      "type": "onDocumentCreated",
+      "file": "components/clientissue.js",
+      "triggerPath": "/clientissue/{docid}/messages/{messageid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "totalparticipant_tierupdate",
+      "type": "onDocumentWritten",
+      "file": "components/eiflix-tier.js",
+      "triggerPath": "/tier access config/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "UnconvertedUrltoHLS",
+      "type": "onRequest",
+      "file": "components/content.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updateAuthorUIDInAtcAlpha",
+      "type": "onDocumentCreated",
+      "file": "components/ATC.js",
+      "triggerPath": "atc_alpha/{atcalphaid}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updateBigParticipantsAssignment",
+      "type": "onRequest",
+      "file": "components/big-assignment.js",
+      "triggerPath": "big participants assignments/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updateJourneyDataToSalesCRM",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "journey/{journeyid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updateJourneyProductDataToSalesCRM",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "journey-to-product/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updatePackageDesignDataToSalesCRM",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "package design/{packagedesignid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "updateProductDataToSalesCRM",
+      "type": "onRequest",
+      "file": "components/salescrm-updates.js",
+      "triggerPath": "products/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "uploadContentToPublitio",
+      "type": "onRequest",
+      "file": "components/content.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "validateATCtoAlpha",
+      "type": "onDocumentCreated",
+      "file": "components/ATC.js",
+      "triggerPath": "atc_to_validate/{id}",
+      "database": "firestore-atc",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "verifyEmailOTPNewUsers",
+      "type": "onCall",
+      "file": "components/user_registration.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "videoAskHLS",
+      "type": "onDocumentCreated",
+      "file": "components/content.js",
+      "triggerPath": "content analytics/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "watiResponseCapture",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopAssignment",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopautocommunicationschedule",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopconfiguration",
+      "type": "onDocumentUpdated",
+      "file": "components/workshop.js",
+      "triggerPath": "/workshopconfiguration/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopenrolledwatti",
+      "type": "onDocumentCreated",
+      "file": "components/workshop.js",
+      "triggerPath": "workshop participant enrolled/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopFormsSubmission",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "triggerPath": "formsByClient/{docid}",
+      "database": "firestore-forms",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopprogressmessage",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopprogressmessagev2",
+      "type": "onRequest",
+      "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "workshopQandA",
+      "type": "onDocumentCreated",
+      "file": "components/communication.js",
+      "triggerPath": "workshopQA/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "zoomActivitylog",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    }
+  ]
+}
