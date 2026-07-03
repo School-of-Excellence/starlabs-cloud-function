@@ -26,9 +26,9 @@ const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { logger } = require("firebase-functions");
 const cors = require("cors");
 
-const { alertAtc } = require("./atc_alerts");
+const { alertAtc } = require("../queue-required-stage-aiatc-creation/atc_alerts");
 const { requeueJob, DEFAULT_COLLECTION } = require("./pod_jobs");
-const { shouldStartPod } = require("./atc_helpers");
+const { shouldStartPod } = require("../queue-required-stage-aiatc-creation/atc_helpers");
 const { launchPod, getPodBearer, terminatePod } = require("./pod_controller");
 
 const corsHandler = cors({ origin: true });
