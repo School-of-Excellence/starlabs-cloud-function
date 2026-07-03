@@ -27,7 +27,6 @@ const runpodLLMRunning = require("./components/pod-execution-pipeline/runpod_ai"
 const queue_atc_generation = require("./components/queue-required-stage-aiatc-creation/queue_atc_generation")
 const podWorker = require("./components/pod-execution-pipeline/pod_worker")
 const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
-const zoomTranscriptCapture = require("./components/queue-required-stage-aiatc-creation/zoom_transcript_capture")
 const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
 
 //voiptestcalls
@@ -181,9 +180,7 @@ exports.inviteToStudio = queueSystem.inviteToStudio // c - "studioinvitation/{do
 exports.onQueueTokenCreateUpdateProductMode = queueSystem.onQueueTokenCreateUpdateProductMode // c -"queue_token/{docid}"
 exports.onQueueDateChange = queueSystem.onQueueDateChange // u - "queue generation/{docid}"
 exports.onEventDateChange = queueSystem.onEventDateChange // u - "event collection/{docid}"
-exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest
-exports.enqueueZoomTranscriptFetch = zoomTranscriptCapture.enqueueZoomTranscriptFetch // c - "zoom activitylog/{id}"
-exports.checkZoomTranscript = zoomTranscriptCapture.checkZoomTranscript // task queue — dispatched by enqueueZoomTranscriptFetch, 15min delay + up to 3 attempts 15min apart
+exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest — includes inline recording.transcript_completed handling (handleRecordingTranscriptCompleted)
 exports.bulkReadyInvitation = queueSystem.bulkReadyInvitation // c - "bulk invitation/{docid}"
 exports.invitationAccepted = queueSystem.invitationAccepted // u - "studioinvitation/{docid}"
 exports.queueavtest = queueSystem.queueavtest //  c - "queue avtest/{docid}"

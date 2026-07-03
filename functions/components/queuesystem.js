@@ -2567,6 +2567,14 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
       }
     }
 
+    if (zoomEvent === 'recording.transcript_completed') {
+      const meetingId = request.body.payload.object.id;
+      console.log("transcript completed for meetingId", meetingId);
+      await handleRecordingTranscriptCompleted(meetingId);
+      response.status(200).json(null);
+      return;
+    }
+
     response.status(200).json(null);
   } catch (error) {
     console.error("Error processing zoom event:", error);
@@ -3617,6 +3625,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
 // ATC logic without the surrounding WATI/Zoom/Slack side effects.
 exports.processStage = processStage;
 exports.resolvePreviousStage = resolvePreviousStage;
+exports.handleRecordingTranscriptCompleted = handleRecordingTranscriptCompleted;
 
 // ---------- Helpers ----------
 async function getTranscript(meetingId) {
@@ -3658,6 +3667,50 @@ async function getTranscript(meetingId) {
     transcript_text: convertVttToLLM(vttContent),
     download_url: transcriptFile.download_url,
   };
+}
+
+// Handles the "recording.transcript_completed" zoomActivitylog branch — this
+// event fires once the transcript specifically is ready (separately from,
+// and later than, "recording.completed"), so unlike that branch there's no
+// timing race here: getTranscript's re-fetch of /meetings/{id}/recordings
+// should reliably find the TRANSCRIPT file at this point.
+// `fetchTranscript` is injectable so tests can avoid hitting the real Zoom API.
+async function handleRecordingTranscriptCompleted(meetingId, { fetchTranscript = getTranscript } = {}) {
+  if (!meetingId) return console.log("handleRecordingTranscriptCompleted: missing meetingId");
+
+  const snapshot = await admin.firestore().collection('live assignment').where('zoomdata.id', '==', meetingId).get();
+  if (snapshot.empty) {
+    return console.log(`handleRecordingTranscriptCompleted: no live assignment for meeting ${meetingId}`);
+  }
+  const liveAssignmentDoc = snapshot.docs[0];
+  if (liveAssignmentDoc.data().transcript_text) {
+    // idempotent guard — Zoom may resend the same webhook event.
+    return console.log(`handleRecordingTranscriptCompleted: transcript already captured for ${liveAssignmentDoc.id}`);
+  }
+
+  try {
+    const result = await fetchTranscript(meetingId);
+    if (!result || !result.transcript_text || !result.transcript_text.trim()) {
+      throw new Error(`empty transcript for meeting ${meetingId}`);
+    }
+    await liveAssignmentDoc.ref.update({
+      transcript_text: result.transcript_text,
+      transcript_raw: result.transcript_raw,
+      zoom_topic: result.topic,
+      zoom_start_time: result.start_time,
+      zoom_duration: result.duration,
+      transcriptCapturedAt: admin.firestore.FieldValue.serverTimestamp(),
+      transcriptCaptureStatus: "captured",
+    });
+    console.log(`handleRecordingTranscriptCompleted: captured transcript for live assignment ${liveAssignmentDoc.id} (meeting ${meetingId})`);
+  } catch (err) {
+    console.error(`handleRecordingTranscriptCompleted: failed for meeting ${meetingId}: ${err.message}`);
+    await liveAssignmentDoc.ref.set({
+      transcriptCaptureStatus: "failed",
+      transcriptCaptureFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      transcriptCaptureLastError: err.message,
+    }, { merge: true });
+  }
 }
 
 function convertVttToLLM(vttText) {

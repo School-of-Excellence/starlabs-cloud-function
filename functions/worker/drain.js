@@ -25,7 +25,7 @@ const admin = require("firebase-admin");
 if (!admin.apps.length) admin.initializeApp();
 
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { claimNextJob, writeJobResult, requeueJob, DEFAULT_COLLECTION } = require("../components/pod_jobs");
+const { claimNextJob, writeJobResult, requeueJob, DEFAULT_COLLECTION } = require("../components/pod-execution-pipeline/pod_jobs");
 
 const db = admin.firestore();
 const WORKER_DOC = "pod_worker";

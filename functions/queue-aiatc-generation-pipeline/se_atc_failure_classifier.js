@@ -1,5 +1,5 @@
 /**
- * se_atc_failure_classifier.js — scope-enhancement-atc-pipeline (usage dashboard)
+ * se_atc_failure_classifier.js — queue-aiatc-generation-pipeline (usage dashboard)
  *
  * Pure, dependency-free classifier that maps the freeform failure signals already
  * present on a terminal ATC job (the `reason` passed to requeueJob, the model's
@@ -8,7 +8,7 @@
  * for per-record drill-down; this category is what the usage rollup tallies so the
  * dashboard can chart *why* reports fail.
  *
- * Imported by components/pod_jobs.js at the terminal-state writes.
+ * Imported by components/pod-execution-pipeline/pod_jobs.js at the terminal-state writes.
  *
  * Categories (keep this list in sync with the dashboard legend):
  *   infer_timeout    — inference exceeded the timeout
