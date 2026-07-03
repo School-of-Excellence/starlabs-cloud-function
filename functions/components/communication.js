@@ -5049,7 +5049,6 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
   }
 });
 
-
   exports.productenquiryfromeiflix = onDocumentCreated("productenquirylog/{docid}", async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();
@@ -5073,4 +5072,3 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       });
     }
   });
-
