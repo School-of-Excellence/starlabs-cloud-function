@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /*
- * predeploy.js — the CF PREDEPLOY gate (master plan 2026-07-02, L13/L14; scoped + interactive
- * per operator lock 2026-07-03).
+ * predeploy.js — the CF PREDEPLOY gate (master plan 2026-07-02 L13/L14; Option B rework 2026-07-05).
  *
  * Wired in firebase.json → runs on EVERY `firebase deploy`. Flow:
+ *   0. REQUIRE GitHub CLI login — postdeploy records the deploy under the dev's identity (`gh auth token`);
  *   1. regenerate functions-manifest.json (guard + console read it);
- *   2. detect WHICH functions this deploy ships (parses the parent `firebase deploy` command's
- *      --only list — hooks receive no args, but the parent cmdline is readable via ps);
- *   3. PROMPT: run the loop-guard? [Y = test / s = skip]  (30s auto-Y; non-TTY → always test;
- *      SKIP_TEST=1 env = explicit non-interactive skip);
- *   4. if testing: run the hub's cf-predeploy.sh scoped via GUARD_ONLY to the deploying functions
- *      (full deploy → all functions). NON-ZERO EXIT ⇒ the CLI ABORTS the deploy.
+ *   2. detect WHICH functions this deploy ships (parse the parent `firebase deploy --only`);
+ *   3. fast-skip if no deploying function is a Firestore trigger (nothing the loop-guard can exercise);
+ *   4. PROMPT: run the loop-guard?  (non-TTY/CI → always run; SKIP_TEST=1 → explicit skip);
+ *   5. ensureHubCache(): auto-clone/refresh the PUBLIC hub into .cicd-hub/ (gitignored, sha-versioned);
+ *   6. run the hub's cf-predeploy.sh FROM THE CACHE (boots the emulator with THIS repo's code, runs
+ *      the guard). NON-ZERO EXIT ⇒ the Firebase CLI ABORTS the deploy.
  *
- * GOAL: every function about to deploy is loop-guard-tested — no more, no less.
- * Setup (one-time): bash scripts/cicd/setscript.sh  (writes .env.cicd — hub path + ingest token).
+ * Option B (2026-07-05): no .env.cicd, no setscript.sh, no E2E_HUB_PATH, no local hub to maintain.
+ * The guard machinery stays the hub's — reused VERBATIM from the cache → zero drift. The only thing a
+ * developer needs is `gh auth login` (identity) plus the tooling they already have to deploy CF
+ * (git, Node 22, Java 21, firebase-tools).
  */
 const { spawnSync, execSync } = require('child_process');
 const readline = require('readline');
@@ -21,16 +23,19 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const HUB_REPO = 'https://github.com/School-of-Excellence/starlabs-e2e-tests';
+const CACHE = path.join(REPO_ROOT, '.cicd-hub'); // gitignored, auto-managed hub checkout
 
-function loadEnvFile() {
-  const p = path.join(REPO_ROOT, '.env.cicd');
-  const out = {};
-  if (!fs.existsSync(p)) return out;
-  for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, '');
+// --- gh auth gate: identity-based deploy recording needs `gh auth token` (postdeploy). Fail fast so a
+//     dev never deploys and then silently fails to record. -----------------------------------------
+function requireGhAuth() {
+  try {
+    execSync('gh auth status', { stdio: 'ignore' });
+  } catch {
+    console.error('✋ predeploy blocked: not logged in to the GitHub CLI.');
+    console.error('   Run:  gh auth login        (needed so the deploy is recorded to the console)');
+    process.exit(1);
   }
-  return out;
 }
 
 /**
@@ -116,19 +121,66 @@ function askRunTests(scopeLabel) {
   });
 }
 
-(async () => {
-  const envFile = loadEnvFile();
-  const HUB = process.env.E2E_HUB_PATH || envFile.E2E_HUB_PATH;
-  const TOKEN = process.env.CONSOLE_INGEST_TOKEN || envFile.CONSOLE_INGEST_TOKEN;
+// --- Option B: keep the PUBLIC hub cached + set up, then reuse its cf-predeploy.sh (no drift) ------
+function hubLatestSha() {
+  try {
+    return execSync(`git ls-remote ${HUB_REPO} refs/heads/main`, { encoding: 'utf8' }).split(/\s/)[0];
+  } catch {
+    return '';
+  }
+}
 
-  console.log('\n══ CF predeploy gate (loop-guard) ═══════════════════════════════');
+/**
+ * Ensure .cicd-hub/ holds a ready, up-to-date checkout of the (public) hub. "Check latest version,
+ * else use cache": compare the remote main sha against .cicd-hub/.hubversion.
+ *   - warm + current            → reuse instantly (no network work beyond ls-remote)
+ *   - offline but cache ready    → reuse with a staleness warning
+ *   - offline and no cache       → fail closed (can't guarantee the guard)
+ *   - new sha / no cache         → shallow clone (or fetch+reset) + npm ci + stage emulator config
+ */
+function ensureHubCache() {
+  const ready = fs.existsSync(path.join(CACHE, 'scripts', 'cf-predeploy.sh'));
+  const versionFile = path.join(CACHE, '.hubversion');
+  const cachedSha = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : '';
+  const latest = hubLatestSha();
 
-  // ONE CONTRACT (locked 2026-07-03): no complete .env.cicd → no deploy.
-  if (!TOKEN) {
-    console.error('✋ predeploy blocked: CONSOLE_INGEST_TOKEN missing from .env.cicd.');
-    console.error('   One-time setup: bash scripts/cicd/setscript.sh');
+  if (ready && cachedSha && (latest === cachedSha || latest === '')) {
+    if (latest === '') console.warn('   ⚠ could not reach GitHub — using the cached guard (may be stale).');
+    return;
+  }
+  if (!latest && !ready) {
+    console.error('✋ predeploy blocked: guard not cached and GitHub is unreachable — cannot verify the');
+    console.error('   deploying triggers are loop-safe. Connect to the network and retry.');
     process.exit(1);
   }
+
+  console.log(`   preparing guard environment (${ready ? 'updating' : 'first-time clone of'} the hub)…`);
+  try {
+    if (!fs.existsSync(path.join(CACHE, '.git'))) {
+      fs.rmSync(CACHE, { recursive: true, force: true });
+      execSync(`git clone --depth 1 ${HUB_REPO} "${CACHE}"`, { stdio: 'inherit' });
+    } else {
+      execSync('git fetch --depth 1 origin main', { cwd: CACHE, stdio: 'inherit' });
+      execSync('git reset --hard origin/main', { cwd: CACHE, stdio: 'inherit' });
+    }
+    execSync('npm ci', { cwd: CACHE, stdio: 'inherit' });
+    // CF-guard-only: stage the emulator config WITHOUT wiring the Angular app (the guard runs no app —
+    // a bare hub clone has no app symlink, so the full overlay would fail on APP_PATH). See the hub's
+    // ci/setup-emulator-config.sh CF_GUARD_ONLY branch.
+    execSync('CF_GUARD_ONLY=1 bash ci/setup-emulator-config.sh', { cwd: CACHE, stdio: 'inherit' });
+    fs.writeFileSync(versionFile, latest);
+  } catch (e) {
+    console.error('✋ predeploy blocked: failed to prepare the guard cache (.cicd-hub).');
+    console.error(`   Remove .cicd-hub and retry, or check network/Node 22/Java 21. Details: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+(async () => {
+  console.log('\n══ CF predeploy gate (loop-guard) ═══════════════════════════════');
+
+  // 0. Identity gate — postdeploy records under the dev's GitHub identity.
+  requireGhAuth();
 
   // 1. Fresh manifest — the guard seeds from it; the console reads it per-branch.
   const gen = spawnSync(process.execPath, [path.join(__dirname, 'generate-manifest.js')], {
@@ -146,16 +198,19 @@ function askRunTests(scopeLabel) {
   console.log(`   deploying: ${scopeLabel}`);
 
   // Fast path: scoped deploy where NONE of the functions is a Firestore trigger → nothing the
-  // loop-guard can exercise; skip the emulator boot entirely (honest: logged, not silent).
+  // loop-guard can exercise; skip the whole hub/emulator boot (honest: logged, not silent).
   if (only) {
     try {
       const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'functions-manifest.json'), 'utf8'));
-      const triggers = new Set(
-        (manifest.functions ?? [])
-          .filter((f) => f.triggerPath)
-          .map((f) => f.name),
-      );
-      if (!only.some((n) => triggers.has(n))) {
+      const byName = new Map((manifest.functions ?? []).map((f) => [f.name, f]));
+      // Skip the guard ONLY if EVERY deploying function is KNOWN to the manifest AND is definitively a
+      // non-Firestore-trigger. An unknown function (manifest missed it) or an UNKNOWN type is treated as
+      // "might loop" → run the guard (fail-safe). Prevents a manifest gap from silently ungating a deploy.
+      const mightTrigger = only.some((n) => {
+        const f = byName.get(n);
+        return !f || f.triggerPath || f.type === 'UNKNOWN';
+      });
+      if (!mightTrigger) {
         console.log('   ✓ none of the deploying functions is a Firestore trigger — nothing to loop-guard.');
         process.exit(0);
       }
@@ -171,17 +226,10 @@ function askRunTests(scopeLabel) {
     process.exit(0);
   }
 
-  // 4. The dynamic loop-guard (hub-owned), scoped via GUARD_ONLY when --only was used.
-  if (!HUB || !fs.existsSync(path.join(HUB, 'scripts', 'cf-predeploy.sh'))) {
-    console.error('✋ predeploy blocked: E2E_HUB_PATH is not set (or has no scripts/cf-predeploy.sh).');
-    console.error('   One-time setup: bash scripts/cicd/setscript.sh');
-    console.error('   (prompts for the hub path — clones the public hub if you lack one — and');
-    console.error('   fetches the ingest token, then writes .env.cicd).');
-    process.exit(1);
-  }
-
-  const guard = spawnSync('bash', [path.join(HUB, 'scripts', 'cf-predeploy.sh')], {
-    cwd: HUB,
+  // 4. Ensure the cached hub, then run its (hub-owned) guard against THIS repo's code.
+  ensureHubCache();
+  const guard = spawnSync('bash', [path.join(CACHE, 'scripts', 'cf-predeploy.sh')], {
+    cwd: CACHE,
     stdio: 'inherit',
     env: { ...process.env, CF_DIR: REPO_ROOT, ...(only ? { GUARD_ONLY: only.join(',') } : {}) },
   });
