@@ -415,6 +415,24 @@ exports.podWorkerUpdate = onRequest({ secrets: [sharedSecret] }, (req, res) => {
         return res.status(200).json({ success: true, action: "terminated" });
       }
 
+      // Clean budget-halt from the drain Job (maxJobsPerRun hit). Unlike
+      // "unhealthy" this is NOT a failure: no in-flight job to requeue (the
+      // last job finished before the loop broke), remaining jobs stay pending.
+      // Land in HALTED so atcPodLifecycle will NOT relaunch — a human clears
+      // `halted` + sets state=IDLE to resume.
+      if (event === "halt") {
+        await terminateAndReset(cfg, podid, collectionName, STATES.HALTED);
+        await workerRef().set({
+          halted: true,
+          haltedReason: detail || "job budget reached",
+          lastUpdateAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        await alertAtc("info", `Pod ${podid} halted after job budget: ${detail || "(no detail)"} — manual reset to resume.`, {
+          stage: "PodWorker", webhookUrl: cfg.SLACK_WEBHOOK_URL,
+        });
+        return res.status(200).json({ success: true, action: "halted" });
+      }
+
       if (event === "unhealthy") {
         const decision = await markUnhealthy({ podid, reason: detail, collectionName });
         if (decision.action === "terminate") {
