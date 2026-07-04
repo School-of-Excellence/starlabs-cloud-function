@@ -38,9 +38,21 @@ always runs it).
   as yourself. `recordCfDeploy` verifies you have push access to this repo and records `by` as your
   GitHub login.
 
+## Follow-up fix (same day): inline functions were invisible to the guard
+`generate-manifest.js` only recognized the repo convention `exports.X = module.fn` (component re-exports),
+so a function defined INLINE in `index.js` (`exports.testHUB = onDocumentCreated("test/{docid}", …)`) was
+missing from the manifest → the predeploy fast-path saw "no trigger" and skipped the guard. Fixes:
+- `generate-manifest.js` — also parse the inline form (`exports.X = factory(...)`), using `index.js` as
+  the body for type/trigger detection. (testHUB now appears: 140 fns / 85 triggers.)
+- `predeploy.js` — fast-path now runs the guard when a deploying function is **unknown to the manifest**
+  or typed `UNKNOWN` (fail-safe), not just when a known function has a `triggerPath`.
+- NOTE: an inline function still needs adding to `functions/index.emulator.js` for the guard to *execute*
+  it (`emulatorLoaded` flag) — the emulator boots the filtered entry by design.
+
 ## Files
-- **Changed:** `scripts/cicd/predeploy.js` (gh-auth gate + `.cicd-hub` cache + run cached guard),
-  `scripts/cicd/postdeploy.js` (`gh auth token` auth), `.gitignore` (`+ .cicd-hub/`).
+- **Changed:** `scripts/cicd/predeploy.js` (gh-auth gate + `.cicd-hub` cache + run cached guard +
+  fast-path fail-safe), `scripts/cicd/postdeploy.js` (`gh auth token` auth),
+  `scripts/cicd/generate-manifest.js` (inline-function detection), `.gitignore` (`+ .cicd-hub/`).
 - **Deleted:** `.env.cicd`, `.env.cicd.example`, `scripts/cicd/setscript.sh`.
 - **Unchanged:** `scripts/cicd/generate-manifest.js`, `functions/index.emulator.js`, `firebase.json`
   (hooks already correct), `functions/package.json` (playwright lives in the cached hub, not here).

@@ -164,7 +164,10 @@ function ensureHubCache() {
       execSync('git reset --hard origin/main', { cwd: CACHE, stdio: 'inherit' });
     }
     execSync('npm ci', { cwd: CACHE, stdio: 'inherit' });
-    execSync('bash ci/setup-emulator-config.sh', { cwd: CACHE, stdio: 'inherit' });
+    // CF-guard-only: stage the emulator config WITHOUT wiring the Angular app (the guard runs no app —
+    // a bare hub clone has no app symlink, so the full overlay would fail on APP_PATH). See the hub's
+    // ci/setup-emulator-config.sh CF_GUARD_ONLY branch.
+    execSync('CF_GUARD_ONLY=1 bash ci/setup-emulator-config.sh', { cwd: CACHE, stdio: 'inherit' });
     fs.writeFileSync(versionFile, latest);
   } catch (e) {
     console.error('✋ predeploy blocked: failed to prepare the guard cache (.cicd-hub).');
@@ -199,8 +202,15 @@ function ensureHubCache() {
   if (only) {
     try {
       const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'functions-manifest.json'), 'utf8'));
-      const triggers = new Set((manifest.functions ?? []).filter((f) => f.triggerPath).map((f) => f.name));
-      if (!only.some((n) => triggers.has(n))) {
+      const byName = new Map((manifest.functions ?? []).map((f) => [f.name, f]));
+      // Skip the guard ONLY if EVERY deploying function is KNOWN to the manifest AND is definitively a
+      // non-Firestore-trigger. An unknown function (manifest missed it) or an UNKNOWN type is treated as
+      // "might loop" → run the guard (fail-safe). Prevents a manifest gap from silently ungating a deploy.
+      const mightTrigger = only.some((n) => {
+        const f = byName.get(n);
+        return !f || f.triggerPath || f.type === 'UNKNOWN';
+      });
+      if (!mightTrigger) {
         console.log('   ✓ none of the deploying functions is a Firestore trigger — nothing to loop-guard.');
         process.exit(0);
       }
