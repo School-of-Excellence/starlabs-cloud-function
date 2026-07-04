@@ -1,32 +1,23 @@
 #!/usr/bin/env node
 /*
- * postdeploy.js — report EVERY `firebase deploy` to the release console (master plan 2026-07-02,
- * L15/L16). This is what makes "deployed to starlabs-test but code not pushed yet" VISIBLE on the
- * CF Board's Dev/Prod matrix — the exact case webhooks can never see.
+ * postdeploy.js — report EVERY `firebase deploy` to the release console (master plan L15/L16;
+ * identity auth 2026-07-05). This is what makes "deployed to starlabs-test but code not pushed yet"
+ * VISIBLE on the CF Board's Dev/Prod matrix — the exact case webhooks can never see.
  *
- * POSTs {repo, project, branch, sha, by, functions[]} → recordCfDeploy (bearer CONSOLE_INGEST_TOKEN).
+ * POSTs {repo, project, branch, sha, by, functions[]} → recordCfDeploy, authenticated with the DEV'S
+ * OWN GitHub token (`gh auth token`). recordCfDeploy verifies the caller has PUSH access to the CF
+ * repo and stamps `by` from the verified identity — NO shared secret on the dev machine, NO .env.cicd.
+ * (CI may still inject the shared CONSOLE_INGEST_TOKEN; that path is honored first.)
+ *
  * BEST-EFFORT BY DESIGN: the deploy already happened — a reporting hiccup must not fail the deploy
- * command, so this script ALWAYS exits 0 (reconcilePoll's Cloud-Functions-API check heals misses
- * within 30 minutes).
- *
- * Setup: .env.cicd with CONSOLE_INGEST_URL + CONSOLE_INGEST_TOKEN (see .env.cicd.example).
+ * command, so this script ALWAYS exits 0 (the audit-log webhook cfDeployEvent heals a miss, minus sha).
  */
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-
-function loadEnvFile() {
-  const p = path.join(REPO_ROOT, '.env.cicd');
-  const out = {};
-  if (!fs.existsSync(p)) return out;
-  for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-  return out;
-}
+const INGEST_URL = process.env.CONSOLE_INGEST_URL || 'https://us-central1-starlabs-cicd.cloudfunctions.net';
 
 function git(cmd) {
   try {
@@ -36,14 +27,22 @@ function git(cmd) {
   }
 }
 
+/** The bearer for recordCfDeploy: a CI-injected shared token if present, else the dev's GitHub identity. */
+function ingestBearer() {
+  if (process.env.CONSOLE_INGEST_TOKEN) return process.env.CONSOLE_INGEST_TOKEN;
+  try {
+    return execSync('gh auth token', { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
 (async () => {
-  const envFile = loadEnvFile();
-  const BASE = process.env.CONSOLE_INGEST_URL || envFile.CONSOLE_INGEST_URL || 'https://us-central1-starlabs-cicd.cloudfunctions.net';
-  const TOKEN = process.env.CONSOLE_INGEST_TOKEN || envFile.CONSOLE_INGEST_TOKEN;
+  const token = ingestBearer();
   const project = process.env.GCLOUD_PROJECT || '';
 
-  if (!TOKEN) {
-    console.warn('[postdeploy] CONSOLE_INGEST_TOKEN not set (.env.cicd) — deploy NOT reported to the console (matrix heals via the audit-log webhook (cfDeployEvent)).');
+  if (!token) {
+    console.warn('[postdeploy] no GitHub auth (run `gh auth login`) and no CONSOLE_INGEST_TOKEN — deploy NOT reported (matrix heals via the audit-log webhook cfDeployEvent).');
     return;
   }
   if (!project) {
@@ -63,6 +62,7 @@ function git(cmd) {
     project,
     branch: git('rev-parse --abbrev-ref HEAD') || 'unknown',
     sha: git('rev-parse HEAD') || undefined,
+    // Sent as a hint; recordCfDeploy OVERRIDES it with the verified GitHub login on the identity path.
     by: git('config user.email') || undefined,
     functions: (manifest.functions ?? []).map((f) => ({
       name: f.name,
@@ -73,9 +73,9 @@ function git(cmd) {
   };
 
   try {
-    const resp = await fetch(`${BASE}/recordCfDeploy`, {
+    const resp = await fetch(`${INGEST_URL}/recordCfDeploy`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });

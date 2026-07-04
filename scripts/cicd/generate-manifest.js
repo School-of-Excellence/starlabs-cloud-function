@@ -36,11 +36,24 @@ function parseIndexFile(indexPath) {
   let m;
   while ((m = requireRegex.exec(content)) !== null) requires[m[1]] = m[2];
   const functions = [];
-  const exportRegex = /exports\.(\w+)\s*=\s*(\w+)\.(\w+)/g;
-  while ((m = exportRegex.exec(content)) !== null) {
-    functions.push({ exportName: m[1], moduleName: m[2], functionName: m[3] });
+  const seen = new Set();
+  // (a) re-export form — the repo convention: `exports.X = module.fn` (body lives in the component file).
+  const reexportRegex = /exports\.(\w+)\s*=\s*(\w+)\.(\w+)/g;
+  while ((m = reexportRegex.exec(content)) !== null) {
+    if (seen.has(m[1])) continue;
+    functions.push({ kind: 'reexport', exportName: m[1], moduleName: m[2], functionName: m[3] });
+    seen.add(m[1]);
   }
-  return { requires, functions };
+  // (b) INLINE form — `exports.X = onDocumentCreated(...)` defined directly in index.js (body is HERE,
+  //     not in a component file). Without this, inline functions are invisible to the manifest and thus
+  //     ungated by the loop-guard — the testHUB miss, 2026-07-05.
+  const inlineRegex = /exports\.(\w+)\s*=\s*[\w.]+\s*\(/g;
+  while ((m = inlineRegex.exec(content)) !== null) {
+    if (seen.has(m[1])) continue;
+    functions.push({ kind: 'inline', exportName: m[1] });
+    seen.add(m[1]);
+  }
+  return { requires, functions, indexContent: content };
 }
 
 function readComponentFiles(requires, indexDir) {
@@ -98,7 +111,7 @@ function exportedNames(indexPath) {
 
 function main() {
   const indexPath = path.join(FUNCTIONS_DIR, 'index.js');
-  const { requires, functions } = parseIndexFile(indexPath);
+  const { requires, functions, indexContent } = parseIndexFile(indexPath);
   const files = readComponentFiles(requires, FUNCTIONS_DIR);
   // The emulator boots the FILTERED entry — flag which functions it actually loads, so the
   // loop-guard can report "no coverage" honestly instead of false-passing (hub cf-predeploy.sh).
@@ -106,14 +119,22 @@ function main() {
 
   const out = functions
     .map((f) => {
-      const reqPath = requires[f.moduleName];
-      const content = reqPath ? files[reqPath] : null;
-      const body = content ? functionBody(content, f.functionName) : '';
+      let body;
+      let file;
+      if (f.kind === 'inline') {
+        body = functionBody(indexContent, f.exportName); // defined inline in index.js
+        file = 'index.js';
+      } else {
+        const reqPath = requires[f.moduleName];
+        const content = reqPath ? files[reqPath] : null;
+        body = content ? functionBody(content, f.functionName) : '';
+        file = reqPath ? `${reqPath.replace(/^\.\//, '')}.js` : undefined;
+      }
       const type = body ? detectType(body) : 'UNKNOWN';
       return {
         name: f.exportName,
         type,
-        file: reqPath ? `${reqPath.replace(/^\.\//, '')}.js` : undefined,
+        file,
         ...detectTrigger(body),
         emulatorLoaded: emulatorExports.has(f.exportName),
         codebase: 'default',
