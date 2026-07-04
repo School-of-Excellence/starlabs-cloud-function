@@ -39,7 +39,7 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
         Key: videoKey,
       });
 
-      const url = await AWS_S3Request.getSignedUrl(s3, command, { expiresIn: 600 }); // 10 min
+      const url = await AWS_S3Request.getSignedUrl(s3, command, { expiresIn: 360 }); // 6 min
       res.status(200).json({ url });
     } catch (error) {
       console.error("Unable to Get Signed URL:", error);
