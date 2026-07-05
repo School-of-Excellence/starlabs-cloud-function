@@ -132,6 +132,20 @@ async function main() {
 
     try {
       const result = await callInfer({ apiUrl, bearerToken, model, maxTokens, job });
+      // Guard against a "successful" call that produced no usable text: the model
+      // sometimes returns an empty content field. Do NOT finalize it as completed
+      // (that would ship a blank ATC and never retry) — requeue to the BACK of the
+      // queue, attempts-capped, so we try other jobs first and give this one another
+      // shot later. Doesn't count toward the per-run job budget (only real output does).
+      const emptyOutput = !result.output || String(result.output).trim() === "";
+      if (emptyOutput) {
+        const r = await requeueJob({
+          collectionName, path: job.path, reason: "empty output", podId: podid,
+          maxAttempts, toBack: true,
+        });
+        console.warn("drain: empty output — requeued to back", { job: job.jobId, attempts: r.attempts, errored: !!r.errored });
+        continue; // try the next job; empty output is not a completed job
+      }
       await writeJobResult({
         result: { path: job.path, ...result },
         podId: podid,
