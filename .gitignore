@@ -64,7 +64,9 @@ node_modules/
 
 # dotenv environment variables file
 .env
+# CI/CD predeploy loop-guard cache — the auto-managed hub checkout (Option B, 2026-07-05). Never commit.
+.cicd-hub/
+# legacy per-developer CI/CD config (removed 2026-07-05 — identity auth via `gh`, no local hub). Ignore in case a stale copy lingers.
+.env.cicd
 
-# Scripts
-/scripts
 *.csv
