@@ -214,7 +214,14 @@ exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackinteg
 exports.workshopQandA = communication.workshopQandA
 exports.workshopFormsSubmission = communication.workshopFormsSubmission
 exports.workshopAssignment = communication.workshopAssignment
-
+//workshop payment
+exports.createWorkshopPaymentOrder = workshop.createWorkshopPaymentOrder
+exports.verifyWorkshopPayment      = workshop.verifyWorkshopPayment
+// On-demand recovery for a payment captured on Razorpay but not settled here
+// (e.g. the browser died right after checkout). The background safety-net sweep
+// (`runWorkshopPaymentReconcile`) is NOT its own scheduled function — it is
+// invoked from the existing every-5-minutes `appointmentremainder` schedule.
+exports.reconcileWorkshopPayment   = workshop.reconcileWorkshopPayment
 //workshop communication
 exports.workshopenrolledwatti = workshop.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
