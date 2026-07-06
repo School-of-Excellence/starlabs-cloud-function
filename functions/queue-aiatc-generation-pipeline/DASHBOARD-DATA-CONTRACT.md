@@ -45,8 +45,9 @@ One doc per job. Use aggregation `count()` queries for live tiles (cheap).
 
 | field | type | meaning |
 |---|---|---|
-| `status` | string | `pending` \| `processing` \| `completed` \| `error` |
-| `type` | string | `form` \| `zoom` (\| on-hold: `checkpoint report` \| `rubrics scoring`) |
+| `status` | string | `dataincomplete` \| `pending` \| `processing` \| `completed` \| `error` |
+| `type` | string | `form` \| `zoom` — own-stage type (drives `byType` rollup; always present) |
+| `stagedata` | map | redesigned workflow: `stagename → {data,category,status,type,queueid,queuetokenid}` for the own stage + every pairing stage (`category`: `own`\|`mandatory`\|`atleastonerequired`; `status`: `resolved`\|`missing`). The dashboard reads this to show *which* pairing stage is missing on a `dataincomplete` doc. |
 | `profileid` | string | coach |
 | `stage` | string | queue stage (e.g. "Scope Enhancement") |
 | `createdAt` | ts | enqueue time |
@@ -57,6 +58,7 @@ One doc per job. Use aggregation `count()` queries for live tiles (cheap).
 | `attempts` | number | retry count |
 
 **Live tiles (real-time):**
+- Data-incomplete now: `where status==dataincomplete` → `count()` — created but blocked on missing mandatory/atleastonerequired pairing data; each is actionable via the `regenerateAtcDoc` button (reads `stagedata` to show what's missing)
 - Pending now: `where status==pending` → `count()`
 - In-flight: `where status==processing` → `count()`
 - Stuck (live): `where status==processing AND startedAt <= now-30min` → `count()`
@@ -77,7 +79,9 @@ Jobs that were **never created** because an S0/S1 gate bailed (the biggest silen
 | `lastReason` | string | most recent reason |
 | `lastExtra` | map | `{ profileid, queueTokenId, stage, docid }` of the last one (debug) |
 
-**Drop-off reasons:** `no_form_submission`, `no_studio_session`, `no_liveassignment`, `no_zoom_meeting`, `transcript_fetch_failed`, `empty_transcript`, `unknown_stage_type` (S0); `generateatc_false`, `atcprompts_missing` (S1).
+**Drop-off reasons:** `generateatc_false`, `no_form_submission`, `no_studio_session`, `no_liveassignment`, `no_zoom_meeting`, `transcript_fetch_failed`, `unknown_stage_type` (S0 — the OWN stage source could not be resolved, so no doc was created); `atcprompts_missing`, `no_stagedata`, `no_resolved_stages` (S1).
+
+> **Redesigned-workflow note:** a *drop-off* now means only the **own-stage** source was unresolvable (nothing to generate from → no doc). Missing **pairing** data no longer drops off — it creates a `dataincomplete` doc instead (see §2 live tile + the `dataincompleteCount` gauge in §4). So "breaks" (never-created) and "dataincomplete" (created-but-blocked) are two distinct panels.
 
 **Breaks tile:** `_dropoffs/{today}.total` + `byReason` breakdown.
 
@@ -89,6 +93,7 @@ Point-in-time gauge written by `atcJobWatchdog` (hourly). `latest` = newest samp
 | field | type | meaning |
 |---|---|---|
 | `pendingCount` / `processingCount` / `stuckCount` | number | queue depth by state |
+| `dataincompleteCount` | number | docs blocked on missing pairing data (redesigned workflow) |
 | `oldestPendingAgeMin` | number | age of oldest pending job |
 | `podState` | string | `pod_worker.state` at sample time |
 | `collectionName` | string | source collection |
@@ -124,6 +129,7 @@ Idempotency marker (`lifetimeApplied`, `appliedAt`). **Not for the dashboard** �
 | Panel | Source | Cadence |
 |---|---|---|
 | Pod status | `classify/pod_worker` | live |
+| Data-incomplete now (actionable) | `queue_atc_generation` `status==dataincomplete` count() (+ read `stagedata` per doc) | live |
 | Backlog (pending/processing now) | `queue_atc_generation` count() | live |
 | Stuck now | `queue_atc_generation` `processing & startedAt<now-30m` | live |
 | Done / errors **today** | `queue_atc_generation` by `finalizedAt>=todayIST` | live |
@@ -134,3 +140,5 @@ Idempotency marker (`lifetimeApplied`, `appliedAt`). **Not for the dashboard** �
 | Lifetime totals | `_lifetime/__ALL` | nightly |
 
 > **Note:** throughput/error/turnaround stay at zero until production is **armed** (`classify/pod_worker.enabled=true`) so jobs actually drain to a terminal state. Drop-offs and live raw-queue tiles populate regardless.
+
+> **Known gap (deferred):** there is no *conversion* metric for the redesigned workflow (how many `dataincomplete` docs eventually reach `completed` after a regenerate). `dataincomplete` is non-terminal (like `pending`) so the nightly `_daily`/`_lifetime` rollups — which window on `finalizedAt` — intentionally exclude it. If a conversion funnel is wanted later, stamp a `dataincompleteAt` on creation and diff against `finalizedAt` in the rollup.

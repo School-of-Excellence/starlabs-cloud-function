@@ -11,13 +11,13 @@
 FROM node:22-slim
 WORKDIR /app
 
-# Deterministic prod deps. drain.js → components/pod_jobs →
-# scope-enhancement-atc-pipeline/se_atc_failure_classifier need firebase-admin;
+# Deterministic prod deps. drain.js → components/pod-execution-pipeline/pod_jobs →
+# queue-aiatc-generation-pipeline/se_atc_failure_classifier need firebase-admin;
 # install the full set so every transitive require resolves.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# App source (components/, worker/, scope-enhancement-atc-pipeline/, …).
+# App source (components/, worker/, queue-aiatc-generation-pipeline/, …).
 # node_modules/.git are excluded via .dockerignore so the npm ci layer is kept.
 COPY . .
 

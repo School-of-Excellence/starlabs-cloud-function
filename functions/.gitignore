@@ -19,3 +19,7 @@ CLAUDE.md
 
 # on-hold doc backups (prod data dumps — do not commit)
 atc-onhold-backup-*/
+backup/
+
+# graphify knowledge-graph build output — regenerable, not source
+graphify-out/

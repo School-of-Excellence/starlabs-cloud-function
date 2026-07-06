@@ -1,5 +1,5 @@
 /**
- * se_atc_telemetry.js — scope-enhancement-atc-pipeline telemetry helpers.
+ * se_atc_telemetry.js — queue-aiatc-generation-pipeline telemetry helpers.
  *
  * Fills the gaps the nightly seAtcUsageRollup can't see (it only windows on
  * `finalizedAt` = terminal jobs). These capture:
@@ -56,12 +56,15 @@ async function recordDropoff(stage, reason, extra = {}) {
 /**
  * Point-in-time backlog gauge — writes a "latest" doc (overwrite) plus a per-IST-day
  * doc (so a daily trend exists). Call from the watchdog, which already computes these.
- * @param {object} g {pendingCount, processingCount, stuckCount, oldestPendingAgeMin, collectionName, podState}
+ * @param {object} g {pendingCount, processingCount, dataincompleteCount, stuckCount, oldestPendingAgeMin, collectionName, podState}
  */
 async function writeBacklogGauge(g = {}) {
   const payload = {
     pendingCount: g.pendingCount || 0,
     processingCount: g.processingCount || 0,
+    // Redesigned workflow: docs waiting on missing pairing data (never reach
+    // pending/processing until the regenerate button completes them).
+    dataincompleteCount: g.dataincompleteCount || 0,
     stuckCount: g.stuckCount || 0,
     oldestPendingAgeMin: g.oldestPendingAgeMin || 0,
     collectionName: g.collectionName || "",
