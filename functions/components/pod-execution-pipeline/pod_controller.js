@@ -113,7 +113,9 @@ async function callController(fnName, data) {
 }
 
 // ── Public API (mirrors the controller's three callables) ────────────────────
-const launchPod = (configId) => callController("launchPod", { config_id: configId });
+// notify:true asks the controller to PUSH this pod's ready/failure back to
+// podWorkerUpdate (so the lifecycle doesn't wait for its backstop poll to notice).
+const launchPod = (configId) => callController("launchPod", { config_id: configId, notify: true });
 const terminatePod = (podId) => callController("terminatePod", { pod_id: podId });
 async function getPodBearer(podId) {
   const r = await callController("getPodBearer", { pod_id: podId });

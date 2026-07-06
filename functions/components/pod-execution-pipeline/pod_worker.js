@@ -320,9 +320,13 @@ async function terminateAndReset(cfg, podid, collectionName, finalState = STATES
 }
 
 // ── atcPodLifecycle — the state-machine clock ────────────────────────────────
-// every 2 min: IDLE→launch gate (batched), LOADING→ready poll (+ load timeout).
+// PRIMARY job: the IDLE→launch gate (batched). LOADING→READY discovery and
+// failed-boot HALT are now driven by the controller PUSH (podWorkerUpdate
+// ready/unhealthy, fired the instant the pod reports in). The LOADING branch
+// below stays as a slow BACKSTOP — it only acts if a push was dropped — so the
+// 10-min cadence is fine (no need for a tight poll).
 exports.atcPodLifecycle = onSchedule(
-  { schedule: "every 2 minutes", secrets: [sharedSecret] },
+  { schedule: "every 10 minutes", secrets: [sharedSecret] },
   async () => {
     const cfg = await loadWorker();
     const collectionName = cfg.FIREBASE_COLLECTION_NAME || DEFAULT_COLLECTION;
@@ -345,23 +349,24 @@ exports.atcPodLifecycle = onSchedule(
     if (state === STATES.READY) return; // drain Job owns this phase
 
     if (state === STATES.LOADING) {
-      // Fast-fail on a bad boot: ask the controller for the DURABLE pod status
-      // (Firestore pod_launches doc — survives termination). A failed self-report
-      // (status=failed) or a controller-side crash/hang sweep (status=terminated
-      // with reason "hung boot"/"gone on RunPod") means the pod will never become
-      // ready, so HALT now with the real cause instead of waiting out the load
-      // timeout. Soft: any controller/query error just falls through to the health
-      // poll + load-timeout guard below (unchanged behaviour).
+      // Fast-fail on a dead pod: ask the controller for the DURABLE pod status
+      // (Firestore pod_launches doc — survives termination). In LOADING the worker
+      // never terminates its OWN pod (self-terminates only happen from READY on
+      // drain/halt), so ANY status=failed OR status=terminated reported here means
+      // the pod is dead and will never become ready — whether it's a boot failure,
+      // a reconcile sweep (hung/gone), or a manual/out-of-band terminate
+      // (reason "manual"). HALT now instead of waiting out the 30-min load timeout.
+      // Soft: any controller/query error just falls through to the health poll +
+      // load-timeout guard below (unchanged behaviour).
       try {
         const ps = await getPodStatus(cfg.podid);
-        const crashed = ps && (ps.status === "failed" ||
-          (ps.status === "terminated" &&
-            ["hung boot", "gone on RunPod"].includes(ps.termination_reason)));
+        const crashed = ps && (ps.status === "failed" || ps.status === "terminated");
         if (crashed) {
           const why = ps.termination_reason || ps.failed_stage || `pod ${ps.status}`;
-          await markUnhealthy({ podid: cfg.podid, reason: `pod deploy failed: ${why}`, collectionName });
+          const reason = `pod ${ps.status} before ready (${why})`;
+          await markUnhealthy({ podid: cfg.podid, reason, collectionName });
           await terminateAndReset(cfg, cfg.podid, collectionName, STATES.HALTED);
-          await alertAtc("critical", `Pod ${cfg.podid} deploy failed (${why}) — halted, manual reset needed.`, {
+          await alertAtc("critical", `Pod ${cfg.podid} ${ps.status} before ready (${why}) — halted, manual reset needed.`, {
             stage: "PodLifecycle", webhookUrl: cfg.SLACK_WEBHOOK_URL,
           });
           return;
