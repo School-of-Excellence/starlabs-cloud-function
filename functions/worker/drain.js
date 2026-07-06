@@ -26,6 +26,7 @@ if (!admin.apps.length) admin.initializeApp();
 
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { claimNextJob, writeJobResult, requeueJob, DEFAULT_COLLECTION } = require("../components/pod-execution-pipeline/pod_jobs");
+const { validateAtcStructure } = require("../components/queue-required-stage-aiatc-creation/atc_helpers");
 
 const db = admin.firestore();
 const WORKER_DOC = "pod_worker";
@@ -132,19 +133,22 @@ async function main() {
 
     try {
       const result = await callInfer({ apiUrl, bearerToken, model, maxTokens, job });
-      // Guard against a "successful" call that produced no usable text: the model
-      // sometimes returns an empty content field. Do NOT finalize it as completed
-      // (that would ship a blank ATC and never retry) — requeue to the BACK of the
-      // queue, attempts-capped, so we try other jobs first and give this one another
-      // shot later. Doesn't count toward the per-run job budget (only real output does).
-      const emptyOutput = !result.output || String(result.output).trim() === "";
-      if (emptyOutput) {
+      // Quality gate: only a well-formed ATC counts as done. Reject BOTH an empty
+      // response AND a non-empty one that lacks a usable ATC structure — e.g. the
+      // reasoning model exhausts its context and stops before emitting the
+      // ---JSON--- block, or emits truncated/unparseable JSON. Finalizing either
+      // would ship a blank-structure ATC that never regenerates. Requeue to the
+      // BACK of the queue, attempts-capped, so we try other jobs first and give
+      // this one another shot later. Doesn't count toward the per-run job budget
+      // (only a real ATC does).
+      const structure = validateAtcStructure(result.output);
+      if (!structure.ok) {
         const r = await requeueJob({
-          collectionName, path: job.path, reason: "empty output", podId: podid,
+          collectionName, path: job.path, reason: `bad atc output: ${structure.reason}`, podId: podid,
           maxAttempts, toBack: true,
         });
-        console.warn("drain: empty output — requeued to back", { job: job.jobId, attempts: r.attempts, errored: !!r.errored });
-        continue; // try the next job; empty output is not a completed job
+        console.warn("drain: bad atc output — requeued to back", { job: job.jobId, reason: structure.reason, attempts: r.attempts, errored: !!r.errored });
+        continue; // try the next job; a malformed ATC is not a completed job
       }
       await writeJobResult({
         result: { path: job.path, ...result },
