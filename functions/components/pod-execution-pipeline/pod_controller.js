@@ -8,6 +8,9 @@
  *   launchPod({config_id})  -> {pod_id, public_url, gpu_used}
  *   getPodBearer({pod_id})  -> {bearer_token}
  *   terminatePod({pod_id})  -> {pod_id, cost_usd}
+ *   getPodStatus({pod_id})  -> {status, termination_reason, terminated_by, ready,
+ *                               public_url, failed_stage}  (durable Firestore doc;
+ *                               survives termination — used to fast-fail a bad boot)
  *
  * Auth (KEYLESS — no service-account key stored anywhere):
  *   The functions runtime SA *impersonates* a dedicated, role-less signer SA in
@@ -110,18 +113,24 @@ async function callController(fnName, data) {
 }
 
 // ── Public API (mirrors the controller's three callables) ────────────────────
-const launchPod = (configId) => callController("launchPod", { config_id: configId });
+// notify:true asks the controller to PUSH this pod's ready/failure back to
+// podWorkerUpdate (so the lifecycle doesn't wait for its backstop poll to notice).
+const launchPod = (configId) => callController("launchPod", { config_id: configId, notify: true });
 const terminatePod = (podId) => callController("terminatePod", { pod_id: podId });
 async function getPodBearer(podId) {
   const r = await callController("getPodBearer", { pod_id: podId });
   return r && r.bearer_token;
 }
+// Durable, Firestore-backed pod status — resolves even after the pod is gone, so
+// the lifecycle can distinguish a failed/crashed boot from "still loading".
+const getPodStatus = (podId) => callController("getPodStatus", { pod_id: podId });
 
 module.exports = {
   getControllerIdToken,
   launchPod,
   getPodBearer,
   terminatePod,
+  getPodStatus,
   callController,
   SIGNER_SA,
   BASE_URL,

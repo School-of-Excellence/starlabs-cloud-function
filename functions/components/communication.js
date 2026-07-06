@@ -4,7 +4,7 @@ const process = require("process");
 // const projectId = process.env.GCLOUD_PROJECT;
 // const PRODUCTION_PROJECTS = ['fir-sample-aae4a'];
 // const production = PRODUCTION_PROJECTS.includes(projectId);
-const production = false;
+// const production = false;
 // if(!admin.apps.length){
   // admin.initializeApp({
   //   storageBucket: production == false ? "gs://starlabs-test.firebasestorage.app/" : "gs://fir-sample-aae4a.appspot.com"
@@ -5051,7 +5051,6 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
   }
 });
 
-
   exports.productenquiryfromeiflix = onDocumentCreated("productenquirylog/{docid}", async (document) => {
     var snapshot = document.data;
     var data = snapshot.data();
@@ -5075,4 +5074,3 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       });
     }
   });
-
