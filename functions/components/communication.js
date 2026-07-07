@@ -176,6 +176,7 @@ exports.notifyMobileApp = onDocumentCreated({
         landingpage: notificationData["landingpage"],
         sticky: notificationData["sticky"],
         metaData,
+        receivingapp: receivingApp,
         recordid: snapshot.data.id
       });
     }
@@ -1204,6 +1205,7 @@ async function storeNotificationLogs(appUsers, data) {
         landingpage: data.landingpage,
         sticky: data.sticky,
         metadata: data.metaData,
+        receivingapp: data.receivingapp || null,
         read: false,
         recordid: data.recordid
       });
