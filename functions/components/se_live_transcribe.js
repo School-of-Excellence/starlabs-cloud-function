@@ -4,9 +4,17 @@
  * Two functions:
  *
  * 1. seLiveTranscribeSubmit  — Firestore trigger on "live assignment/{id}"
- *    Fires when needtranscriptsforse becomes true and dropboxlink is present.
- *    Submits a job to the RunPod serverless WhisperX endpoint and stores
+ *    Fires when the doc's `dropboxlink` is set or CHANGED to a new value — i.e.
+ *    the manual (re)generation path: paste/replace the Dropbox audio URL and a
+ *    fresh WhisperX transcript is produced and written back over any existing
+ *    one. Submits a job to the RunPod serverless WhisperX endpoint and stores
  *    the returned jobId on the doc so the callback can route the result back.
+ *
+ *    Keying on the dropboxlink *changing* (not on a status flag) is deliberate:
+ *    none of this pipeline's own write-backs (queued / processing / captured /
+ *    failed) touch `dropboxlink`, so they never re-trigger a submission — this
+ *    is what prevents both a resubmit loop and the duplicate-submission race
+ *    from the intermediate "queued" write.
  *
  * 2. seLiveTranscribeCallback — HTTP webhook receiver
  *    RunPod calls this URL when the transcription job completes.
@@ -29,6 +37,18 @@ const callbackUrl  = defineSecret("SE_TRANSCRIBE_CALLBACK_URL");
 
 const ENDPOINT_ID = "5bghabyldgu2tj";
 const RUNPOD_RUN_URL = `https://api.runpod.ai/v2/${ENDPOINT_ID}/run`;
+
+// ── trigger gate ──────────────────────────────────────────────────────────────
+// Pure decision: submit a transcription job iff `dropboxlink` is present AND just
+// changed. Exported for unit testing — this is the guard that prevents the
+// resubmit loop and duplicate-submission race (the pipeline's own write-backs
+// never change dropboxlink, so they never pass this gate).
+function shouldSubmitTranscription(before, after) {
+  const linkNow    = ((after && after.dropboxlink)  || "").trim();
+  const linkBefore = ((before && before.dropboxlink) || "").trim();
+  return !!linkNow && linkNow !== linkBefore;
+}
+exports.shouldSubmitTranscription = shouldSubmitTranscription;
 
 // ── transcript formatters ─────────────────────────────────────────────────────
 
@@ -125,31 +145,33 @@ function formatOutput(rawOutput, profileName) {
 exports.seLiveTranscribeSubmit = onDocumentWritten(
   { document: "live assignment/{id}", secrets: [runpodApiKey, callbackUrl] },
   async (event) => {
+    // Doc deleted — nothing to do.
+    if (!event.data.after.exists) return null;
+
     const before = event.data.before.data() || {};
     const after  = event.data.after.data()  || {};
 
-    // Only act when needtranscriptsforse just became true
-    const flagNow  = after.needtranscriptsforse  === true;
-    const flagBefore = before.needtranscriptsforse === true;
-    const hasLink  = !!after.dropboxlink;
-    const alreadyQueued = !!after.runpodJobId;
-
-    if (!flagNow || !hasLink || alreadyQueued) return null;
-    // avoid re-triggering a doc that already had the flag set
-    if (flagBefore && !after.runpodJobId) {
-      // flag was already true but no jobId — allow resubmit (e.g. previous job failed)
-    }
+    // Only act when the dropbox URL is present AND just changed. Because none of
+    // this pipeline's own write-backs alter `dropboxlink`, the queued/processing/
+    // captured/failed writes all fall out here (link unchanged) — no loop, no
+    // duplicate-submission race.
+    if (!shouldSubmitTranscription(before, after)) return null;
 
     const docId      = event.params.id;
     const profileId  = after.participantid || after.profile_id || null;
     const profileName = after.profile_name || "";
-    const videoUrl   = after.dropboxlink;
+    const videoUrl   = after.dropboxlink.trim();
 
     const db = admin.firestore();
 
-    // Mark as queued immediately to prevent duplicate submissions
+    // Mark as queued immediately. This write does not change dropboxlink, so it
+    // will not re-trigger this function. Clear any prior error from a past run.
     await db.collection("live assignment").doc(docId).set(
-      { transcriptCaptureStatus: "queued", transcriptQueuedAt: admin.firestore.FieldValue.serverTimestamp() },
+      {
+        transcriptCaptureStatus: "queued",
+        transcriptQueuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        transcriptCaptureLastError: admin.firestore.FieldValue.delete(),
+      },
       { merge: true }
     );
 
@@ -175,6 +197,7 @@ exports.seLiveTranscribeSubmit = onDocumentWritten(
 
       const data = await resp.json();
       const jobId = data.id;
+      if (!jobId) throw new Error(`RunPod response missing job id: ${JSON.stringify(data).slice(0, 300)}`);
 
       await db.collection("live assignment").doc(docId).set(
         { runpodJobId: jobId, transcriptCaptureStatus: "processing" },
