@@ -178,7 +178,9 @@ exports.seLiveTranscribeSubmit = onDocumentWritten(
     try {
       const body = {
         input: { audio_url: videoUrl, profileid: profileId, profile_name: profileName },
-        webhook: callbackUrl.value(),
+        // .trim() is load-bearing: a trailing newline in the secret makes RunPod's
+        // webhook POST silently fail (malformed URL) → the transcript never comes back.
+        webhook: callbackUrl.value().trim(),
       };
 
       const resp = await fetch(RUNPOD_RUN_URL, {
