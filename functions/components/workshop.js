@@ -477,7 +477,12 @@ exports.workshopenrolledwatti = onDocumentCreated(
 
     try {
       const profile = await getProfileData(newData.profileid);
+      let referreduser = null;
+      if (newData.referringuser != null) {
+        referreduser = await getProfileData(newData.referringuser);
+      }
       if (!profile) return;
+      
       // if (!newData['profileid']) {
       //   console.log("profileid not found"); 
       //   return;
@@ -543,7 +548,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
           }
           if (url) {
             const webhook = new commonService.IncomingWebhook(url);
-            let message = `🚀 *${profile['name']}* just Enrolled *${workshopName}*! 🌱`;
+            let message = referreduser ?  `🚀 *${profile['name']}* just Enrolled *${workshopName}*! 🌱 Referred by *${referreduser['name']}*` : `🚀 *${profile['name']}* just Enrolled *${workshopName}*! 🌱`;
             console.log(message);
             webhook.send(message, (err, header, statusCode, body) => {
               if (err) {
@@ -576,6 +581,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
           ]
         };
         try {
+          console.log(evergreenWorkshop,'consoleee evergreenWorkshop')
           const templateAlias = evergreenWorkshop
             ? "WorkshopEnrolledMessageEvergreen"
             : categorybased
@@ -643,7 +649,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
     }
   }
 );
-exports.workshopautocommunicationschedule = onSchedule({schedule : "00 17 * * *", region: "asia-south1", timeZone: "Asia/Kolkata"},async (context)=>{
+exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *", region: "asia-south1", timeZone: "Asia/Kolkata"},async (context)=>{
   try {
     console.log('started');
     const snapshot = await admin.firestore().collection("workshopconfiguration").where('evergreenWorkshop','==',true).get();
@@ -714,22 +720,24 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 17 * * *"
             "Day:", dayNumber
           );
           console.log("Message:", message);
-          await commonService.saveNotificationRecord({
-            title: workshopName || "Workshop Update",
-            message: message || '',
-            subtitle: message || null,
-            date: admin.firestore.FieldValue.serverTimestamp(),
-            landingpage: null,
-            logged: false,
-            profileid: [profileID],
-            sticky: false,
-            notificationtype: "ahupdate",
-            notificationimage: null,
-            metadata: {
-              workshopId: workshop.id,
-              day: dayNumber
-            }
-          });
+          //redo when needed
+          
+          // await commonService.saveNotificationRecord({
+          //   title: workshopName || "Workshop Update",
+          //   message: message || '',
+          //   subtitle: message || null,
+          //   date: admin.firestore.FieldValue.serverTimestamp(),
+          //   landingpage: null,
+          //   logged: false,
+          //   profileid: [profileID],
+          //   sticky: false,
+          //   notificationtype: "ahupdate",
+          //   notificationimage: null,
+          //   metadata: {
+          //     workshopId: workshop.id,
+          //     day: dayNumber
+          //   }
+          // });
           // profile_data first, then new_user_data (new users live there).
           const profileData = await getProfileData(profileID);
           const profileName = profileData?.["name"] ?? "";
@@ -1489,7 +1497,7 @@ async function settleWorkshopPayment(
   if (outcome.newlyCredited) {
     try {
       const url = commonService.production
-        ? commonService.slackWorkshopQandA
+        ? commonService.slackeiflixrefferals
         : commonService.slackDevTest;
       if (url) {
         const webhook = new commonService.IncomingWebhook(url);
