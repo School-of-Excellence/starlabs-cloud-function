@@ -470,7 +470,7 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     const referredDoc = await admin.firestore().collection("profile_data").doc(referredProfileId).get();
     referredProfileName = referredDoc.exists ? referredDoc.data()["name"] : "Unknown";
   } else {
-    referredProfileName = "Unknown";
+    referredProfileName = "Refferal";
   }
 
   try {
@@ -501,12 +501,15 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
   let url;
 
   if (referralcode === referralcodesubscriber) {
+    console.log('old web hook',referredProfileName)
     url = commonService.production
       ? commonService.slackWorkshopsubscribers
       : commonService.slackDevTest;
   } else {
+    console.log('new web hook',referredProfileName)
     url = commonService.production
-      ? commonService.slackWorkshopQandA
+      // ? commonService.slackWorkshopQandA
+      ? commonService.slackeiflixrefferals
       : commonService.slackDevTest;
   }
   if (url) {

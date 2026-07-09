@@ -7,6 +7,7 @@ const https = require('https'); // HTTP Request/Response
 const { Buffer } = require('buffer');
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const cors = require("cors")({ origin: true });
+const workshop = require('./workshop');
 
 // Request Scheduling
 exports.requestScheduling = onRequest(async (req, res) => {
@@ -1640,4 +1641,14 @@ exports.appointmentremainder = onSchedule({schedule: "every 5 minutes"}, async (
   }).catch(err => {
     console.log("Saved Notification Error:", err)
   })
+
+  // Workshop payment safety-net: settle any workshop order that was charged on
+  // Razorpay but never settled here (e.g. the buyer's browser died right after
+  // checkout). Runs on this same 5-minute tick; fenced so a failure here never
+  // affects the reminders/notifications above.
+  try {
+    await workshop.runWorkshopPaymentReconcile()
+  } catch (err) {
+    console.log("Workshop Payment Reconcile Error:", err)
+  }
 })

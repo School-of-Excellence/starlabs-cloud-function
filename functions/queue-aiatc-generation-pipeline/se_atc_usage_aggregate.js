@@ -1,5 +1,5 @@
 /**
- * se_atc_usage_aggregate.js — scope-enhancement-atc-pipeline (usage dashboard)
+ * se_atc_usage_aggregate.js — queue-aiatc-generation-pipeline (usage dashboard)
  *
  * PURE aggregation helpers (no Firestore / firebase-admin), so they unit-test
  * without the emulator — same split as components/atc_helpers.js. se_atc_usage.js

@@ -1,5 +1,5 @@
 /**
- * se_atc_usage.js — scope-enhancement-atc-pipeline (ATC usage dashboard)
+ * se_atc_usage.js — queue-aiatc-generation-pipeline (ATC usage dashboard)
  *
  * Nightly rollup that turns terminal ATC job docs into the pre-aggregated
  * collections the frontend dashboard reads. Business-throughput only: reports
@@ -21,7 +21,7 @@
 
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { alertAtc } = require("../components/atc_alerts");
+const { alertAtc } = require("../components/queue-required-stage-aiatc-creation/atc_alerts");
 const { aggregateUsage, istDayWindow } = require("./se_atc_usage_aggregate");
 
 const atcDb = getFirestore("firestore-atc");
