@@ -1,0 +1,34 @@
+# manifest-check — functions-manifest.json freshness (master plan 2026-07-02, L22).
+#
+# The manifest feeds the console's CF Board (Δfunctions names+types) and the predeploy loop-guard.
+# It is regenerated automatically inside every predeploy, but a push that edits functions/ without
+# a deploy could leave it stale — this check catches that (regenerate + diff must be clean).
+name: manifest-check
+
+on:
+  push:
+    paths:
+      - 'functions/**'
+      - 'functions-manifest.json'
+      - 'scripts/cicd/generate-manifest.js'
+  pull_request:
+    branches: [development, production]
+
+jobs:
+  fresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Regenerate manifest
+        run: node scripts/cicd/generate-manifest.js
+      - name: Manifest must be committed fresh
+        run: |
+          if ! git diff --exit-code functions-manifest.json; then
+            echo "::error::functions-manifest.json is STALE — run 'node scripts/cicd/generate-manifest.js' and commit it."
+            exit 1
+          fi
+          echo "✓ manifest is fresh"
