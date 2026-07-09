@@ -21,6 +21,7 @@ const userRegistration = require("./components/user_registration")
 const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
+const livekitCloudSystem = require("./components/livekitCloud")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
 const runpodLLMRunning = require("./components/runpod_ai")
@@ -247,6 +248,15 @@ exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
 exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
+
+// LiveKit Cloud + Krisp variant (managed — no autoscaling). Same Firestore workflow.
+exports.createLivekitCloudToken = livekitCloudSystem.createLivekitCloudToken
+exports.livekitCloudStartRecording = livekitCloudSystem.livekitCloudStartRecording
+exports.livekitCloudStopRecording = livekitCloudSystem.livekitCloudStopRecording
+exports.livekitCloudCloseRoom = livekitCloudSystem.livekitCloudCloseRoom
+exports.livekitCloudMuteParticipant = livekitCloudSystem.livekitCloudMuteParticipant
+exports.livekitCloudKickParticipant = livekitCloudSystem.livekitCloudKickParticipant
+exports.onEventLivekitCloud = livekitCloudSystem.onEventLivekitCloud
 
 // AWS
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS

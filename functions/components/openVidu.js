@@ -183,11 +183,18 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
 
             const token = await at.toJwt();
 
+            // Stamp the provider explicitly (missing == self-hosted is the default everywhere, so this
+            // is belt-and-suspenders). merge:true touches no other field. AWAITED so the write flushes
+            // before the gen2 instance can freeze; .catch so it can never block/break the token.
+            await admin.firestore().collection("openviduroom").doc(roomName)
+                .set({ provider: "openvidu" }, { merge: true })
+                .catch(err => console.log(`[${roomName}] provider stamp failed:`, err && err.message));
+
             console.log(`[${roomName}] Token generated for ${participantName}`);
 
-            return res.status(200).json({ 
+            return res.status(200).json({
                 success: true,
-                url: livekitURL, 
+                url: livekitURL,
                 token,
                 roomName,
                 instanceCount: canCreateRoom.totalInstances
@@ -937,6 +944,10 @@ async function houseKeepRooms() {
     for (const docSnap of snap.docs) {
         try {
             const room = docSnap.data();
+            // LiveKit Cloud rooms self-manage occupancy/lifecycle (no AWS node). They never appear in
+            // the self-hosted listRooms() above, so they'd always look "empty" and get wrongly
+            // inactivated. Skip them. Missing provider == self-hosted (legacy/default).
+            if (room.provider === 'livekit-cloud') continue;
             const ghost = room.participantghost;
             const liveReal = (room.participantlive || []).filter(id => id !== ghost);
 
@@ -1215,13 +1226,17 @@ async function createRoomForMeeting(meeting) {
 async function getActiveRoomsCount() {
     try {
         const activeSessionsSnapshot = await admin.firestore()
-            .collection('openviduroom') 
+            .collection('openviduroom')
             .where('active', '==', true)
             .get();
 
-        const activeCount = activeSessionsSnapshot.size;
-        
-        console.log(`Active sessions in Firestore: ${activeCount}`);
+        // Count self-hosted rooms only — LiveKit Cloud rooms run on managed infra, so they must not
+        // drive AWS media-node scaling or block master-node shutdown. Missing provider == self-hosted.
+        const activeCount = activeSessionsSnapshot.docs
+            .filter(d => d.data().provider !== 'livekit-cloud')
+            .length;
+
+        console.log(`Active self-hosted sessions in Firestore: ${activeCount}`);
         
         return activeCount;
 
