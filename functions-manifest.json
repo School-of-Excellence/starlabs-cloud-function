@@ -230,6 +230,13 @@
       "codebase": "default"
     },
     {
+      "name": "createWorkshopPaymentOrder",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "dailyFirestoreAuditAnalysis",
       "type": "onSchedule",
       "file": "components/exports-alerts.js",
@@ -618,6 +625,13 @@
       "codebase": "default"
     },
     {
+      "name": "reconcileWorkshopPayment",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "regenerateAtcDoc",
       "type": "onCall",
       "file": "components/queue-required-stage-aiatc-creation/atc_ondemand.js",
@@ -695,6 +709,21 @@
       "name": "seAtcUsageRollup",
       "type": "onSchedule",
       "file": "queue-aiatc-generation-pipeline/se_atc_usage.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "seLiveTranscribeCallback",
+      "type": "onRequest",
+      "file": "components/se_live_transcribe.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "seLiveTranscribeSubmit",
+      "type": "onRequest",
+      "file": "components/se_live_transcribe.js",
+      "triggerPath": "live assignment/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -985,6 +1014,13 @@
       "codebase": "default"
     },
     {
+      "name": "verifyWorkshopPayment",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "videoAskHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
@@ -1008,7 +1044,7 @@
     },
     {
       "name": "workshopautocommunicationschedule",
-      "type": "onCall",
+      "type": "onSchedule",
       "file": "components/workshop.js",
       "emulatorLoaded": false,
       "codebase": "default"
