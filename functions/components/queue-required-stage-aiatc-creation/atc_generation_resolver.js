@@ -137,12 +137,15 @@ async function resolveStageSource({ stageName, stageType, queueData, queueRef, p
       // lives in the default DB, this doc in firestore-atc) — see form branch.
       sourceref: liveSnap.ref.path,
       detail: `liveassignmentid=${logData.liveassignmentid}`,
+      // Coalesce optional fields to null: a transcript sourced via the Dropbox/
+      // WhisperX backfill path (not Zoom) has no zoom_* metadata, and Firestore
+      // rejects `undefined` on write (breaks processStage / regenerateAtcDoc).
       data: {
         transcript_text: liveData.transcript_text,
-        transcript_raw: liveData.transcript_raw,
-        zoom_topic: liveData.zoom_topic,
-        zoom_start_time: liveData.zoom_start_time,
-        zoom_duration: liveData.zoom_duration,
+        transcript_raw: liveData.transcript_raw ?? null,
+        zoom_topic: liveData.zoom_topic ?? null,
+        zoom_start_time: liveData.zoom_start_time ?? null,
+        zoom_duration: liveData.zoom_duration ?? null,
       },
     };
   }
