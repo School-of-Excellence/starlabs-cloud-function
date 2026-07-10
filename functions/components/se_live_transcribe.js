@@ -62,33 +62,69 @@ function fmtTs(sec) {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(mss).padStart(3,"0")}`;
 }
 
+// Facilitator phrasings the COACH uses vs self-introduction phrasings the
+// PARTICIPANT uses — used to decide which diarized speaker is the coach when the
+// name-address signal alone is weak. Deliberately generic to coaching sessions.
+const COACH_CUES = [
+  /helping you/i, /scope enhancement/i, /tell me (something |a little )?about yourself/i,
+  /can you hear me/i, /how are you (doing|today)/i, /\bget started\b/i, /before we (get|begin|start)/i,
+  /let me explain/i, /shall we (start|begin)/i, /are you ready/i, /walk me through/i, /what do you do/i,
+  /my role/i, /i('| wi)ll be (helping|facilitating|guiding)/i,
+];
+const PARTICIPANT_CUES = [
+  /my name is/i, /i am (a|an|the) /i, /i'?m (a|an|the) /i, /i'?ve been/i, /i have been/i,
+  /years of experience/i, /i work (with|in|as|for)/i, /about myself/i, /my age/i,
+];
+
+// Decide the diarized speaker→role mapping. The coach is the speaker who (a) most
+// addresses the participant by name and (b) uses facilitator phrasing, minus any
+// self-introduction phrasing (a strong participant tell). Only when nothing
+// discriminates do we fall back to "the first (greeting) speaker is the coach".
+// `confidence` reports how that decision was reached so downstream (ATC) can weigh
+// it: high/medium = signal-driven, low = fallback, single/no-speakers = degenerate.
 function assignSpeakers(segs, profileName) {
-  const profileFirst = profileName ? profileName.split(" ")[0] : "";
   const speakers = [...new Set(segs.map(s => s.speaker).filter(Boolean))].sort();
   if (!speakers.length) return { mapping: {}, coachName: "Coach", confidence: "no-speakers" };
 
-  const mentions = Object.fromEntries(speakers.map(sp => [sp, 0]));
-  if (profileFirst) {
-    const pat = new RegExp(`\\b${profileFirst.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-    for (const s of segs) {
-      if (s.speaker && pat.test(s.text || "")) mentions[s.speaker]++;
-    }
+  const profileFirst = profileName ? profileName.trim().split(/\s+/)[0] : "";
+  // Match a prefix of the participant's first name — WhisperX often mis-spells
+  // names ("Sangeetha" → "Sangeeta"/"Sagitta"), so an exact \bword\b match misses.
+  const stem = profileFirst.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").slice(0, Math.max(4, profileFirst.length - 2));
+  const nameRe = stem.length >= 3 ? new RegExp(`\\b${stem}`, "i") : null;
+
+  const stat = Object.fromEntries(speakers.map((sp) => [sp, { name: 0, coach: 0, part: 0 }]));
+  for (const s of segs) {
+    const sp = s.speaker; if (!sp || !stat[sp]) continue;
+    const t = s.text || "";
+    if (nameRe && nameRe.test(t)) stat[sp].name++;
+    for (const re of COACH_CUES) if (re.test(t)) stat[sp].coach++;
+    for (const re of PARTICIPANT_CUES) if (re.test(t)) stat[sp].part++;
+  }
+  const firstSp = segs.find((s) => s.speaker)?.speaker || speakers[0];
+
+  if (speakers.length === 1) {
+    // One diarized speaker — can't split coach vs participant; label as participant.
+    return { mapping: { [speakers[0]]: profileName || speakers[0] }, coachName: "Coach", confidence: "single-speaker" };
   }
 
-  let coachSp;
-  const hasMentions = Object.values(mentions).some(v => v > 0);
-  if (hasMentions) {
-    coachSp = speakers.reduce((a, b) => mentions[a] >= mentions[b] ? a : b);
+  const score = (sp) => stat[sp].name * 2 + stat[sp].coach * 2 - stat[sp].part * 2;
+  const ranked = [...speakers].sort((a, b) => score(b) - score(a));
+  const margin = score(ranked[0]) - score(ranked[1]);
+
+  let coachSp, confidence;
+  if (margin > 0) {
+    coachSp = ranked[0];
+    confidence = margin >= 3 ? "high" : "medium";
   } else {
-    coachSp = segs[0]?.speaker || speakers[0];
+    coachSp = firstSp;                       // greeting-first fallback
+    confidence = "low(first-speaker fallback)";
   }
 
   const mapping = {};
-  for (const sp of speakers) {
-    mapping[sp] = sp === coachSp ? "Coach" : (profileName || sp);
-  }
-  return { mapping, coachName: "Coach", confidence: hasMentions ? "high" : "low(first-speaker fallback)" };
+  for (const sp of speakers) mapping[sp] = sp === coachSp ? "Coach" : (profileName || sp);
+  return { mapping, coachName: "Coach", confidence };
 }
+exports.assignSpeakers = assignSpeakers;
 
 function buildProse(segs, mapping) {
   const turns = [];
