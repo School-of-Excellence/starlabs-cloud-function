@@ -962,7 +962,7 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 }
 
 module.exports = {
-	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
+	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,slackeiflixrefferals,
 	production,
 	postmarkClient,
 	monthName,
