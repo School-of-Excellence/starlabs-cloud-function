@@ -509,7 +509,7 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     console.log('new web hook',referredProfileName)
     url = commonService.production
       // ? commonService.slackWorkshopQandA
-      ? commonService.slackeiflixrefferals
+      ? commonService.slackWorkshopQandA
       : commonService.slackDevTest;
   }
   if (url) {
