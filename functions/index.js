@@ -28,6 +28,7 @@ const queue_atc_generation = require("./components/queue-required-stage-aiatc-cr
 const podWorker = require("./components/pod-execution-pipeline/pod_worker")
 const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
 const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
+const seLiveTranscribe = require("./components/se_live_transcribe")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -215,7 +216,14 @@ exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackinteg
 exports.workshopQandA = communication.workshopQandA
 exports.workshopFormsSubmission = communication.workshopFormsSubmission
 exports.workshopAssignment = communication.workshopAssignment
-
+//workshop payment
+exports.createWorkshopPaymentOrder = workshop.createWorkshopPaymentOrder
+exports.verifyWorkshopPayment      = workshop.verifyWorkshopPayment
+// On-demand recovery for a payment captured on Razorpay but not settled here
+// (e.g. the browser died right after checkout). The background safety-net sweep
+// (`runWorkshopPaymentReconcile`) is NOT its own scheduled function — it is
+// invoked from the existing every-5-minutes `appointmentremainder` schedule.
+exports.reconcileWorkshopPayment   = workshop.reconcileWorkshopPayment
 //workshop communication
 exports.workshopenrolledwatti = workshop.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
@@ -281,4 +289,8 @@ exports.rebuildAtcPrompt = atcOnDemand.rebuildAtcPrompt // onCall — rebuild pr
 
 //queue-aiatc-generation-pipeline — usage dashboard rollup
 exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup
+
+//scope-enhancement live transcription — Firestore trigger submits to RunPod serverless; HTTP callback writes result back
+exports.seLiveTranscribeSubmit   = seLiveTranscribe.seLiveTranscribeSubmit    // w - "live assignment/{id}"
+exports.seLiveTranscribeCallback = seLiveTranscribe.seLiveTranscribeCallback  // onRequest — RunPod webhook
 
