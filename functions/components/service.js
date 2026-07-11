@@ -42,7 +42,7 @@ var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
 
 async function getWebhookUrl(docid) {
 	try {
-		const doc = await db.collection('slack webhookurls').doc(docid).get();
+		const doc = await admin.firestore().collection('slack webhookurls').doc(docid).get();
 		if (!doc.exists) {
 			console.log(`[getWebhookUrl] No webhook found for docid: ${docid}`);
 			return null;
