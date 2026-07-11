@@ -2,69 +2,14 @@ const admin = require('firebase-admin');
 const commonService = require('./service');
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 
-exports.slackInterimCrossOver = onDocumentCreated("/interim crossover/{docid}",async (snap) => {
-    var context = snap.data
-    const data = context.data()
-    let url = null
-    if(commonService.production === true){
-      url = commonService.slackEvolutionProgress // production
-    }else{
-      url = commonService.slackDevTest //test
-    }
-    if(url != null){
-      // admin.firestore().collection("participant AEL").doc(newData[data['aelid']]).get().then(snap => {
-        // if(snap.exists){
-          admin.firestore().collection("profile_data").doc(data['profileid']).get().then( profileSnap => {
-            if(profileSnap.exists){
-              let message = {
-                "blocks": [
-                  {
-                    "type": "section",
-                    "text": {
-                      "type": "mrkdwn",
-                      "text": `*${profileSnap.data()['name']}*`
-                    }
-                  },
-                  {
-                    "type": "rich_text",
-                    "elements": []
-                  }
-                ]
-              }
-              for (const key in data['metric']) {
-                message.blocks[0].elements.push({
-                    "type": "rich_text_section",
-                    "elements": [
-                      {
-                        "type": "text",
-                        "text": `${key} : ${data['metric']['startpoint']} to ${data['metric']['endpoint']}`
-                      }
-                    ]
-                  })
-              }
-              var webhook = new commonService.IncomingWebhook(url);
-              webhook.send(message,function(err, header, statusCode, body) {
-                if (err) {
-                  console.log('Error:', err);
-                } else {
-                  console.log('Received', statusCode, 'from Slack');
-                }
-              });
-            }else console.log("profile data doc not found");
-          })
-        // }else console.log("participant AEL doc not found");
-      // })
-    }
-})
-
 exports.slackLoveLetter = onDocumentCreated("/love letter/{docid}", async (snap) => {
     var context = snap.data
     const data = context.data()
     let url = null
     if(commonService.production === true){
-      url = commonService.slackLoveLetter // production
+      url = await commonService.getWebhookUrl("slackLoveLetter") // production
     }else{
-      url = commonService.slackDevTest //test
+      url = await commonService.getWebhookUrl("slackDevTest") //test
     }
     if(url != null){
       admin.firestore().collection("profile_data").doc(data['profileid']).get().then( profileSnap => {
@@ -105,9 +50,9 @@ exports.slackAskAH = onDocumentCreated("/ask AH/{docid}", async (snap) => {
     const data = context.data()
     let url = null
     if(commonService.production === true){
-      url = commonService.slackAskAH // production
+      url = await commonService.getWebhookUrl("slackAskAH") // production
     }else{
-      url = commonService.slackDevTest //test
+      url = await commonService.getWebhookUrl("slackDevTest") //test
     }
     if(url != null){
       await admin.firestore().collection("profile_data").doc(data['profileid']).get().then( profileSnap => {

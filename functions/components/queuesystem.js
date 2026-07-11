@@ -543,10 +543,10 @@ exports.onQueueStageChange = onDocumentWritten({
           if(!excludequeuestage.includes(afterData['currentstage'])){
             var url
             if(commonService.production){
-              url = commonService.slackEvent // Production
+              url = await commonService.getWebhookUrl("slackEvent") // Production
             }
             else{
-              url = commonService.slackDevTest // Test
+              url = await commonService.getWebhookUrl("slackDevTest") // Test
             }
             if(url != undefined){
               var webhook = new commonService.IncomingWebhook(url);
@@ -1286,10 +1286,10 @@ exports.studioZoomLink = onDocumentCreated({
 async function slackQueueZoomLink(message){
   var url
   if(commonService.production){
-    url = commonService.slackEvent // Production
+    url = await commonService.getWebhookUrl("slackEvent") // Production
   }
   else{
-    url = commonService.slackDevTest // Test
+    url = await commonService.getWebhookUrl("slackDevTest") // Test
   }
   var webhook = new commonService.IncomingWebhook(url);
   await webhook.send(message, function(err, header, statusCode, body) {
@@ -1895,33 +1895,14 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
       formid :  mapform[data["formname"]]
     })
   }
-  // "uP! Life Report" : "https://hooks.slack.com/services/T1E57BR8F/B06FQ6Y9QMC/8QhG9IBClGvvOgTChWe sYq76K", old one
-  // "" : "https://hooks.slack.com/services/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",//Self ATC
-  // "Self ATC - Next Cycle" : "https://hooks.slack.com/services/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",
-  // "":"https://hooks.slack.com/services/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",//Self Evaluation Form
 
-  let mapFormByUrl = {
-    "m44B4RzITTX5lW0XnR47" : "https://hooks.slack.com/services/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",//International Mental Wellness Scaling questionnaire
-    "J04B12dx8tFx4xUuKjT6" : "https://hooks.slack.com/services/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",//DAS Scaling Form
-    "PXG71F09gzNoDCraQFBG" : "https://hooks.slack.com/services/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",//uP! Life Aspiration Report
-    "cWlz1Tu4mty4UU5LmToO" : "https://hooks.slack.com/services/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",//ATC Understanding Validation
-    "jaGY5kDrrhECQsny95Ns" : "https://hooks.slack.com/services/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",//uP! Life Report
-    "QundpMXgXlXiCJYZ7WU4" : "https://hooks.slack.com/services/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",//B!G Life Report / Legacy Life Report / uP! Life Report
-    "pSvB62jcyrgSSUI1WqtC" : "https://hooks.slack.com/services/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",//Guided Pre-ATC
-    "fg5ly2C2uL2DSJyikIsQ" : "https://hooks.slack.com/services/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",//Self Evolution Report
-    "NqcpL7DZvYpSJ7I8H1ZA" : "https://hooks.slack.com/services/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",//CTD Aspiration Form
-    "28VXVYIPcwpbepl977o9" : "https://hooks.slack.com/services/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",//SuP!r Metabolism Aspiration Form
-    "rs8nYVElnKbAJoXDftYN" : "https://hooks.slack.com/services/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",//Application for One-on-One Consultation with Antano & Harini
-    "exUAMbuu8ujg5aZ8Jot2" : "https://hooks.slack.com/services/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", //Your Career Growth – Readiness Form
-    "vsVXu1kQ9wUXO50r4vPW" : "https://hooks.slack.com/services/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" // ATC Predictive Intelligence Form - Level 1
-  }
-  //
   var url = null
   if(commonService.production){
-    url = mapFormByUrl[data['formid']] || null // Production
+    url = await commonService.getWebhookUrl(data['formid'])
+    // mapFormByUrl[data['formid']] || null // Production
   }
   else{
-    url = commonService.slackDevTest // Test
+    url = await commonService.getWebhookUrl("slackDevTest") // Test
   }
   //
   console.log("formname",data['formname']);

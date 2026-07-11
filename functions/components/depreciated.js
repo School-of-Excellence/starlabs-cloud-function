@@ -529,10 +529,10 @@ exports.watiQueueWelcomeNotification = onDocumentWritten("/queue_token/{queuetok
           if(!excludequeuestage.includes(newdoc['currentstage'])){
             var url
             if(commonService.production){
-              url = commonService.slackEvent // Production
+              url = await commonService.getWebhookUrl("slackEvent") // Production
             }
             else{
-              url = commonService.slackDevTest // Test
+              url = await commonService.getWebhookUrl("slackDevTest") // Test
             }
             if(url != undefined){
               var webhook = new commonService.IncomingWebhook(url);
@@ -1534,6 +1534,90 @@ async function updateParticipantMetadataTierAccess(profileidArg,path){
     })
   }
 }
+
+exports.slackContentConsumption = onDocumentCreated("content analytics/{docid}", async (document) => {
+  var snapshot = document.data
+  var data = snapshot.data()
+  var videoname = data["videoname"]
+  var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"]
+  var url = null
+  if(commonService.production){
+    url = await commonService.getWebhookUrl("slackLogVideoWatch")
+  }
+  else{
+    url = await commonService.getWebhookUrl("slackDevTest")
+  }
+  if(url != null){
+    var webhook = new commonService.IncomingWebhook(url);
+    var message = `${profilename} has started ${data["type"] == "solarvoice" ? "Listening to" : "watching the video"} - ${videoname}
+    To get full details:
+    https://app.posthog.com/person/${data['profileid']}#activeTab=events
+    `;
+    console.log(message.toString())
+    webhook.send(message, function(err, header, statusCode, body) {
+      if (err) {
+        console.log('Error:', err);
+      } else {
+        console.log('Received', statusCode, 'from Slack');
+      }
+    });
+  }
+})
+
+exports.slackInterimCrossOver = onDocumentCreated("/interim crossover/{docid}",async (snap) => {
+  var context = snap.data
+  const data = context.data()
+  let url = null
+  if(commonService.production === true){
+    url = await commonService.getWebhookUrl("slackEvolutionProgress") // production
+  }else{
+    url = await commonService.getWebhookUrl("slackDevTest") //test
+  }
+  if(url != null){
+    // admin.firestore().collection("participant AEL").doc(newData[data['aelid']]).get().then(snap => {
+      // if(snap.exists){
+        admin.firestore().collection("profile_data").doc(data['profileid']).get().then( profileSnap => {
+          if(profileSnap.exists){
+            let message = {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": `*${profileSnap.data()['name']}*`
+                  }
+                },
+                {
+                  "type": "rich_text",
+                  "elements": []
+                }
+              ]
+            }
+            for (const key in data['metric']) {
+              message.blocks[0].elements.push({
+                  "type": "rich_text_section",
+                  "elements": [
+                    {
+                      "type": "text",
+                      "text": `${key} : ${data['metric']['startpoint']} to ${data['metric']['endpoint']}`
+                    }
+                  ]
+                })
+            }
+            var webhook = new commonService.IncomingWebhook(url);
+            webhook.send(message,function(err, header, statusCode, body) {
+              if (err) {
+                console.log('Error:', err);
+              } else {
+                console.log('Received', statusCode, 'from Slack');
+              }
+            });
+          }else console.log("profile data doc not found");
+        })
+      // }else console.log("participant AEL doc not found");
+    // })
+  }
+})
 
 /*
 exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (snapshotdata) =>{
