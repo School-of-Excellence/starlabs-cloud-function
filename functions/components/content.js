@@ -135,35 +135,6 @@ exports.videoAskHLS = onDocumentCreated({
     })
 })
 
-exports.slackContentConsumption = onDocumentCreated("content analytics/{docid}", async (document) => {
-    var snapshot = document.data
-    var data = snapshot.data()
-    var videoname = data["videoname"]
-    var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"]
-    var url = null
-    if(commonService.production){
-      url = commonService.slackLogVideoWatch
-    }
-    else{
-      url = commonService.slackDevTest
-    }
-    if(url != null){
-      var webhook = new commonService.IncomingWebhook(url);
-      var message = `${profilename} has started ${data["type"] == "solarvoice" ? "Listening to" : "watching the video"} - ${videoname}
-      To get full details:
-      https://app.posthog.com/person/${data['profileid']}#activeTab=events
-      `;
-      console.log(message.toString())
-      webhook.send(message, function(err, header, statusCode, body) {
-        if (err) {
-          console.log('Error:', err);
-        } else {
-          console.log('Received', statusCode, 'from Slack');
-        }
-      });
-    }
-})
-
 //from buffermix archive to recommended playlist
 exports.buffermixToRecommendedPlaylist = onDocumentCreated("buffermix archive/{docid}", async(snap) => {
     var snapshot = snap.data

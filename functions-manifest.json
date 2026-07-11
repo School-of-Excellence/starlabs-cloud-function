@@ -172,7 +172,7 @@
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
-      "triggerPath": "content analytics/{docid}",
+      "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -721,9 +721,8 @@
     },
     {
       "name": "seLiveTranscribeSubmit",
-      "type": "onRequest",
+      "type": "UNKNOWN",
       "file": "components/se_live_transcribe.js",
-      "triggerPath": "live assignment/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -790,34 +789,10 @@
       "codebase": "default"
     },
     {
-      "name": "slackContentConsumption",
-      "type": "onSchedule",
-      "file": "components/content.js",
-      "triggerPath": "content analytics/{docid}",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
       "name": "slackCustomerSupport",
       "type": "onDocumentCreated",
       "file": "components/clientissue.js",
       "triggerPath": "clientissue/{id}",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
-      "name": "slackInterimCrossOver",
-      "type": "onDocumentCreated",
-      "file": "components/interimreport.js",
-      "triggerPath": "/interim crossover/{docid}",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
-      "name": "slackLoginEvent",
-      "type": "onDocumentCreated",
-      "file": "components/communication.js",
-      "triggerPath": "loginlog/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -885,6 +860,13 @@
       "type": "onRequest",
       "file": "components/communication.js",
       "triggerPath": "/supportdesk/{docid}/messages/{messageid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "syncETicketEligibility",
+      "type": "onRequest",
+      "file": "components/watson-updates.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -1022,9 +1004,9 @@
     },
     {
       "name": "videoAskHLS",
-      "type": "onDocumentCreated",
+      "type": "onSchedule",
       "file": "components/content.js",
-      "triggerPath": "content analytics/{docid}",
+      "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -1032,6 +1014,13 @@
       "name": "watiResponseCapture",
       "type": "onRequest",
       "file": "components/communication.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "watsonEventParticipation",
+      "type": "onRequest",
+      "file": "components/watson-updates.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },

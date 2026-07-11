@@ -344,10 +344,10 @@ exports.salesCaptureSlackIntegration = onRequest({region: "us-central1", cors:tr
     //
     var url
     if(commonService.production){
-      url = commonService.slackSaleCapture // Production
+      url = await commonService.getWebhookUrl("slackSaleCapture") // Production
     }
     else{
-      url = commonService.slackDevTest // Test
+      url = await commonService.getWebhookUrl("slackDevTest") // Test
     }
     console.log("slack message",message);
     var webhook = new IncomingWebhook(url);
@@ -467,10 +467,10 @@ exports.sendSlackNotificationSaleRejection = onDocumentUpdated({document:'salesl
     //
     var url
     if(commonService.production){
-      url = commonService.slackSaleRejection // Production
+      url = await commonService.getWebhookUrl("slackSaleRejection") // Production
     }
     else{
-      url = commonService.slackDevTest // Test
+      url = await commonService.getWebhookUrl("slackDevTest") // Test
     }
     console.log("slack message",message);
     var webhook = new IncomingWebhook(url);

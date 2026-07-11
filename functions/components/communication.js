@@ -1300,10 +1300,11 @@ exports.SupportDeskToSlack = onDocumentCreated('/supportdesk/{docid}/messages/{m
   var url
   var snapshot = snapshotdata.data
   if(commonService.production){
-    url = commonService.slackLogSupport;
+    
+    url = await commonService.getWebhookUrl("slackLogSupport")
   }
   else{
-    url = commonService.slackDevTest
+    url = await commonService.getWebhookUrl("slackDevTest")
   }
 
   var webhook = new IncomingWebhook(url);
@@ -3573,9 +3574,9 @@ exports.slackLoginEvent = onDocumentCreated("loginlog/{docid}",async (change) =>
   const data = change.data.data()
   let url = null
   if(commonService.production === true){
-    url = commonService.slackAppLogin
+    url = await commonService.getWebhookUrl("slackAppLogin")
   }else{
-    url = commonService.slackDevTest
+    url = await commonService.getWebhookUrl("slackDevTest")
   }
   if(url != null){
     const googleSheetsUrl = "https://script.google.com/a/macros/soexcellence.com/s/AKfycbxGoEUHufRqlcZEZ2hffcDYf07bnw9_Nr_Kmvz9qkNmcVcmdRTfCUkFoNKNjPgxUVAg/exec"
@@ -4211,14 +4212,13 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     let url;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
-        ? commonService.slackWorkshopsubscribersactivity
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
+        : await commonService.getWebhookUrl("slackDevTest");
     } else {
       url = commonService.production
-        ? commonService.slackWorkshopQandA
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopQandA")
+        : await commonService.getWebhookUrl("slackDevTest");
     }
-    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
 
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -4340,11 +4340,11 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
-    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+
     var url;
     // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
-    // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+
     // const slackChannel = (await data["workshopref"].get()).data()["workshopactivitychannel"];
     // const workshopDoc = await data["workshopref"].get();
     const workshopDoc = await admin.firestore().doc(data["workshopref"].path).get();
@@ -4358,14 +4358,13 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const slackChannel = workshopData['workshopactivitychannel'] || null;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
-        ? commonService.slackWorkshopsubscribersactivity
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
+        : await commonService.getWebhookUrl("slackDevTest");
     } else {
       url = commonService.production
-        ? commonService.slackWorkshopQandA
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopQandA")
+        : await commonService.getWebhookUrl("slackDevTest");
     }
-    // var url =  commonService.slackDevTest;
     if (url != null) {
     // if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -4404,7 +4403,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         res.status(400).send('Message is required');
         return;
       }
-      var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+      var url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopQandA") : await commonService.getWebhookUrl("slackDevTest");
       if (url != null) {
         var webhook = new commonService.IncomingWebhook(url);
         
@@ -5059,7 +5058,7 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
     const profile = await getProfileData(data["profileid"]);
     if (!profile) return;
     const profilename = profile["name"];
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    var url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopQandA") : await commonService.getWebhookUrl("slackDevTest");
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
       var message = `👤 *${profilename}* enquired | 📱 ${data["phone"]} | 🛒 ${product ?? "No Product"} | 💬 ${question}`;
