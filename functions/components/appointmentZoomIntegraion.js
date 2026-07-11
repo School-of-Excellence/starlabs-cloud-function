@@ -45,7 +45,7 @@ exports.requestScheduling = onRequest(async (req, res) => {
 });
 
 async function slackScheduleRequest({name, timestamp, appointment, productname}) {
-  var webhookUrl = commonService.production ? commonService.slackLogScheduling : commonService.slackDevTest
+  var webhookUrl = await commonService.getWebhookUrl(commonService.production ? "slackLogScheduling" : "slackDevTest")
   if (!webhookUrl) {
     logger.warn("Slack webhook URL not configured");
     return;
