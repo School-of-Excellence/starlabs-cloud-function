@@ -47,7 +47,7 @@ async function getWebhookUrl(docid) {
 			console.log(`[getWebhookUrl] No webhook found for docid: ${docid}`);
 			return null;
 		}
-		const url = doc.data().webhookurl;
+		const url = doc.data()["webhookurl"];
 		if (!url) {
 			console.log(`[getWebhookUrl] webhookurl field missing for docid: ${docid}`);
 			return null;
