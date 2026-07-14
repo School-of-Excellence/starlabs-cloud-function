@@ -5,9 +5,10 @@ const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
-
+const workshop = require('./workshop');
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
 const axios = require("axios");
+
 
 exports.ticketfromwebsite = onRequest(async (req,res) => {
   console.log("Data", req.body);
@@ -178,6 +179,11 @@ exports.ticketMsgNotification = onDocumentCreated('/clientissue/{docid}/messages
       //   ticketMsgData['message'],
       //   null,
       // );
+      try {
+       
+      } catch (err) {
+        console.log("newuser support watii:", err)
+      }
       await commonService.saveNotificationRecord({
         title: "Ticket No :" + ticketData['issueno'],
         message: ticketMsgData['message'],
