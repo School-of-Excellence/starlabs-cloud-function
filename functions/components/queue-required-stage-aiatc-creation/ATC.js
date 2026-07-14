@@ -449,9 +449,9 @@ exports.updateAuthorUIDInAtcAlpha = onDocumentWritten({document: "atc_alpha/{atc
       console.log(" slack update totalevolutionprogress",totalevolutionprogress);
       let url = null
       if(commonService.production === true){
-        url = commonService.slackEvolutionProgress //production
+        url = await commonService.getWebhookUrl("slackEvolutionProgress") //production
       }else{
-        url = commonService.slackDevTest //test
+        url = await commonService.getWebhookUrl("slackDevTest") //test
       }
       if(url != null){
         await admin.firestore().collection("profile_data").doc(newData['profileid']).get().then(snap => {

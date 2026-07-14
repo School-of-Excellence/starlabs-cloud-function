@@ -241,142 +241,144 @@ exports.ticketMsgNotification = onDocumentCreated('/clientissue/{docid}/messages
   }
 });
 
-exports.slackCustomerSupport = onDocumentWritten("clientissue/{id}",async (change)=>{
-  const beforeData = change.data.before.exists ? change.data.before.data() : null;
-  const afterData = change.data.after.exists ? change.data.after.data() : null;
-  if( beforeData == null || beforeData['status']['status'].toLowerCase() != afterData['status']['status'].toLowerCase() || beforeData != null && beforeData['category'] != afterData['category']) {
+exports.slackCustomerSupport = onDocumentWritten("clientissue/{id}", async (change)=>{
+	const beforeData = change.data.before.exists ? change.data.before.data() : null;
+	const afterData = change.data.after.exists ? change.data.after.data() : null;
+  console.log("Client Issue Updated", change.data.after.ref.path)
+  console.log(beforeData['status']['status'].toLowerCase() , "=====", afterData['status']['status'].toLowerCase())
+	if( beforeData == null || beforeData['status']['status'].toLowerCase() != afterData['status']['status'].toLowerCase() || beforeData != null && beforeData['category'] != afterData['category']) {
+    if(afterData['status']['status'].toLowerCase() == 'closed'){
+      console.log("Sending Notification To Participant")
+      // await sendPushNotification(
+      //   afterData['clientid'],
+      //   afterData['id'],
+      //   "Ticket No : " +afterData['issueno'],
+      //   "This Ticket has been Resolved",
+      //   null
+      // )
+      await commonService.saveNotificationRecord({
+        title: "Ticket No :" + afterData['issueno'],
+        message: "This Ticket has been Resolved",
+        subtitle: null,
+        date: admin.firestore.FieldValue.serverTimestamp(),
+        landingpage: null,
+        logged: false,
+        profileid: afterData["assign"],
+        sticky: false,
+        notificationtype: "supportticket",
+        notificationimage: null,
+        metadata: {
+          ticketid: afterData['id'],
+          messageid: change.data.after.id
+        }
+      });
+    }
 
-    if(afterData['status']['status'].toLowerCase() == 'closed'){
-      console.log("Sending Notification To Participant")
-      // await sendPushNotification(
-      //   afterData['clientid'],
-      //   afterData['id'],
-      //   "Ticket No : " +afterData['issueno'],
-      //   "This Ticket has been Resolved",
-      //   null
-      // )
-      await commonService.saveNotificationRecord({
-        title: "Ticket No :" + afterData['issueno'],
-        message: "This Ticket has been Resolved",
-        subtitle: null,
-        date: admin.firestore.FieldValue.serverTimestamp(),
-        landingpage: null,
-        logged: false,
-        profileid: afterData["assign"],
-        sticky: false,
-        notificationtype: "supportticket",
-        notificationimage: null,
-        metadata: {
-          ticketid: afterData['id'],
-          messageid: change.data.after.id
-        }
-      });
-    }
+    var reportedby;
+    var assignedto = [];
+    var status = beforeData == null ? afterData['status']['status'] : `From ${beforeData['status']['status']} To ${afterData['status']['status']}`;
+    var category = beforeData != null && beforeData['category'] != afterData['category'] ? `From ${'*'+beforeData['category']+"*"} To ${"*"+afterData['category']+"*"}` : "*"+afterData['category']+"*";
+    // await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
+    //   reportedby = profile.data()["name"]
+    // }).catch(e => {console.log(e)})
+    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(async profile => {
+      if (profile.exists) {
+        reportedby = profile.data()["name"];
+      } else {
+        await admin.firestore().collection("new_user_data").doc(afterData["reportedBy"]).get().then(newProfile => {
+          if (newProfile.exists) {
+            reportedby = newProfile.data()["name"];
+          }
+        }).catch(e => { console.log(e) });
+      }
+    }).catch(e => { console.log(e) });
+    for (let i = 0; i < afterData["assign"].length; i++) {
+      const element = afterData["assign"][i];
+      await admin.firestore().collection("profile_data").doc(element).get().then(profile=>{
+        assignedto.push(profile.data()["name"])
+      }).catch(e => {console.log(e)})
+    }
+    var url
+      if(commonService.production){
+        url = await commonService.getWebhookUrl("slackTicketingSystem") // Production
+      }
+      else{
+        url = await commonService.getWebhookUrl("slackDevTest") // Test
+      }
+		console.log("WebHook URL", url)
+    var webhook = new IncomingWebhook(url);
 
-    var reportedby;
-    var assignedto = [];
-    var status = beforeData == null ? afterData['status']['status'] : `From ${beforeData['status']['status']} To ${afterData['status']['status']}`;
-    var category = beforeData != null && beforeData['category'] != afterData['category'] ? `From ${'*'+beforeData['category']+"*"} To ${"*"+afterData['category']+"*"}` : "*"+afterData['category']+"*";
-    // await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
-    //   reportedby = profile.data()["name"]
-    // }).catch(e => {console.log(e)})
-    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(async profile => {
-      if (profile.exists) {
-        reportedby = profile.data()["name"];
-      } else {
-        await admin.firestore().collection("new_user_data").doc(afterData["reportedBy"]).get().then(newProfile => {
-          if (newProfile.exists) {
-            reportedby = newProfile.data()["name"];
-          }
-        }).catch(e => { console.log(e) });
-      }
-    }).catch(e => { console.log(e) });
-    for (let i = 0; i < afterData["assign"].length; i++) {
-      const element = afterData["assign"][i];
-      await admin.firestore().collection("profile_data").doc(element).get().then(profile=>{
-        assignedto.push(profile.data()["name"])
-      }).catch(e => {console.log(e)})
-    }
-    var url
-      if(commonService.production){
-        url = commonService.slackTicketingSystem // Production
-      }
-      else{
-        url = commonService.slackDevTest // Test
-      }
-    var webhook = new IncomingWebhook(url);
-
-    let message = {
-      "blocks" : [
-        {
-          "type" : "divider"
-        },
-        {
-          "type": "header",
-          "text": {
-            "type": "plain_text",
-            "text": `Ticket Captured : ${afterData['issueno'].toString()}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Client Name* : ${afterData['name']}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Reported Date* : ${afterData['reporteddate'].toDate().toDateString()}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Reported By* : ${reportedby}`
-          }
-        },         
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Category* : ${category}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Assigned To* : ${assignedto.join(', ')}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Status* : ${status}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Issue* : ${afterData['issue']}`
-          }
-        },
-      ]
-    }
-    await webhook.send(message, function(err, header, statusCode, body) {
-      if (err) {
-        console.log('Error:', err);
-      } else {
-        console.log('Received', statusCode, 'from Slack');
-      }
-    });
-  }
+    let message = {
+      "blocks" : [
+        {
+          "type" : "divider"
+        },
+        {
+          "type": "header",
+          "text": {
+            "type": "plain_text",
+            "text": `Ticket Captured : ${afterData['issueno'].toString()}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Client Name* : ${afterData['name']}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Reported Date* : ${afterData['reporteddate'].toDate().toDateString()}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Reported By* : ${reportedby}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Category* : ${category}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Assigned To* : ${assignedto.join(', ')}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Status* : ${status}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Issue* : ${afterData['issue']}`
+          }
+        },
+      ]
+    }
+    await webhook.send(message, function(err, header, statusCode, body) {
+      if (err) {
+        console.log('Error:', err);
+      } else {
+        console.log('Received', statusCode, 'from Slack');
+      }
+    });
+  }
 });
 
 //harish
