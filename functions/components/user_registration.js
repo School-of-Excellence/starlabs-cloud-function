@@ -496,21 +496,18 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
     } catch (err) {
       console.error("Error sending to Customer.io:", err);
     }
-
-  // const url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
   let url;
 
   if (referralcode === referralcodesubscriber) {
     console.log('old web hook',referredProfileName)
     url = commonService.production
-      ? commonService.slackWorkshopsubscribers
-      : commonService.slackDevTest;
+      ? await commonService.getWebhookUrl("slackWorkshopsubscribers")
+      : await commonService.getWebhookUrl("slackDevTest");
   } else {
     console.log('new web hook',referredProfileName)
     url = commonService.production
-      // ? commonService.slackWorkshopQandA
-      ? commonService.slackWorkshopQandA
-      : commonService.slackDevTest;
+      ? await commonService.getWebhookUrl("slackeiflixrefferals")
+      : await commonService.getWebhookUrl("slackDevTest");
   }
   if (url) {
     const webhook = new commonService.IncomingWebhook(url);

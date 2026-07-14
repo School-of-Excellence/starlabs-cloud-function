@@ -38,27 +38,26 @@ const eventWatiServerId = '101723';
 
 const axios = require("axios"); // Promise based HTTP Client
 
-var slackDevTest = "https://hooks.slack.com/services/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"
-var slackLogSupport = "https://hooks.slack.com/services/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"
-var slackLogVideoWatch = "https://hooks.slack.com/services/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"
-var slackAppLogin = "https://hooks.slack.com/services/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"
-var slackTicketingSystem = "https://hooks.slack.com/services/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"
-var slackEvent = "https://hooks.slack.com/services/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"
-var slackSaleCapture = "https://hooks.slack.com/services/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"
-var slackSaleRejection = "https://hooks.slack.com/services/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"
-var slackEvolutionProgress = "https://hooks.slack.com/services/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"
-var slackLoveLetter = "https://hooks.slack.com/services/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"
-var slackAskAH = "https://hooks.slack.com/services/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"
-var slackFirebaseBilling = "https://hooks.slack.com/services/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"
-var slackLogScheduling = "https://hooks.slack.com/services/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"
-// var slackWorkshopQandA = "https://hooks.slack.com/services/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"
-var slackWorkshopQandA = "https://hooks.slack.com/services/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"
-var slackeiflixrefferals = "https://hooks.slack.com/services/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"
-var slackWorkshopsubscribers = "https://hooks.slack.com/services/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"
-var slackWorkshopsubscribersactivity = "https://hooks.slack.com/services/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"
-var hiddenSalesChannel = "https://hooks.slack.com/services/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"
-var queueSelectionLog = "https://hooks.slack.com/services/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"
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
+
+async function getWebhookUrl(docid) {
+	try {
+		const doc = await admin.firestore().collection('slack webhookurls').doc(docid).get();
+		if (!doc.exists) {
+			console.log(`[getWebhookUrl] No webhook found for docid: ${docid}`);
+			return null;
+		}
+		const url = doc.data()["webhookurl"];
+		if (!url) {
+			console.log(`[getWebhookUrl] webhookurl field missing for docid: ${docid}`);
+			return null;
+		}
+		return url;
+	} catch (error) {
+		console.log(`[getWebhookUrl] failed for ${docid}:`, error);
+		return null;
+	}
+}
 
 // Split Array into Multiple Array
 function chunkArray(array, chunkSize) {
@@ -808,12 +807,16 @@ async function sendSalesCaptureToSalesChannel(value) {
 	var url
 	if (production) {
 		if(value['hiddenpipeline']) {
-			url = hiddenSalesChannel
+			url = await getWebhookUrl("hiddenSalesChannel")
 		} else {
-			url = slackSaleCapture // Production
+			url = await getWebhookUrl("slackSaleCapture") // Production
 		}
 	} else {
-		url = slackDevTest // Test
+		url = await getWebhookUrl("slackDevTest") // Test
+	}
+	if (!url) {
+		console.log("[sendSalesCaptureToSalesChannel] webhook url not found, skipping slack post");
+		return;
 	}
 	console.log("slack message", message);
 	var webhook = new IncomingWebhook(url);
@@ -923,9 +926,13 @@ async function sendSlotConfirmationToSlackChannel(value, status, profile) {
 
 	var url
 	if (production) {
-		url = queueSelectionLog // Production
+		url = await getWebhookUrl("queueSelectionLog") // Production
 	} else {
-		url = slackDevTest // Test
+		url = await getWebhookUrl("slackDevTest") // Test
+	}
+	if (!url) {
+		console.log("[sendSlotConfirmationToSlackChannel] webhook url not found, skipping slack post");
+		return;
 	}
 	console.log("slack message", message);
 	var webhook = new IncomingWebhook(url);
@@ -962,7 +969,7 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 }
 
 module.exports = {
-	slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,slackeiflixrefferals,
+	// slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
 	postmarkClient,
 	monthName,
@@ -981,7 +988,8 @@ module.exports = {
 	updateParticipantTouchPoint,
 	generateZoomMeeting,
 	createEmailArchiveDocument,
-	createWatiArchiveDocument
+	createWatiArchiveDocument,
+	getWebhookUrl
 }
 
 async function createEmailArchiveDocument({

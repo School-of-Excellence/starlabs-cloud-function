@@ -100,13 +100,12 @@ exports.postmarkResponseCapture = communication.postmarkResponseCapture // on re
 // exports.sendValidationMail = communication.sendValidationMail; // onRequest
 exports.sendWhatsAppBroadcastCreated = communication.sendWhatsAppBroadcastCreated // c - 'wati archive/{docid}'
 exports.sendWhatsAppBroadcast = communication.sendWhatsAppBroadcast // c - 'On Request'
-exports.slackLoginEvent = communication.slackLoginEvent // c - "loginlog/{docid}"
+// exports.slackLoginEvent = communication.slackLoginEvent // c - "loginlog/{docid}"
 // exports.createTwilioWhatsAppTemplate = communication.createTwilioWhatsAppTemplate // c - 'twilio_templates/{docid}'
 
 //contentSystem
 exports.communityPostHLS = contentSystem.communityPostHLS // w - '/community post/{id}'
 exports.videoAskHLS = contentSystem.videoAskHLS // c - '/participantvideoask/{id}'
-exports.slackContentConsumption = contentSystem.slackContentConsumption // c - "content analytics/{docid}"
 exports.buffermixToRecommendedPlaylist = contentSystem.buffermixToRecommendedPlaylist // c - "buffermix archive/{docid}"
 exports.ConvertUrltoHLS = contentSystem.ConvertUrltoHLS // w - '/episodes/{id}'
 exports.UnconvertedUrltoHLS = contentSystem.UnconvertedUrltoHLS // schedule 'every 6 hours'
@@ -124,7 +123,6 @@ exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublish
 exports.dailyFirestoreAuditAnalysis = exportsAndAlerts.dailyFirestoreAuditAnalysis // Everyday firestore read & write count
 // 
 //interim report
-exports.slackInterimCrossOver = interimReportSystem.slackInterimCrossOver // c - "/interim crossover/{docid}"
 exports.slackLoveLetter = interimReportSystem.slackLoveLetter // c - "/love letter/{docid}"
 exports.slackAskAH = interimReportSystem.slackAskAH //  c - "/ask AH/{docid}"
 exports.ATCevolutionProgress = interimReportSystem.ATCevolutionProgress
@@ -202,6 +200,8 @@ exports.evolutionFamilyWishlistOnWrite = wishlist.evolutionFamilyWishlistOnWrite
 
 // Watson
 exports.dashboardPaymentplanWatsonRequest = watsonUpdates.dashboardPaymentplanWatsonRequest
+exports.watsonEventParticipation = watsonUpdates.watsonEventParticipation
+exports.syncETicketEligibility = watsonUpdates.syncETicketEligibility
 
 // Chat
 exports.ChatxNotification = communication.ChatxNotification
