@@ -38,7 +38,7 @@ exports.requestScheduling = onRequest(async (req, res) => {
 });
 
 async function slackScheduleRequest({name, timestamp, appointment, productname}) {
-  var webhookUrl = commonService.production ? commonService.slackLogScheduling : commonService.slackDevTest
+  var webhookUrl = await commonService.getWebhookUrl(commonService.production ? "slackLogScheduling" : "slackDevTest")
   if (!webhookUrl) {
     logger.warn("Slack webhook URL not configured");
     return;
@@ -1456,199 +1456,297 @@ exports.approveOfftime = onRequest(async(req, res)=>{
 })
 
 // Send Appointment Remainder Before
-exports.appointmentremainder = onSchedule({schedule: "every 5 minutes"}, async (event) => {
-  var currentTime = new Date()
-  // 5 Minutes
-  var nextfive = new Date()
-  nextfive.setMinutes(currentTime.getMinutes() + 5)
-  console.log("Five Minutes Time", currentTime.toTimeString(), nextfive.toTimeString())
-  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", currentTime).where("starttime", "<=", nextfive).get().then(async appt=>{
-    console.log("Next 5 Mins Appt", appt.size)
-    var profileid = []
-    if(appt.docs.length != 0){
-      for (let i = 0; i < appt.docs.length; i++) {
-        const appDoc = appt.docs[i]
-        const apptData = appDoc.data();
-        var appointmentName = ""
-        await admin.firestore().doc(apptData["appointment"].path).get().then(data=>{
-          appointmentName = data.data()["appointmenttype"]
-        }).catch(e => {})
-        profileid.push(apptData["bookedby"].id)
-        apptData["hosts"].forEach(e =>{
-          profileid.push(e.id)
-        })
-        var title = appointmentName + " Reminder!"
-        var message = "Your appointment starts in 5 minutes"
-        await commonService.saveNotificationRecord({
-          title: title,
-          message: message,
-          subtitle: null,
-          date: admin.firestore.FieldValue.serverTimestamp(),
-          landingpage: null,
-          logged: false,
-          profileid: profileid,
-          sticky: false,
-          notificationtype: "appointmentreminder",
-          notificationimage: null,
-          metadata: {
-            appointmentid: appDoc.id
-          }
-        })
-      }
-    }
-  })
+exports.appointmentremainder = onSchedule({ schedule: "every 5 minutes" }, async (event) => {
+  var currentTime = new Date()
+  // 5 Minutes
+  var nextfive = new Date()
+  nextfive.setMinutes(currentTime.getMinutes() + 5)
+  console.log("Five Minutes Time", currentTime.toTimeString(), nextfive.toTimeString())
+  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", currentTime).where("starttime", "<=", nextfive).get().then(async appt => {
+    console.log("Next 5 Mins Appt", appt.size)
+    var profileid = []
+    if (appt.docs.length != 0) {
+      for (let i = 0; i < appt.docs.length; i++) {
+        const appDoc = appt.docs[i]
+        const apptData = appDoc.data();
+        var appointmentName = ""
+        await admin.firestore().doc(apptData["appointment"].path).get().then(data => {
+          appointmentName = data.data()["appointmenttype"]
+        }).catch(e => { })
+        profileid.push(apptData["bookedby"].id)
+        apptData["hosts"].forEach(e => {
+          profileid.push(e.id)
+        })
+        var title = appointmentName + " Reminder!"
+        var message = "Your appointment starts in 5 minutes"
+        await commonService.saveNotificationRecord({
+          title: title,
+          message: message,
+          subtitle: null,
+          date: admin.firestore.FieldValue.serverTimestamp(),
+          landingpage: null,
+          logged: false,
+          profileid: profileid,
+          sticky: false,
+          notificationtype: "appointmentreminder",
+          notificationimage: null,
+          metadata: {
+            appointmentid: appDoc.id
+          }
+        })
+      }
+    }
+  })
 
-  // One Hour
-  var starttime = new Date()
-  starttime.setMinutes(currentTime.getMinutes() + 55)
-  var endtime = new Date()
-  endtime.setMinutes(currentTime.getMinutes() + 65)
-  console.log("Next One Hour", starttime.toTimeString(), endtime.toTimeString())
-  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", starttime).where("starttime", "<=", endtime).get().then(async appt=>{
-    console.log("Next 1 Hour Appt", appt.size)
-    var profileid = []
-    if(appt.docs.length != 0){
-      for (let i = 0; i < appt.docs.length; i++) {
-        const appDoc = appt.docs[i]
-        const apptData = appDoc.data();
-        var appointmentName = ""
-        await admin.firestore().doc(apptData["appointment"].path).get().then(data=>{
-          appointmentName = data.data()["appointmenttype"]
-        }).catch(e => {})
-        profileid.push(apptData["bookedby"].id)
-        apptData["hosts"].forEach(e =>{
-          profileid.push(e.id)
-        })
-        var title = appointmentName + " Reminder!"
-        var message = "Your appointment is scheduled in 1 hour"
-        await commonService.saveNotificationRecord({
-          title: title,
-          message: message,
-          subtitle: null,
-          date: admin.firestore.FieldValue.serverTimestamp(),
-          landingpage: null,
-          logged: false,
-          profileid: profileid,
-          sticky: false,
-          notificationtype: "appointmentreminder",
-          notificationimage: null,
-          metadata: {
-            appointmentid: appDoc.id
-          }
-        })
+  // send wati notification for participants in In Evolution Mapping Activity for 24/48 hrs.
+  var followUpWindowStart24h = new Date(currentTime.getTime() - (24 * 60 * 60 * 1000))
+  var followUpWindowEnd24h = new Date(nextfive.getTime() - (24 * 60 * 60 * 1000))
+  var expiryWindowStart48h = new Date(currentTime.getTime() - (48 * 60 * 60 * 1000))
+  var expiryWindowEnd48h = new Date(nextfive.getTime() - (48 * 60 * 60 * 1000))
+  var liveQueueRefs = []
+  await admin.firestore().collection("queue generation")
+    .where("queuestartdate", "<=", currentTime)
+    .where("queueenddate", ">=", currentTime)
+    .get()
+    .then(queueGenSnap => {
+      liveQueueRefs = queueGenSnap.docs.map(doc => doc.ref)
+      console.log("Live Queues Found:", liveQueueRefs.length)
+    }).catch(err => {
+      console.log("Queue Generation Query Error:", err)
+    })
 
-        // Wati Remainder
-        try {
-          var profileData = (await admin.firestore().collection("profile_data").doc(apptData["bookedby"].id).get()).data()
-          if(profileData["number"]){
-            let countrycode = (![null,undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g,"")
+  await admin.firestore().collection("liveevolutionmapping")
+    .where("live", "==", true)
+    .get()
+    .then(async liveSnap => {
+      console.log("Live Evolution Mapping Participants:", liveSnap.size)
+      for (let i = 0; i < liveSnap.docs.length; i++) {
+        const liveDoc = liveSnap.docs[i]
+        const liveData = liveDoc.data()
+        try {
+          if (liveQueueRefs.length === 0) continue
 
-            // Convert Firestore timestamp to Date
-            var appointmentTime = new Date(apptData["starttime"].toDate());
+          const queueTokenSnap = await admin.firestore().collection("queue_token")
+            .where("profile_id", "==", liveData["profileid"])
+            .where("tokenstatus", "==", "Active")
+            .where("currentstage", "==", "In Evolution Mapping Activity")
+            .where("queueref", "in", liveQueueRefs)
+            .limit(1)
+            .get()
 
-            // Format directly to IST using toLocaleString
-            var formatTime = appointmentTime.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            }) + " IST";
+          console.log("queue token:", queueTokenSnap)
 
-            const watiParams = [
-              { name: 'name', value: profileData['name'] },
-              { name: 'session', value: appointmentName },
-              { name: 'timing', value: formatTime }
-            ]
+          if (queueTokenSnap.empty) continue
 
-            console.log("Params", watiParams)
+          const lastUpdated = liveData["lastupdated"].toDate()
+          const profileData = (await admin.firestore().collection("profile_data").doc(liveData["profileid"]).get()).data()
 
-            const waticontent = {
-              phonenumber: `${countrycode}${profileData['number']}`,
-              body: {
-                parameters: watiParams,
-                broadcast_name: 'onboarding_1hr_reminder_v1',
-                template_name: 'onboarding_1hr_reminder_v1'
-              }
-            };
+          if (lastUpdated >= followUpWindowStart24h && lastUpdated < followUpWindowEnd24h) {
+            await sendEvolutionMappingNotification(profileData, "em_activity_24hrs_left")
+            console.log("24hr Evolution Mapping notification sent for", liveData["profileid"])
+          }
 
-            const parameterConfig = watiParams.map(param => ({
-              excelColumn: null,
-              fillType: 'static',
-              metadataField: null,
-              name: param.name,
-              staticValue: param.value
-            }));
-            console.log('Triggered Wati Archive Creation');
-            
-            const response = await commonService.createWatiArchiveDocument({
-              numbers: [parseInt(profileData['number'])],
-              numbermap : {[`${profileData['number']}`] : profileData.id},
-              broadcastname : 'Individual',
-              paramFillMode: 'static',
-              parameterConfig: parameterConfig,
-              params: [],
-              profileid: [profileData.id],
-              templateid: null,
-              watitemplateid: 'onboarding_1hr_reminder_v1',
-            });
-            console.log('WATI ARCHIVE RESPONSE', response);
-            
-            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-            //   console.log("Wati Appointment Remainder Error")
-            //   console.log(err)
-            // });
-          }
-        } catch (error) {
-          console.log("Wati Appointment Remainder Exception")
-          console.log(error)
-        }
-      }
-    }
-  })
-  
-  // Scheduled Saved Notifications
-  await admin.firestore().collection("savednotifications")
-  .where("schedule", "==", true)
-  .where("sent", "==", false)
-  .where("scheduledat", ">=", currentTime)
-  .where("scheduledat", "<=", nextfive)
-  .get().then(async notiSnap => {
-    console.log("Saved Notifications:", notiSnap.size)
-    if (notiSnap.docs.length != 0) {
-      for (let i = 0; i < notiSnap.docs.length; i++) {
-        const notiDoc = notiSnap.docs[i]
-        const notiData = notiDoc.data()
-        var profileID = (notiData["profiles"] || []).map(p => p)
-        if (profileID.length > 0) {
-          await commonService.saveNotificationRecord({
-            title: notiData["title"] || "",
-            message: notiData["message"] || "",
-            subtitle: notiData["subtitle"] || null,
-            date: admin.firestore.FieldValue.serverTimestamp(),
-            landingpage: notiData["landingpage"] || null,
-            logged: notiData["logged"] ? true : false,
-            profileid: profileID,
-            sticky: notiData["sticky"] || false,
-            notificationtype: "ahupdate",
-            notificationimage: notiData["notificationimage"] || null,
-            metadata: notiData["metadata"] || {}
-          })
-          await notiDoc.ref.update({ schedule: false, sent: true, sentat: admin.firestore.FieldValue.serverTimestamp() })
-          console.log("Saved notification sent:", notiDoc.id)
-        }
-      }
-    }
-  }).catch(err => {
-    console.log("Saved Notification Error:", err)
-  })
+          if (lastUpdated >= expiryWindowStart48h && lastUpdated < expiryWindowEnd48h) {
+            await sendEvolutionMappingNotification(profileData, "em_activity_expired")
+            console.log("48hr notification sent for", liveData["profileid"])
 
-  // Workshop payment safety-net: settle any workshop order that was charged on
-  // Razorpay but never settled here (e.g. the buyer's browser died right after
-  // checkout). Runs on this same 5-minute tick; fenced so a failure here never
-  // affects the reminders/notifications above.
-  try {
-    await workshop.runWorkshopPaymentReconcile()
-  } catch (err) {
-    console.log("Workshop Payment Reconcile Error:", err)
-  }
+            await liveDoc.ref.update({ live: false })
+            console.log("Live set to false for", liveData["profileid"])
+          }
+        } catch (error) {
+          console.log(error)
+        }
+      }
+    }).catch(err => {
+      console.log("Live Evolution Mapping Query Error:", err)
+    })
+
+  // One Hour
+  var starttime = new Date()
+  starttime.setMinutes(currentTime.getMinutes() + 55)
+  var endtime = new Date()
+  endtime.setMinutes(currentTime.getMinutes() + 65)
+  console.log("Next One Hour", starttime.toTimeString(), endtime.toTimeString())
+  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", starttime).where("starttime", "<=", endtime).get().then(async appt => {
+    console.log("Next 1 Hour Appt", appt.size)
+    var profileid = []
+    if (appt.docs.length != 0) {
+      for (let i = 0; i < appt.docs.length; i++) {
+        const appDoc = appt.docs[i]
+        const apptData = appDoc.data();
+        var appointmentName = ""
+        await admin.firestore().doc(apptData["appointment"].path).get().then(data => {
+          appointmentName = data.data()["appointmenttype"]
+        }).catch(e => { })
+        profileid.push(apptData["bookedby"].id)
+        apptData["hosts"].forEach(e => {
+          profileid.push(e.id)
+        })
+        var title = appointmentName + " Reminder!"
+        var message = "Your appointment is scheduled in 1 hour"
+        await commonService.saveNotificationRecord({
+          title: title,
+          message: message,
+          subtitle: null,
+          date: admin.firestore.FieldValue.serverTimestamp(),
+          landingpage: null,
+          logged: false,
+          profileid: profileid,
+          sticky: false,
+          notificationtype: "appointmentreminder",
+          notificationimage: null,
+          metadata: {
+            appointmentid: appDoc.id
+          }
+        })
+
+        // Wati Remainder
+        try {
+          var profileData = (await admin.firestore().collection("profile_data").doc(apptData["bookedby"].id).get()).data()
+          if (profileData["number"]) {
+            let countrycode = (![null, undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g, "")
+
+            // Convert Firestore timestamp to Date
+            var appointmentTime = new Date(apptData["starttime"].toDate());
+
+            // Format directly to IST using toLocaleString
+            var formatTime = appointmentTime.toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            }) + " IST";
+
+            const watiParams = [
+              { name: 'name', value: profileData['name'] },
+              { name: 'session', value: appointmentName },
+              { name: 'timing', value: formatTime }
+            ]
+
+            console.log("Params", watiParams)
+
+            const waticontent = {
+              phonenumber: `${countrycode}${profileData['number']}`,
+              body: {
+                parameters: watiParams,
+                broadcast_name: 'onboarding_1hr_reminder_v1',
+                template_name: 'onboarding_1hr_reminder_v1'
+              }
+            };
+
+            const parameterConfig = watiParams.map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(profileData['number'])],
+              numbermap: { [`${profileData['number']}`]: profileData.id },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileData.id],
+              templateid: null,
+              watitemplateid: 'onboarding_1hr_reminder_v1',
+            });
+            console.log('WATI ARCHIVE RESPONSE', response);
+
+            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+            //   console.log("Wati Appointment Remainder Error")
+            //   console.log(err)
+            // });
+          }
+        } catch (error) {
+          console.log("Wati Appointment Remainder Exception")
+          console.log(error)
+        }
+      }
+    }
+  })
+
+  // Scheduled Saved Notifications
+  await admin.firestore().collection("savednotifications")
+    .where("schedule", "==", true)
+    .where("sent", "==", false)
+    .where("scheduledat", ">=", currentTime)
+    .where("scheduledat", "<=", nextfive)
+    .get().then(async notiSnap => {
+      console.log("Saved Notifications:", notiSnap.size)
+      if (notiSnap.docs.length != 0) {
+        for (let i = 0; i < notiSnap.docs.length; i++) {
+          const notiDoc = notiSnap.docs[i]
+          const notiData = notiDoc.data()
+          var profileID = (notiData["profiles"] || []).map(p => p)
+          if (profileID.length > 0) {
+            await commonService.saveNotificationRecord({
+              title: notiData["title"] || "",
+              message: notiData["message"] || "",
+              subtitle: notiData["subtitle"] || null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: notiData["landingpage"] || null,
+              logged: notiData["logged"] ? true : false,
+              profileid: profileID,
+              sticky: notiData["sticky"] || false,
+              notificationtype: "ahupdate",
+              notificationimage: notiData["notificationimage"] || null,
+              metadata: notiData["metadata"] || {}
+            })
+            await notiDoc.ref.update({ schedule: false, sent: true, sentat: admin.firestore.FieldValue.serverTimestamp() })
+            console.log("Saved notification sent:", notiDoc.id)
+          }
+        }
+      }
+    }).catch(err => {
+      console.log("Saved Notification Error:", err)
+    })
+
+  // Workshop payment safety-net: settle any workshop order that was charged on
+  // Razorpay but never settled here (e.g. the buyer's browser died right after
+  // checkout). Runs on this same 5-minute tick; fenced so a failure here never
+  // affects the reminders/notifications above.
+  try {
+    await workshop.runWorkshopPaymentReconcile()
+  } catch (err) {
+    console.log("Workshop Payment Reconcile Error:", err)
+  }
 })
+
+// Send Email Notification for 24 hrs and 48 hrs
+async function sendEvolutionMappingNotification(profileData, templateName) {
+  console.log("inside send evolution notification")
+  if (!profileData || !profileData["number"]) return null
+
+  let countrycode = (![null, undefined].includes(profileData['countrycode']) ? profileData['countrycode'] : '+91').replace(/\+/g, "")
+
+  const watiParams = [
+    { name: 'name', value: profileData['name'] }
+  ]
+
+  const parameterConfig = watiParams.map(param => ({
+    excelColumn: null,
+    fillType: 'static',
+    metadataField: null,
+    name: param.name,
+    staticValue: param.value
+  }))
+
+  const response = await commonService.createWatiArchiveDocument({
+    numbers: [parseInt(profileData['number'])],
+    numbermap: { [`${profileData['number']}`]: profileData['profileid'] },
+    broadcastname: 'Individual',
+    paramFillMode: 'static',
+    parameterConfig: parameterConfig,
+    params: [],
+    profileid: [profileData['profileid']],
+    templateid: null,
+    watitemplateid: templateName,
+  })
+
+  console.log(`WATI ${templateName} sent for`, profileData['profileid'], response)
+  return response
+}

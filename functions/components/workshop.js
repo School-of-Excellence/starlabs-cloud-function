@@ -542,9 +542,9 @@ exports.workshopenrolledwatti = onDocumentCreated(
         try {
           let url;
           if (slackchannel === 'workshop-subscriber-activity') {
-            url = commonService.production ? commonService.slackWorkshopsubscribersactivity : commonService.slackDevTest;
+            url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity") : await commonService.getWebhookUrl("slackDevTest");
           } else if (slackchannel === 'workshop-logs') {
-            url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+            url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopQandA") : await commonService.getWebhookUrl("slackDevTest");
           }
           if (url) {
             const webhook = new commonService.IncomingWebhook(url);
@@ -1497,8 +1497,8 @@ async function settleWorkshopPayment(
   if (outcome.newlyCredited) {
     try {
       const url = commonService.production
-        ? commonService.slackeiflixrefferals
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackeiflixrefferals")
+        : await commonService.getWebhookUrl("slackDevTest");
       if (url) {
         const webhook = new commonService.IncomingWebhook(url);
         const workshopTitle = detail.title || "Workshop";
