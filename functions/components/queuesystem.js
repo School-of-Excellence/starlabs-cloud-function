@@ -3282,7 +3282,10 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             deliveryRef: deliverablesRef, 
             participantproductid: docData['mapParticipantProduct'][tokenelement['profile_id']],
             transferredfrom: admin.firestore().collection("queue generation").doc(docData['queuefrom']),
-            tokentransferredfrom:admin.firestore().collection("queue_token").doc(tokenelement['docid'])
+            tokentransferredfrom:admin.firestore().collection("queue_token").doc(tokenelement['docid']),
+            notes: tokenelement['notes'] ?? "",
+            notesList: tokenelement['notesList'] ?? [],
+            tags: tokenelement['tags'] ?? [],
           }
           if (participantProductData["requestedslot"]) {
             queueData["selectedstageslot"] = {}
