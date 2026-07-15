@@ -249,11 +249,6 @@ exports.openViduStartRecording = openViduSystem.openViduStartRecording
 exports.openViduStopRecording = openViduSystem.openViduStopRecording
 exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
 exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
-exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
-exports.awsEventWebhook = openViduSystem.awsEventWebhook
-exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
-exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
-exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
 exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
@@ -267,8 +262,13 @@ exports.livekitCloudMuteParticipant = livekitCloudSystem.livekitCloudMutePartici
 exports.livekitCloudKickParticipant = livekitCloudSystem.livekitCloudKickParticipant
 exports.onEventLivekitCloud = livekitCloudSystem.onEventLivekitCloud
 
-// AWS
+// AWS (self-hosted OpenVidu infrastructure — capacity/scaling, node lifecycle, state webhook)
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
+exports.CheckMasternodeStatus = AWS_endpont.CheckMasternodeStatus
+exports.awsEventWebhook = AWS_endpont.awsEventWebhook
+exports.startMasterNodeHTTP = AWS_endpont.startMasterNodeHTTP
+exports.stopMasterNodeHTTP = AWS_endpont.stopMasterNodeHTTP
+exports.scaleMediaNodes = AWS_endpont.scaleMediaNodes
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment

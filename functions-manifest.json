@@ -95,7 +95,7 @@
     {
       "name": "awsEventWebhook",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -164,7 +164,7 @@
     {
       "name": "CheckMasternodeStatus",
       "type": "onSchedule",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -196,6 +196,13 @@
       "type": "onDocumentCreated",
       "file": "components/big-assignment.js",
       "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "createLivekitCloudToken",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
       "codebase": "default"
     },
     {
@@ -344,6 +351,41 @@
       "codebase": "default"
     },
     {
+      "name": "livekitCloudCloseRoom",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudKickParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudMuteParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStartRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStopRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "muteParticipant",
       "type": "onRequest",
       "file": "components/openVidu.js",
@@ -395,6 +437,13 @@
       "type": "onRequest",
       "file": "components/queuesystem.js",
       "triggerPath": "event collection/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventLivekitCloud",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -694,7 +743,7 @@
     {
       "name": "scaleMediaNodes",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -721,9 +770,8 @@
     },
     {
       "name": "seLiveTranscribeSubmit",
-      "type": "onRequest",
+      "type": "UNKNOWN",
       "file": "components/se_live_transcribe.js",
-      "triggerPath": "live assignment/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -832,7 +880,7 @@
     {
       "name": "startMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -847,7 +895,7 @@
     {
       "name": "stopMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
