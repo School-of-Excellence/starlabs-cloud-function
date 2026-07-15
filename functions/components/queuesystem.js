@@ -3160,6 +3160,21 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
     })
   }
 
+  let mapQueueTokenNotesTagsInfo = {}
+  for (let i = 0; i < docData['selectedparticipants'].length; i=i+10) {
+    const tokenDocIdList = docData['selectedparticipants'].slice(i,i+10).map(e => e['docid']);
+    await admin.firestore().collection("queue_token").where("docid","in",tokenDocIdList).get().then(sourceTokenSnap => {
+      for (let j = 0; j < sourceTokenSnap.docs.length; j++) {
+        const sourceTokenData = sourceTokenSnap.docs[j].data();
+        mapQueueTokenNotesTagsInfo[sourceTokenData['docid']] = {
+          notes: sourceTokenData['notes'],
+          notesList: sourceTokenData['notesList'],
+          tags: sourceTokenData['tags']
+        }
+      }
+    })
+  }
+
   //get participant delivery sequence
   let mapParticipantDeleiverySequence = {}
   for (let i = 0; i < docData['selectedparticipants'].length; i=i+10) {
@@ -3283,9 +3298,9 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             participantproductid: docData['mapParticipantProduct'][tokenelement['profile_id']],
             transferredfrom: admin.firestore().collection("queue generation").doc(docData['queuefrom']),
             tokentransferredfrom:admin.firestore().collection("queue_token").doc(tokenelement['docid']),
-            notes: tokenelement['notes'] ?? "",
-            notesList: tokenelement['notesList'] ?? [],
-            tags: tokenelement['tags'] ?? [],
+            notes: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.notes ?? "",
+            notesList: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.notesList ?? [],
+            tags: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.tags ?? [],
           }
           if (participantProductData["requestedslot"]) {
             queueData["selectedstageslot"] = {}
