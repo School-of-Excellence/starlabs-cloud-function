@@ -51,6 +51,8 @@
     "jsonwebtoken": "^9.0.3",
     "jsrsasign": "^11.1.0",
     "livekit-server-sdk": "^2.6.1",
+    "oci-common": "^2.137.0",
+    "oci-core": "^2.137.0",
     "postmark": "^4.0.5",
     "publitio_js_sdk": "^1.1.5",
     "razorpay": "^2.9.4",

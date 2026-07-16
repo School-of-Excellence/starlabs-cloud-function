@@ -23,6 +23,7 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const livekitCloudSystem = require("./components/livekitCloud")
 const AWS_endpont = require("./components/AWS_endpoint")
+const OCI_endpoint = require("./components/OCI_endpoint")
 const workshop = require("./components/workshop")
 const runpodLLMRunning = require("./components/pod-execution-pipeline/runpod_ai")
 const queue_atc_generation = require("./components/queue-required-stage-aiatc-creation/queue_atc_generation")
@@ -270,6 +271,14 @@ exports.awsEventWebhook = AWS_endpont.awsEventWebhook
 exports.startMasterNodeHTTP = AWS_endpont.startMasterNodeHTTP
 exports.stopMasterNodeHTTP = AWS_endpont.stopMasterNodeHTTP
 exports.scaleMediaNodes = AWS_endpont.scaleMediaNodes
+
+// OCI (self-hosted OpenVidu Elastic on Oracle Cloud)
+exports.getSignedUrlOci = OCI_endpoint.getSignedUrlOci
+exports.CheckOciNodeStatus = OCI_endpoint.CheckOciNodeStatus
+exports.startOciMasterHTTP = OCI_endpoint.startOciMasterHTTP
+exports.stopOciMasterHTTP = OCI_endpoint.stopOciMasterHTTP
+exports.scaleOciMediaNodes = OCI_endpoint.scaleOciMediaNodes
+exports.ociEventWebhook = OCI_endpoint.ociEventWebhook
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment

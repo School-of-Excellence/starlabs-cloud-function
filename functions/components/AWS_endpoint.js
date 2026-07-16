@@ -482,6 +482,10 @@ async function houseKeepRooms() {
             // the self-hosted listRooms() above, so they'd always look "empty" and get wrongly
             // inactivated. Skip them. Missing provider == self-hosted (legacy/default).
             if (room.provider === 'livekit-cloud') continue;
+            // Same reasoning for rooms hosted on another cloud (OCI/DO): they live on that
+            // cluster's LiveKit, so this cluster's listRooms() always sees them as empty.
+            // Their own controller housekeeps them. Missing mediaProvider == aws (legacy).
+            if (room.mediaProvider && room.mediaProvider !== 'aws') continue;
             const ghost = room.participantghost;
             const liveReal = (room.participantlive || []).filter(id => id !== ghost);
 
@@ -764,10 +768,12 @@ async function getActiveRoomsCount() {
             .where('active', '==', true)
             .get();
 
-        // Count self-hosted rooms only — LiveKit Cloud rooms run on managed infra, so they must not
-        // drive AWS media-node scaling or block master-node shutdown. Missing provider == self-hosted.
+        // Count self-hosted AWS rooms only — LiveKit Cloud rooms run on managed infra and
+        // OCI/DO rooms run on their own clusters, so neither must drive AWS media-node
+        // scaling or block master-node shutdown. Missing mediaProvider == aws (legacy).
         const activeCount = activeSessionsSnapshot.docs
             .filter(d => d.data().provider !== 'livekit-cloud')
+            .filter(d => !d.data().mediaProvider || d.data().mediaProvider === 'aws')
             .length;
 
         console.log(`Active self-hosted sessions in Firestore: ${activeCount}`);

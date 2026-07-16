@@ -169,6 +169,13 @@
       "codebase": "default"
     },
     {
+      "name": "CheckOciNodeStatus",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
@@ -312,6 +319,13 @@
       "codebase": "default"
     },
     {
+      "name": "getSignedUrlOci",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "invitationAccepted",
       "type": "onDocumentCreated",
       "file": "components/queuesystem.js",
@@ -413,6 +427,13 @@
       "type": "onDocumentCreated",
       "file": "components/communication.js",
       "triggerPath": "/notificationrecord/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "ociEventWebhook",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -755,6 +776,13 @@
       "codebase": "default"
     },
     {
+      "name": "scaleOciMediaNodes",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "scheduledFirestoreExport",
       "type": "onSchedule",
       "file": "components/exports-alerts.js",
@@ -868,6 +896,13 @@
       "codebase": "default"
     },
     {
+      "name": "startOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "startParticipantNextDeliverySequence",
       "type": "onDocumentUpdated",
       "file": "components/participantproduct.js",
@@ -879,6 +914,13 @@
       "name": "stopMasterNodeHTTP",
       "type": "onRequest",
       "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "stopOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
