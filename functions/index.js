@@ -248,6 +248,7 @@ exports.createOpenViduToken = openViduSystem.createOpenViduToken
 exports.openViduStartRecording = openViduSystem.openViduStartRecording
 exports.openViduStopRecording = openViduSystem.openViduStopRecording
 exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
+exports.onEventOci = openViduSystem.onEventOci // OCI cluster webhook (OCI-signed; twin of onEventOpenVidu)
 exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant

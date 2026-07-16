@@ -153,13 +153,14 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
   });
 });
 
-exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET] }, async (req, res) => {
+exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET, ...OCI_endpoint.SECRETS, ...OCI_endpoint.RECORDING_SECRETS] }, async (req, res) => {
 	cors(req, res, async () => {
 		if (req.method !== "POST") {
 			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
 		}
 
 		const { roomId } = req.body;
+		const provider = (req.body.provider || "aws").toString().toLowerCase();
 		if (!roomId) {
 			return res.status(400).json({
 				error: "roomId is required",
@@ -167,11 +168,19 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 		}
 
 		try {
-			const liveKitApiKey = LIVEKIT_API_KEY.value();
-			const livekitApiSecret = LIVEKIT_API_SECRET.value();
-			const livekitURL = LIVEKIT_URL.value();
-			const awsAccessKey = AWS_ACCESS_KEY.value();
-			const awsSecret = AWS_SECRET.value();
+			const { url: livekitURL, key: liveKitApiKey, secret: livekitApiSecret } = getCredsFor(provider);
+
+			// Recording storage per provider: OCI → the cluster's appdata bucket via the
+			// S3-compat endpoint; everything else (aws/default) → the existing AWS S3 buckets.
+			// DO recording is unimplemented (provider parked, its secrets are not bound here).
+			const s3Output = provider === "oci"
+				? OCI_endpoint.recordingStorage()
+				: {
+					bucket: commonService.production ? "openvidu-meet-recordings-prod" : "openvidu-meet-recordings-dev",
+					region: "ap-south-1",
+					accessKey: AWS_ACCESS_KEY.value(),
+					secret: AWS_SECRET.value()
+				};
 
 			const egressClient = new livekitServer.EgressClient(livekitURL, liveKitApiKey, livekitApiSecret);
 			// Set up recording output
@@ -181,12 +190,7 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 				disableManifest: true,
 				output: {
 					case: "s3",
-					value: {
-						bucket: commonService.production ? "openvidu-meet-recordings-prod" : "openvidu-meet-recordings-dev",
-						region: "ap-south-1",
-						accessKey: awsAccessKey,
-						secret: awsSecret
-					}
+					value: s3Output
 				},
 			});
 
@@ -223,13 +227,14 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 	});
 });
 
-exports.openViduStopRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL] }, async (req, res) => {
+exports.openViduStopRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, ...OCI_endpoint.SECRETS] }, async (req, res) => {
 	cors(req, res, async () => {
 		if (req.method !== "POST") {
 			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
 		}
 
 		const { egressId, roomId } = req.body;
+		const provider = (req.body.provider || "aws").toString().toLowerCase();
 		if (!egressId || !roomId) {
 			return res.status(400).json({
 				error: "egressId & roomId is required",
@@ -237,9 +242,9 @@ exports.openViduStopRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_A
 		}
 
 		try{
-			const liveKitApiKey = LIVEKIT_API_KEY.value();
-			const livekitApiSecret = LIVEKIT_API_SECRET.value();
-			const livekitURL = LIVEKIT_URL.value();
+			// stopEgress must be issued to the cluster that runs the egress, so the
+			// EgressClient uses the same provider's credentials as the start call.
+			const { url: livekitURL, key: liveKitApiKey, secret: livekitApiSecret } = getCredsFor(provider);
 
 			const egressClient = new livekitServer.EgressClient(livekitURL, liveKitApiKey, livekitApiSecret);
 
@@ -290,15 +295,22 @@ exports.openViduStopRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_A
 	})
 });
 
-exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET] }, async (req, res) => {
-	cors(req, res, async () => {
+// Shared LiveKit webhook handler (room/participant/egress lifecycle → Firestore, plus
+// hands-free recording start/stop). Each provider's cluster signs webhooks with its own
+// LIVEKIT key pair, so every provider gets its own thin endpoint below that verifies with
+// its credentials; the event logic itself is provider-agnostic. `provider` is forwarded on
+// the internal recording calls so egress runs against the right cluster and storage.
+async function handleOpenViduEvent(req, res, provider) {
     if (req.method !== "POST") {
       return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
     }
 
 		try{
-			const liveKitApiKey = LIVEKIT_API_KEY.value();
-			const livekitApiSecret = LIVEKIT_API_SECRET.value();
+			// AWS reads this module's own key pair directly (LIVEKIT_URL is not bound on the
+			// webhook, so getCredsFor is not usable here); OCI reads its suffixed secrets.
+			const { key: liveKitApiKey, secret: livekitApiSecret } = provider === "oci"
+				? OCI_endpoint.creds()
+				: { key: LIVEKIT_API_KEY.value(), secret: LIVEKIT_API_SECRET.value() };
 
 			const webhookReceiver = new livekitServer.WebhookReceiver(liveKitApiKey, livekitApiSecret);
 
@@ -367,7 +379,7 @@ exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SEC
 				if(startRecording){
 					// Start Recording
 					try {
-						const result = await axios.post(`https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/openViduStartRecording`, {roomId: event.room.name})
+						const result = await axios.post(`https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/openViduStartRecording`, {roomId: event.room.name, provider: provider})
 						console.log('Room Started and Recording Started:', result.data);
 					} catch (recordingFailed) {
 						console.log('Room Restarted and Recording Failed:');
@@ -410,7 +422,7 @@ exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SEC
 
 				if (stopRecording && egressId) {
 					try {
-						const result = await axios.post(`https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/openViduStopRecording`, {egressId: egressId, roomId: event.room.name})
+						const result = await axios.post(`https://us-central1-${process.env.GCLOUD_PROJECT}.cloudfunctions.net/openViduStopRecording`, {egressId: egressId, roomId: event.room.name, provider: provider})
 						console.log('Room Finised and Recording Completed:', result.data);
 					} catch (recordingError) {
 						console.log('All Participant Left and Recording Failed:')
@@ -449,7 +461,17 @@ exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SEC
 			console.error("Webhook Error:", error);
       return res.status(500).json({ error: error.message || error.toString() });
 		}
-	})
+}
+
+exports.onEventOpenVidu = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET] }, async (req, res) => {
+	cors(req, res, () => handleOpenViduEvent(req, res, "aws"));
+})
+
+// OCI twin of onEventOpenVidu: identical event handling, but signatures are verified with
+// the OCI cluster's key pair (the AWS-keyed receiver rejects OCI-signed posts) and the
+// recording calls fire with provider=oci. The OCI master's webhook URL must point here.
+exports.onEventOci = onRequest({ secrets: [...OCI_endpoint.SECRETS] }, async (req, res) => {
+	cors(req, res, () => handleOpenViduEvent(req, res, "oci"));
 })
 
 exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
