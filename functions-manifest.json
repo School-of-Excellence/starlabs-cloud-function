@@ -448,6 +448,13 @@
       "codebase": "default"
     },
     {
+      "name": "onEventOci",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "onEventOpenVidu",
       "type": "onRequest",
       "file": "components/openVidu.js",
