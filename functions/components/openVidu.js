@@ -49,7 +49,7 @@ function getRoomClient() {
 
 
 
-exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET, ...AWS_endpoint.CAPACITY_SECRETS, ...DO_endpoint.SECRETS, ...OCI_endpoint.SECRETS]}, async (req, res) => {
+exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, AWS_ACCESS_KEY, AWS_SECRET, ...AWS_endpoint.CAPACITY_SECRETS, ...DO_endpoint.SECRETS, ...OCI_endpoint.SECRETS, ...OCI_endpoint.API_SECRETS]}, async (req, res) => {
   cors(req, res, async () => {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method Not Allowed. Only POST allowed" });
@@ -88,9 +88,25 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
           });
         }
         totalInstances = gate.totalInstances;
+      } else if (provider === "oci") {
+        // OCI pool capacity gate + room creation (twin of the AWS branch; Phase-4
+        // controller). At capacity → grow the pool and 503 the SCALING contract.
+        const gate = await OCI_endpoint.prepareRoom({ roomName, url: livekitURL, key: liveKitApiKey, secret: livekitApiSecret });
+        if (gate.scaling) {
+          return res.status(503).json({
+            success: false,
+            code: 'SCALING_IN_PROGRESS',
+            message: 'Media node not ready. Please retry.',
+            retryAfter: 60,
+            currentRooms: gate.activeRooms,
+            maxRooms: gate.maxRooms,
+            instances: gate.totalInstances
+          });
+        }
+        totalInstances = gate.totalInstances;
       } else {
-        // DO / OCI: the per-meeting media node is provisioned by the provider controller,
-        // so there is no ASG gate. Ensure the LiveKit room exists, then issue the token.
+        // DO: the per-meeting media node is provisioned by the provider controller,
+        // so there is no capacity gate yet. Ensure the LiveKit room exists, then issue the token.
         try {
           const existingRooms = await roomClient.listRooms([roomName]);
           if (existingRooms.length === 0) {
@@ -320,10 +336,13 @@ async function handleOpenViduEvent(req, res, provider) {
 			);
 			console.log(`WebhookReceiver: ${JSON.stringify(event)}`);
 
-			// Save Webhook triggers
+			// Save Webhook triggers. mediaProvider records which cloud's cluster fired the
+			// event so playback can presign against the right storage (absent = aws, so
+			// historical events keep resolving through getSignedUrlAWS).
 			var payload = JSON.parse(JSON.stringify(event))
 			await admin.firestore().collection("openvidu event").add({
 				payload: payload,
+				mediaProvider: provider,
 				time: admin.firestore.FieldValue.serverTimestamp()
 			}).catch(err =>{
 				console.log(err)
