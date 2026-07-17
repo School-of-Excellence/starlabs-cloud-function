@@ -317,9 +317,17 @@ async function getUnusedZoomAccount() {
   }
 }
 
+// SDK join-token lifetime. `linkExpiresAt` (written on the live assignment) is
+// derived from the SAME TTL so the studio can show an accurate "expired" state
+// and offer regenerate at the right time.
+const ZOOM_SIGNATURE_TTL_SECONDS = 60 * 60 * 12
+function signatureExpiryDate() {
+  return new Date(Date.now() + ZOOM_SIGNATURE_TTL_SECONDS * 1000)
+}
+
 async function generateSignature(key, secret, meetingNumber, role) {
   const iat = Math.round(new Date().getTime() / 1000) - 30
-  const exp = iat + 60 * 60 * 2
+  const exp = iat + ZOOM_SIGNATURE_TTL_SECONDS
   const oHeader = { alg: 'HS256', typ: 'JWT' }
   const oPayload = {
     sdkKey: key,
@@ -982,6 +990,7 @@ module.exports = {
 	throwParticipantMetaDataException,
 	getUnusedZoomAccount,
 	generateSignature,
+	signatureExpiryDate,
 	updateSalesLead,
 	sendSalesCaptureToSalesChannel,
 	sendSlotConfirmationToSlackChannel,

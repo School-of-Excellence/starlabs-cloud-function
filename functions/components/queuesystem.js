@@ -1022,7 +1022,15 @@ exports.studioZoomLink = onDocumentCreated({
                 // signature: hostSignature,
                 hostsignature: hostSignature,
                 participantsignature: participantSignature,
-                zoomdata: zoomresult.data
+                zoomdata: zoomresult.data,
+                // Keep a history of EVERY Zoom meeting id this call ever had, so the
+                // zoomActivitylog webhook can still map events to this live
+                // assignment after a regenerate overwrites zoomdata.id. Matching on
+                // the mutable zoomdata.id alone drops events during regenerate churn.
+                zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+                // When the join token expires — lets the studio show an accurate
+                // "link expired → regenerate" state (derived from the same TTL).
+                linkExpiresAt: commonService.signatureExpiryDate()
               })
             } catch (zoomError) {
               console.log("Zoom Link Not Generated", zoomError.message);
@@ -1528,6 +1536,26 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
     method: 'POST'
   });
   const tokenData = await tokenResponse.json();
+
+  // Robust regenerate: END the previous meeting on Zoom FIRST so the host account
+  // is freed and the NEW meeting can start. Without this, if the old meeting is
+  // still live on the account, Zoom rejects the new one with "you have another
+  // meeting in progress" (studio scenarios 1 & 2). Best-effort — a meeting that is
+  // already ended / not found just returns an error we swallow.
+  const oldMeetingId = oldZoomData && oldZoomData['id'];
+  if (oldMeetingId) {
+    try {
+      await axios.put(`https://api.zoom.us/v2/meetings/${oldMeetingId}/status`,
+        { action: 'end' },
+        { headers: { 'Authorization': 'Bearer ' + tokenData.access_token, 'content-type': 'application/json' } });
+      console.log('[regenerate] ended old meeting', oldMeetingId);
+    } catch (e) {
+      console.warn('[regenerate] could not end old meeting', oldMeetingId,
+        'status=', e && e.response && e.response.status,
+        'body=', e && e.response ? JSON.stringify(e.response.data) : (e && e.message));
+    }
+  }
+
   if(selectedEmail != null && selectedEmail != undefined)
   try {
     const email = selectedEmail; //host email id;
@@ -1590,7 +1618,13 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       // signature: hostSignature,
       hostsignature: hostSignature,
       participantsignature: participantSignature,
-      zoomdata: zoomresult.data
+      zoomdata: zoomresult.data,
+      // Append this regenerated meeting id to the history so the webhook can still
+      // map its events after zoomdata.id moves on (see studioZoomLink).
+      zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+      // Refresh the expiry for the new token (same TTL) so the studio's
+      // "expired" state resets after a regenerate.
+      linkExpiresAt: commonService.signatureExpiryDate()
     })
 
     // Send Slack
@@ -2426,6 +2460,24 @@ exports.onEventDateChange = onDocumentUpdated("event collection/{docid}", async 
 })
 
 
+// Clear a participant's `participantReadyAt` (lobby "waiting" flag) reliably on
+// tab close. The client's own Firestore write during `pagehide` usually never
+// reaches the server (it queues in the closing tab's IndexedDB, which the
+// specialist's separate browser never syncs), leaving the studio stuck on
+// "Participant is waiting". The client sends a `navigator.sendBeacon` here
+// instead — beacons are delivered by the browser even after the page is gone.
+exports.clearParticipantReady = onRequest({ cors: true }, async (req, res) => {
+  const id = (req.query && req.query.liveassignmentid) || (req.body && req.body.liveassignmentid);
+  if (!id) { res.status(400).json({ error: 'missing liveassignmentid' }); return; }
+  try {
+    await admin.firestore().collection('live assignment').doc(String(id)).update({ participantReadyAt: null });
+  } catch (e) {
+    // Best-effort — the doc may not exist or already be cleared.
+    console.warn('clearParticipantReady failed', id, e && e.message);
+  }
+  res.status(200).json(null);
+});
+
 let zoomClipTimings = [];
 let zoomClipCount = 0;
 exports.zoomActivitylog = onRequest({ memory: '2GiB',
@@ -2509,8 +2561,93 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
             }
           }
         })
+
+        // Presence log: stamp meeting end + duration onto `live assignment log`.
+        try {
+          const endObj = request.body.payload.object || {};
+          const la = await getLiveAssignmentByMeeting(endObj.id);
+          if (la) {
+            const patch = {
+              meetingEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+              // Which meeting ended — so the studio can ignore an OLD meeting's end
+              // event after a regenerate (endedMeetingId != current zoomdata.id).
+              endedMeetingId: endObj.id != null ? Number(endObj.id) : null,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+            if (endObj.start_time && endObj.end_time) {
+              patch.meetingStartTimeZoom = endObj.start_time;
+              patch.meetingEndTimeZoom = endObj.end_time;
+              patch.durationSeconds = Math.max(0, Math.round((new Date(endObj.end_time).getTime() - new Date(endObj.start_time).getTime()) / 1000));
+            }
+            await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
+          }
+        } catch (e) { console.warn('live assignment log (meeting.ended) failed', e); }
       }
       //
+      response.status(200).json(null);
+      return;
+    }
+
+    // Meeting started → stamp start time onto `live assignment log`.
+    if (zoomEvent === 'meeting.started') {
+      try {
+        const obj = request.body.payload.object || {};
+        const la = await getLiveAssignmentByMeeting(obj.id);
+        if (la) {
+          await admin.firestore().collection('live assignment log').doc(la.id).set({
+            liveassignmentid: la.id,
+            meetingId: obj.id,
+            meetingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+            meetingStartTimeZoom: obj.start_time || null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      } catch (e) { console.warn('live assignment log (meeting.started) failed', e); }
+      response.status(200).json(null);
+      return;
+    }
+
+    // Participant/host joined or left → derive presence into `live assignment log`.
+    // Identity is keyed by `customer_key` (= our profile id), which the client sets
+    // at join (participant today; specialists once the screen change lands).
+    if (zoomEvent === 'meeting.participant_joined' || zoomEvent === 'meeting.participant_left') {
+      const obj = request.body.payload.object || {};
+      const meetingId = obj.id;
+      const p = obj.participant || {};
+      const la = await getLiveAssignmentByMeeting(meetingId);
+      if (!la) { response.status(200).json(null); return; }
+
+      const joined = zoomEvent === 'meeting.participant_joined';
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const zoomTime = (joined ? p.join_time : p.leave_time) || null;
+      const { role, profileId } = classifyZoomAttendee(p.customer_key, la.data);
+
+      const patch = {
+        liveassignmentid: la.id,
+        meetingId: meetingId,
+        updatedAt: now,
+      };
+
+      if (role === 'participant') {
+        if (joined) {
+          patch.participantInCallAt = now;
+          patch.participantInCallAtZoom = zoomTime;
+          patch.participantLeftAt = null;
+        } else {
+          patch.participantLeftAt = now;
+          patch.participantLeftAtZoom = zoomTime;
+        }
+      } else {
+        // specialist (or not-yet-identifiable host) → map keyed by profile id, with
+        // a Zoom-uid fallback so nothing is lost until customerKey is set for hosts.
+        const key = profileId || ('uid_' + (p.user_id || p.participant_uuid || p.id || 'unknown'));
+        const spec = { name: p.user_name || null, role: role };
+        if (joined) { spec.joinedAt = now; spec.joinedAtZoom = zoomTime; spec.leftAt = null; }
+        else { spec.leftAt = now; spec.leftAtZoom = zoomTime; }
+        patch.specialists = { [key]: spec };
+      }
+
+      await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
       response.status(200).json(null);
       return;
     }
@@ -2563,7 +2700,54 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
     response.status(500).json({ error: 'Internal Server Error' });
   }
 });
-  
+
+// ── Presence helpers for `live assignment log` (webhook-derived truth) ────────
+// Resolve the live assignment that owns a Zoom meeting id. The webhook sends the
+// meeting id as a STRING, but we store it as a NUMBER (zoomdata.id + zoomMeetingIds
+// come from the Zoom REST response). So try BOTH forms. Prefer the full meeting-id
+// history (survives regenerate churn); fall back to current zoomdata.id.
+async function getLiveAssignmentByMeeting(meetingId) {
+  try {
+    const num = Number(meetingId);
+    const candidates = [];
+    if (!Number.isNaN(num)) candidates.push(num);          // numeric form (how we store it)
+    candidates.push(String(meetingId));                    // string form (belt-and-braces)
+    const col = admin.firestore().collection('live assignment');
+    for (const v of candidates) {
+      let snap = await col.where('zoomMeetingIds', 'array-contains', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+      snap = await col.where('zoomdata.id', '==', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('[presence] getLiveAssignmentByMeeting ERROR', e && e.message, e);
+    return null;
+  }
+}
+
+// Classify a Zoom attendee by `customer_key` (= our profile id):
+//   participant → customer_key === the live assignment's participantid
+//   specialist  → customer_key ∈ the live assignment's pairing[]
+//   unknown     → no/unrecognised customer_key (e.g. a host before the screen
+//                 change starts setting customerKey for specialists)
+function classifyZoomAttendee(customerKey, la) {
+  if (!customerKey) return { role: 'unknown', profileId: null };
+  const participantId = (la && (la.participantid || (la.token && la.token.profile_id))) || null;
+  if (participantId && customerKey === participantId) {
+    return { role: 'participant', profileId: customerKey };
+  }
+  const pairing = la && Array.isArray(la.pairing) ? la.pairing : [];
+  if (pairing.includes(customerKey)) {
+    return { role: 'specialist', profileId: customerKey };
+  }
+  return { role: 'unknown', profileId: customerKey };
+}
+
 // Main function to fetch, process, and upload video clips
 async function fetchCloudRecording(meetingId, token, liveassignmentData) {
   console.log('Token:', token);
