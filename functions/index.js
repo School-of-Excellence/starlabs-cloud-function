@@ -108,6 +108,7 @@ exports.communityPostHLS = contentSystem.communityPostHLS // w - '/community pos
 exports.videoAskHLS = contentSystem.videoAskHLS // c - '/participantvideoask/{id}'
 exports.buffermixToRecommendedPlaylist = contentSystem.buffermixToRecommendedPlaylist // c - "buffermix archive/{docid}"
 exports.ConvertUrltoHLS = contentSystem.ConvertUrltoHLS // w - '/episodes/{id}'
+exports.reconvertEpisodesHLS = contentSystem.reconvertEpisodesHLS // http - ?ids=id1,id2 (max 5) -> READ-ONLY diagnostic of each episode's HLS rendition ladder
 exports.UnconvertedUrltoHLS = contentSystem.UnconvertedUrltoHLS // schedule 'every 6 hours'
 exports.generalContentUpdate = contentSystem.generalContentUpdate
 exports.uploadContentToPublitio = contentSystem.uploadContentToPublitio
