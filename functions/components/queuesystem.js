@@ -3199,10 +3199,19 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  let tokenno = null 
-  await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
-    tokenno = queueTokenSnap.docs[0].data()["tokennumber"]
-  })
+  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc(docData['queueto'])
+  const counterSnap = await queueTokenCounterRef.get()
+  if(!counterSnap.exists){
+    let lastValue = 0
+    await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
+      lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
+    })
+    await queueTokenCounterRef.set({
+      value: lastValue,
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      lastDelivery: null
+    },{merge:true})
+  }
 
   // every profile to deliverables && participantdeliverysequence && queuetoken && particpantproductstatus update&& close existing deliverables && add new product to that profile
   let batch = admin.firestore().batch()
@@ -3276,9 +3285,37 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
         if(delivery[0].type === "queue" && deliverablesRef != null){
           //create queue token
           const queuedocid = admin.firestore().collection("queue_token").doc().id
+          let currentTokenNo = null
+          let attempts = 0
+          const maxAttempts = 15
+          while(currentTokenNo === null && attempts < maxAttempts){
+            attempts++
+            try{
+              await admin.firestore().runTransaction(async (transaction) => {
+                const counterTxnSnap = await transaction.get(queueTokenCounterRef)
+                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().value || 0) : 0
+                const next = currentValue + 1
+                transaction.set(queueTokenCounterRef,{
+                  value: next,
+                  lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  lastDelivery: deliverablesRef
+                },{merge:true})
+                currentTokenNo = next
+              })
+            }catch(error){
+              console.log(`Counter attempt ${attempts} failed for profile ${tokenelement['profile_id']}:`,error.message)
+              if(attempts >= maxAttempts){
+                console.error(`Failed to acquire token number after ${maxAttempts} attempts for profile: ${tokenelement['profile_id']}`)
+                break;
+              }
+              const delay = Math.min(50 * Math.pow(2,attempts) + Math.random() * 200, 5000)
+              await new Promise(resolve => setTimeout(resolve,delay))
+            }
+          }
+
           let queueData = {
             docid: queuedocid,
-            tokennumber: tokenno + 1 + i,
+            tokennumber: currentTokenNo,
             profile_name: tokenelement['profile_name'],
             profile_id: tokenelement['profile_id'],
             currentstage: queuefirststage,
