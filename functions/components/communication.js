@@ -1865,18 +1865,33 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   // ── 3. Load participant metadata ─────────────────────────────────────────
   const mapProfile      = {};
   const mapProfileEmail = {};
- 
-  const query = archiveData['profileid'].length < 30
-    ? admin.firestore().collection("participant metadata").where('profileid', 'in', archiveData['profileid'])
-    : admin.firestore().collection("participant metadata");
- 
-  await query.get().then((snap) => {
-    snap.docs.forEach((d) => {
-      const p = d.data();
-      mapProfile[p['profileid']] = p;
-      mapProfileEmail[p['email']] = p;
+  
+   for (const col of ["participant metadata", "new_user_data"]) {
+    const query = archiveData['profileid'].length < 30
+      ? admin.firestore().collection(col).where('profileid', 'in', archiveData['profileid'])
+      : admin.firestore().collection(col);
+
+    await query.get().then((snap) => {
+      snap.docs.forEach((d) => {
+        const p = d.data();
+        if (!mapProfile[p['profileid']]) {
+          mapProfile[p['profileid']] = p;
+          mapProfileEmail[p['email']] = p;
+        }
+      });
     });
-  });
+  }
+  // const query = archiveData['profileid'].length < 30
+  //   ? admin.firestore().collection("participant metadata").where('profileid', 'in', archiveData['profileid'])
+  //   : admin.firestore().collection("participant metadata");
+ 
+  // await query.get().then((snap) => {
+  //   snap.docs.forEach((d) => {
+  //     const p = d.data();
+  //     mapProfile[p['profileid']] = p;
+  //     mapProfileEmail[p['email']] = p;
+  //   });
+  // });
  
   const datamodel       = archiveData.datamodel || {};
   const variableConfigs = datamodel['_variableConfigs'] || {};
