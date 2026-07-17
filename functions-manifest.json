@@ -1018,7 +1018,7 @@
     },
     {
       "name": "videoAskHLS",
-      "type": "onSchedule",
+      "type": "onDocumentCreated",
       "file": "components/content.js",
       "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
