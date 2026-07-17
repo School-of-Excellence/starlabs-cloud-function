@@ -754,100 +754,54 @@ exports.onQueueStageChange = onDocumentWritten({
             // })
             //wati
             let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
-            if(afterData['currentstage'] === 'In Evolution Mapping Activity'){
-              console.log("sending evolution mapping template");
-
-              let waticontent = {
-                phonenumber : `${profiledata['number']}`,
-                body : {
-                  parameters: [
-                    {name: 'name', value: profiledata['name']}
-                  ],
-                  broadcast_name: 'em_now_available_48hrs',
-                  template_name: 'em_now_available_48hrs'
-                }
+            let waticontent = {
+              phonenumber : `${profiledata['number']}`,
+              body : {
+                parameters: [
+                  {name: 'name', value: profiledata['name']},
+                  {name: 'stage', value: afterData['currentstage']},
+                  {name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource']}
+                ],
+                broadcast_name: 'queue_stage_linktype_v4',
+                template_name: 'queue_stage_linktype_v4'
               }
-              console.log('wati content',waticontent);
-
-              const parameterConfig = waticontent['body']['parameters'].map(param => ({
-                excelColumn: null,
-                fillType: 'static',
-                metadataField: null,
-                name: param.name,
-                staticValue: param.value
-              }));
-              console.log('Triggered Wati Archive Creation');
-
-              const response = await commonService.createWatiArchiveDocument({
-                numbers: [parseInt(waticontent['phonenumber'])],
-                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-                broadcastname: 'Individual',
-                paramFillMode: 'static',
-                parameterConfig: parameterConfig,
-                params: [],
-                profileid: [profileid],
-                templateid: null,
-                watitemplateid: 'em_now_available_48hrs',
-                type: 'queue',
-                metadata: {...afterData}
-              });
-              console.log('WATI ARCHIVE RESPONSE', response);
-
-              await admin.firestore().collection("liveevolutionmapping").doc(profileid).set({
-                profileid: profileid,
-                live: true,
-                lastupdated: admin.firestore.FieldValue.serverTimestamp(),
-              }, { merge: true });
-
-            } else {
-              let waticontent = {
-                phonenumber : `${profiledata['number']}`,
-                body : {
-                  parameters: [
-                    {name: 'name', value: profiledata['name']},
-                    {name: 'stage', value: afterData['currentstage']},
-                    {name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource']}
-                  ],
-                  broadcast_name: 'queue_stage_linktype_v4',
-                  template_name: 'queue_stage_linktype_v4'
-                }
-              }
-              console.log('wati content',waticontent);
-              // await commonService.sendToWhatsappViaWati(waticontent);
-
-              const parameterConfig = waticontent['body']['parameters'].map(param => ({
-                excelColumn: null,
-                fillType: 'static',
-                metadataField: null,
-                name: param.name,
-                staticValue: param.value
-              }));
-              console.log('Triggered Wati Archive Creation');
-
-              const response = await commonService.createWatiArchiveDocument({
-                numbers: [parseInt(waticontent['phonenumber'])],
-                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-                broadcastname: 'Individual',
-                paramFillMode: 'static',
-                parameterConfig: parameterConfig,
-                params: [],
-                profileid: [profileid],
-                templateid: null,
-                watitemplateid: 'queue_stage_linktype_v4',
-                type: 'queue',
-                metadata: {...afterData}
-              });
-              console.log('WATI ARCHIVE RESPONSE', response);
             }
-          }//action type link
-          }
+            console.log('wati content',waticontent);
+            // await commonService.sendToWhatsappViaWati(waticontent);
+
+          
+            const parameterConfig = waticontent['body']['parameters'].map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }));
+            console.log('Triggered Wati Archive Creation');
+
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(waticontent['phonenumber'])],
+              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [profileid],
+              templateid: null,
+              watitemplateid: 'queue_stage_linktype_v4',
+              type: 'queue',
+              metadata: {...afterData}
+            });
+            console.log('WATI ARCHIVE RESPONSE', response);
+            
+          } //action type link
         }
       }
+    }
   } catch (error) {
     console.log("Error Sending Wati Update", error.toString()) 
   }  
 })
-
 
 // Update Big Invitation to Product (Invitation accepted by specialist)
 exports.biginvitationAccepted = onDocumentUpdated("biginvitation/{id}", async (change) => {
@@ -3245,19 +3199,10 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc(docData['queueto'])
-  const counterSnap = await queueTokenCounterRef.get()
-  if(!counterSnap.exists){
-    let lastValue = 0
-    await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
-      lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
-    })
-    await queueTokenCounterRef.set({
-      value: lastValue,
-      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-      lastDelivery: null
-    },{merge:true})
-  }
+  let tokenno = null 
+  await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
+    tokenno = queueTokenSnap.docs[0].data()["tokennumber"]
+  })
 
   // every profile to deliverables && participantdeliverysequence && queuetoken && particpantproductstatus update&& close existing deliverables && add new product to that profile
   let batch = admin.firestore().batch()
@@ -3331,37 +3276,9 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
         if(delivery[0].type === "queue" && deliverablesRef != null){
           //create queue token
           const queuedocid = admin.firestore().collection("queue_token").doc().id
-          let currentTokenNo = null
-          let attempts = 0
-          const maxAttempts = 15
-          while(currentTokenNo === null && attempts < maxAttempts){
-            attempts++
-            try{
-              await admin.firestore().runTransaction(async (transaction) => {
-                const counterTxnSnap = await transaction.get(queueTokenCounterRef)
-                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().value || 0) : 0
-                const next = currentValue + 1
-                transaction.set(queueTokenCounterRef,{
-                  value: next,
-                  lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-                  lastDelivery: deliverablesRef
-                },{merge:true})
-                currentTokenNo = next
-              })
-            }catch(error){
-              console.log(`Counter attempt ${attempts} failed for profile ${tokenelement['profile_id']}:`,error.message)
-              if(attempts >= maxAttempts){
-                console.error(`Failed to acquire token number after ${maxAttempts} attempts for profile: ${tokenelement['profile_id']}`)
-                break;
-              }
-              const delay = Math.min(50 * Math.pow(2,attempts) + Math.random() * 200, 5000)
-              await new Promise(resolve => setTimeout(resolve,delay))
-            }
-          }
-
           let queueData = {
             docid: queuedocid,
-            tokennumber: currentTokenNo,
+            tokennumber: tokenno + 1 + i,
             profile_name: tokenelement['profile_name'],
             profile_id: tokenelement['profile_id'],
             currentstage: queuefirststage,
