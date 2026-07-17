@@ -144,23 +144,32 @@ exports.syncETicketEligibility = onRequest(async (req, res) => {
     const id = d.id;
     if (!id) return res.status(400).json({ error: 'missing id' });
 
-    const toTs = (s) => s ? admin.firestore.Timestamp.fromDate(new Date(s)) : null;
-    const data = {
-      docid: id,
-      eventparticipationid: d.eventparticipationid || null,
-      eventid: d.eventid || null,
-      profileid: d.profileid || null,
-      watsonparticipantid: d.watsonparticipantid || null,
-      product: d.product || null,
-      venue_fee_paid: d.venue_fee_paid === true,
-      venuefeepaymentid: d.venuefeepaymentid || null,
-      active: d.active !== false,
-      createddate: toTs(d.createddate),
-      updateddate: toTs(d.updateddate),
-      syncedfromwatsonat: admin.firestore.FieldValue.serverTimestamp(),
-    };
+    // Store the FULL doc Watson sends — no field restriction. Recursively convert
+    // ISO datetime strings back to Firestore Timestamps.
+    const convert = (v) => {
+      if (v === null || v === undefined) return v;
+      if (typeof v === 'string') {
+        return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? admin.firestore.Timestamp.fromDate(new Date(v)) : v;
+      }
+      if (Array.isArray(v)) return v.map(convert);
+      if (typeof v === 'object') {
+        const o = {};
+        for (const k of Object.keys(v)) o[k] = convert(v[k]);
+        return o;
+      }
+      return v;
+    };
 
-    await admin.firestore().collection('e-ticket eligibility').doc(id).set(data, { merge: true });
+    const { id: _drop, ...rest } = d;
+    const data = {
+      ...convert(rest),
+      docid: id,
+      syncedfromwatsonat: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    // Full replace (no merge) so the mirror exactly matches Watson — including
+    // FIELD DELETIONS. Watson always sends the complete doc, so nothing is lost.
+    await admin.firestore().collection('e-ticket eligibility').doc(id).set(data);
     console.log('syncETicketEligibility: stored', id);
     return res.status(200).json({ success: true, id });
   } catch (e) {
