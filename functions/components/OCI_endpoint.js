@@ -270,17 +270,22 @@ async function stopOciMaster(clients) {
 
 // ---- Capacity gate (twin of AWS checkCapacity/scaleUp/prepareRoom) ----
 
-async function checkOciCapacity(mgmt, roomClient) {
+// Capacity is measured by OTHER active rooms — never the target room the caller is about to
+// occupy. Without excluding it, two people joining the SAME brand-new room race: the first
+// creates the room, the second's check then counts that room as "capacity used" and scales
+// up a node nobody needs (observed 2026-07-18: pool 1→2 on a single 2-person call). The
+// caller occupies the target room whether it creates or joins it, so it must not count.
+async function checkOciCapacity(mgmt, roomClient, targetRoomName) {
   const { instancePool } = await mgmt.getInstancePool({ instancePoolId: OCI_MEDIA_POOL_ID.value() });
   const totalInstances = instancePool.size;
   if (totalInstances === 0) {
     return { allowed: false, activeRooms: 0, maxRooms: 0, totalInstances: 0, reason: 'No instances running' };
   }
   const rooms = await roomClient.listRooms();
-  const activeRoomCount = rooms.length;
+  const otherRoomCount = rooms.filter(r => r.name !== targetRoomName).length;
   const maxRooms = totalInstances * CONFIG.maxRoomsPerInstance;
-  console.log(`OCI capacity: ${activeRoomCount}/${maxRooms} rooms (${totalInstances} instances)`);
-  return { allowed: activeRoomCount < maxRooms, activeRooms: activeRoomCount, maxRooms, totalInstances };
+  console.log(`OCI capacity: ${otherRoomCount} other room(s) / ${maxRooms} max (${totalInstances} instances), target=${targetRoomName}`);
+  return { allowed: otherRoomCount < maxRooms, activeRooms: otherRoomCount, maxRooms, totalInstances };
 }
 
 async function scaleOciUp(mgmt) {
@@ -313,7 +318,7 @@ exports.prepareRoom = async ({ roomName, url, key, secret }) => {
   if (!roomExists) {
     let canCreateRoom;
     try {
-      canCreateRoom = await checkOciCapacity(mgmt, roomClient);
+      canCreateRoom = await checkOciCapacity(mgmt, roomClient, roomName);
     } catch (error) {
       // Cluster unreachable (master booting / node not registered) → scaling contract.
       console.log(`[${roomName}] OCI capacity check failed:`, error.message);
@@ -438,7 +443,7 @@ async function createOciRoomForMeeting(meeting, clients) {
   if (!roomExists) {
     let capacity;
     try {
-      capacity = await checkOciCapacity(clients.mgmt, roomClient);
+      capacity = await checkOciCapacity(clients.mgmt, roomClient, roomName);
     } catch (error) {
       console.error(`[Pre-create oci] Capacity check failed: ${error.message}`);
       capacity = { allowed: false };
