@@ -236,6 +236,18 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
 
 
 // ---- AWS infrastructure (moved verbatim from openVidu.js) ----
+// Which cloud is allowed to act right now (written by the monitor screen's selector).
+// Fail-safe default 'aws' preserves pre-multiprovider behavior.
+async function getActiveProvider() {
+	try {
+		const snap = await admin.firestore().doc('openvidu server/mediaprovider').get();
+		return (snap.exists && snap.data().activeprovider) || 'aws';
+	} catch (e) {
+		console.error('getActiveProvider failed, defaulting to aws:', e && e.message);
+		return 'aws';
+	}
+}
+
 exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", secrets: [masterInstanceId, mediaASGName, AWS_SECRET, AWS_ACCESS_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET ]}, async (event) => {
 	ec2 = getEC2();
 
@@ -248,6 +260,15 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 		secretAccessKey: AWS_SECRET.value()
 	});
 	try {
+		// activeprovider gate: when AWS is not the active provider, take NO lifecycle
+		// actions (no wake, no room creation, no stop). AWS status stays fresh via the
+		// EventBridge webhook, so nothing else is needed here.
+		const activeProvider = await getActiveProvider();
+		if (activeProvider !== 'aws') {
+			console.log(`activeprovider=${activeProvider} — AWS controller idle`);
+			return null;
+		}
+
 		// 1. Check current master state
 		const masterRunning = await isMasterNodeRunning();
 		console.log(`Master node is currently: ${masterRunning ? 'RUNNING' : 'STOPPED'}`);
@@ -702,12 +723,18 @@ async function createRoomForMeeting(meeting) {
           metadata: {
             appointmentid: meeting.id
           },
+          // Cloud that hosts this room's cluster. Stamped by whichever provider's
+          // controller pre-creates (activeprovider gate ensures exactly one does).
+          mediaProvider: "aws",
         });
         console.log(`[Pre-create] Firestore room document created: ${meeting.id}`);
       } else {
         if (!roomDoc.data().active) {
           await roomRef.update({
             active: true,
+            // Restamp on reactivation: the doc may carry another cloud's stamp from a
+            // previous activeprovider period, but THIS controller hosts the room now.
+            mediaProvider: "aws",
             metadata: {
               ...roomDoc.data().metadata,
               title: title

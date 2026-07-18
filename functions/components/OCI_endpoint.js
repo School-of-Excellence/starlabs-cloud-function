@@ -409,43 +409,157 @@ async function getOciActiveRoomsCount() {
   }
 }
 
-// Pre-create the LiveKit room for an upcoming meeting — ONLY when its room doc is
-// explicitly assigned to OCI (mediaProvider == 'oci'). Unassigned/AWS meetings are
-// pre-created by the AWS controller; doing them here too would clobber the shared
-// livekitRoomPreCreated flag and duplicate rooms across clusters.
-async function preCreateOciRoomForMeeting(meeting) {
-  const roomDoc = await admin.firestore().collection('openviduroom').doc(meeting.id).get();
-  if (!roomDoc.exists || roomDoc.data().mediaProvider !== 'oci') {
-    console.log(`[Pre-create oci] ${meeting.id} not assigned to OCI - skipping`);
-    return;
-  }
+// Full pre-create for an upcoming meeting — twin of AWS createRoomForMeeting: ensures the
+// LiveKit room on the OCI cluster AND creates/reactivates the openviduroom doc (title from
+// profiles) stamped mediaProvider:'oci'. Only the ACTIVE provider's controller runs this
+// (activeprovider gate), so exactly one cloud creates each meeting's room. Unlike AWS, no
+// long in-function waits: if the cluster/capacity isn't ready we defer — the flag stays
+// unset so the next 5-min tick retries.
+async function createOciRoomForMeeting(meeting, clients) {
+  const roomName = meeting.id;
+  console.log(`[Pre-create oci] Creating room for meeting ${meeting.id}`);
+
   const roomClient = new livekitServer.RoomServiceClient(
     LIVEKIT_URL_OCI.value(), LIVEKIT_API_KEY_OCI.value(), LIVEKIT_API_SECRET_OCI.value()
   );
+
+  // STEP 1: room exists? (cluster unreachable → defer to next tick)
+  let roomExists = false;
   try {
-    const existing = await roomClient.listRooms([meeting.id]);
-    if (existing.length === 0) {
-      await roomClient.createRoom({ name: meeting.id, emptyTimeout: 300, maxParticipants: 50 });
-      console.log(`[Pre-create oci] Room ${meeting.id} created`);
+    const existingRooms = await roomClient.listRooms([roomName]);
+    roomExists = existingRooms.length > 0;
+    console.log(`[Pre-create oci] Room ${roomName} exists: ${roomExists}`);
+  } catch (error) {
+    console.log(`[Pre-create oci] LiveKit not ready (${error && error.message}) - deferring ${roomName}`);
+    return;
+  }
+
+  // STEP 2: create if missing (capacity-gated; at capacity → grow pool and defer)
+  if (!roomExists) {
+    let capacity;
+    try {
+      capacity = await checkOciCapacity(clients.mgmt, roomClient);
+    } catch (error) {
+      console.error(`[Pre-create oci] Capacity check failed: ${error.message}`);
+      capacity = { allowed: false };
     }
-    await admin.firestore().collection('appointments').doc(meeting.id).update({
-      livekitRoomPreCreated: true,
-      livekitRoomName: meeting.id,
-      livekitRoomCreatedAt: admin.firestore.FieldValue.serverTimestamp()
+    if (!capacity.allowed) {
+      console.log(`[Pre-create oci] At capacity - scaling up and deferring ${roomName}`);
+      await scaleOciUp(clients.mgmt).catch(e => console.error('OCI scaleUp failed:', e.message));
+      return;
+    }
+    try {
+      await roomClient.createRoom({
+        name: roomName,
+        emptyTimeout: 300,
+        maxParticipants: 50,
+        metadata: JSON.stringify({
+          meetingId: meeting.id,
+          startTime: meeting.starttime && meeting.starttime.toDate ? meeting.starttime.toDate().toISOString() : null,
+          createdAt: new Date().toISOString()
+        })
+      });
+      console.log(`[Pre-create oci] Room ${roomName} created in LiveKit`);
+    } catch (createError) {
+      if (createError.message && createError.message.includes('already exists')) {
+        console.log(`[Pre-create oci] Room ${roomName} already exists - continuing`);
+      } else {
+        throw createError;
+      }
+    }
+  }
+
+  // STEP 3: Firestore openviduroom doc (create or reactivate) — verbatim AWS field logic
+  // plus the mediaProvider stamp (restamped on reactivate: the room is hosted HERE now).
+  const hostIds = meeting.hosts ? meeting.hosts.map(ref => {
+    return ref.path ? ref.path.split('/').pop() : ref.id;
+  }) : [];
+  const participantid = (meeting.bookedby && meeting.bookedby.id) || meeting.bookedby || null;
+
+  const mapProfile = {};
+  const profilesSnapshot = await admin.firestore().collection('profile_data').get();
+  profilesSnapshot.forEach(doc => {
+    mapProfile[doc.id] = doc.data().name || 'Unknown';
+  });
+
+  let appointmentTypeName = 'Appointment';
+  if (meeting.appointment && meeting.appointment.id) {
+    const appointmentDoc = await admin.firestore().collection('appointmenttype').doc(meeting.appointment.id).get();
+    if (appointmentDoc.exists) {
+      appointmentTypeName = appointmentDoc.data().appointmenttype || 'Appointment';
+    }
+  }
+
+  const participantName = mapProfile[participantid] || 'Guest';
+  const hostNames = hostIds.map(hostId => mapProfile[hostId] || 'Unknown').join(', ');
+  const title = `${participantName} - ${appointmentTypeName} (${hostNames})`;
+
+  const roomRef = admin.firestore().collection('openviduroom').doc(meeting.id);
+  const roomDoc = await roomRef.get();
+
+  if (!roomDoc.exists) {
+    await roomRef.set({
+      active: true,
+      createddate: admin.firestore.FieldValue.serverTimestamp(),
+      sessiontype: "appointment",
+      sessionid: meeting.id,
+      roomid: meeting.id,
+      hosts: hostIds,
+      participantid: participantid,
+      title: title,
+      metadata: { appointmentid: meeting.id },
+      mediaProvider: 'oci',
     });
+    console.log(`[Pre-create oci] Firestore room document created: ${meeting.id}`);
+  } else if (!roomDoc.data().active) {
+    await roomRef.update({
+      active: true,
+      mediaProvider: 'oci',
+      metadata: { ...roomDoc.data().metadata, title: title }
+    });
+    console.log(`[Pre-create oci] Firestore room document reactivated: ${meeting.id}`);
+  } else {
+    console.log(`[Pre-create oci] Firestore room document already active: ${meeting.id}`);
+  }
+
+  // STEP 4: mark the appointment pre-created
+  await admin.firestore().collection('appointments').doc(meeting.id).update({
+    livekitRoomPreCreated: true,
+    livekitRoomName: roomName,
+    livekitRoomCreatedAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  console.log(`[Pre-create oci] Appointment marked as pre-created: ${meeting.id}`);
+}
+
+// Which cloud is allowed to act right now. Written by the monitor screen's selector
+// (developer role). Fail-safe default 'aws' (matches the pre-multiprovider behavior).
+async function getActiveProvider() {
+  try {
+    const snap = await admin.firestore().doc('openvidu server/mediaprovider').get();
+    return (snap.exists && snap.data().activeprovider) || 'aws';
   } catch (e) {
-    // Node not ready yet → next tick retries (flag stays unset).
-    console.log(`[Pre-create oci] ${meeting.id} deferred:`, e && e.message);
+    console.error('getActiveProvider failed, defaulting to aws:', e && e.message);
+    return 'aws';
   }
 }
 
 // ---- Scheduled controller (twin of AWS CheckMasternodeStatus) ----
 // Auto-start for upcoming meetings, housekeeping, DC-safe pool right-sizing, and
 // stop-to-zero when idle. Always finishes by refreshing the status doc.
+// activeprovider gate: when OCI is not the active provider this tick only refreshes the
+// status doc (keeps the monitor's inactive-server alert truthful) and takes NO lifecycle
+// actions — so even with both schedulers running, exactly one cloud creates rooms.
 exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", timeoutSeconds: 300, secrets: [OCI_TENANCY_OCID, OCI_USER_OCID, OCI_KEY_FINGERPRINT, OCI_API_PRIVATE_KEY, OCI_MASTER_INSTANCE_ID, OCI_MEDIA_POOL_ID, LIVEKIT_URL_OCI, LIVEKIT_API_KEY_OCI, LIVEKIT_API_SECRET_OCI] }, async (event) => {
   const clients = getOciClients();
 
   try {
+    const activeProvider = await getActiveProvider();
+    if (activeProvider !== 'oci') {
+      console.log(`activeprovider=${activeProvider} — OCI controller idle (status refresh only)`);
+      await refreshOciStatus(clients);
+      return null;
+    }
+
     // 1. Current master state
     const status = await collectOciStatus(clients);
     const masterRunning = status.master.state === 'running';
@@ -478,11 +592,13 @@ exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "As
     }
 
     if (masterRunning && meetings.length > 0) {
-      console.log('Pre-creating LiveKit rooms (OCI-assigned only)...');
+      console.log('Pre-creating LiveKit rooms (OCI)...');
       for (const meeting of meetings) {
         if (!meeting.livekitRoomPreCreated) {
-          await preCreateOciRoomForMeeting(meeting).catch(e =>
+          await createOciRoomForMeeting(meeting, clients).catch(e =>
             console.error(`Pre-create failed for ${meeting.id}:`, e && e.message));
+        } else {
+          console.log(`Room already exists for meeting ${meeting.id}`);
         }
       }
     }
