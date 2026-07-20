@@ -1398,7 +1398,8 @@ async function sendSlackDigest() {
     message.text = "<!channel> Daily SLA report image unavailable.";
   }
 
-  const res = await fetch(commonService.getWebhookUrl('Centralised Customer Support'), {
+  const url = await getWebhookUrl('Centralised Customer Support');
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(message),
