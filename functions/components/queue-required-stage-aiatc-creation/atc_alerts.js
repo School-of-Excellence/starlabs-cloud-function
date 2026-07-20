@@ -17,7 +17,7 @@ const { logger } = require("firebase-functions");
 
 // slackDevTest from components/service.js — replace with a dedicated
 // #atc-pipeline channel webhook when one exists.
-const DEFAULT_WEBHOOK = "https://hooks.slack.com/services/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";
+const DEFAULT_WEBHOOK = "";
 
 const EMOJI = {
   info: ":information_source:",
