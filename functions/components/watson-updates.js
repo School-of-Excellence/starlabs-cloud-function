@@ -144,6 +144,13 @@ exports.syncETicketEligibility = onRequest(async (req, res) => {
         const id = d.id;
         if (!id) return res.status(400).json({ error: 'missing id' });
 
+        // Deleted in Watson -> remove the mirror doc here too.
+        if (d._deleted === true) {
+            await admin.firestore().collection('e-ticket eligibility').doc(id).delete();
+            console.log('syncETicketEligibility: deleted', id);
+            return res.status(200).json({ success: true, id, deleted: true });
+        }
+
         // Store the FULL doc Watson sends — no field restriction. Recursively convert
         // ISO datetime strings back to Firestore Timestamps.
         const convert = (v) => {
