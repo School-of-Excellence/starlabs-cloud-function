@@ -140,7 +140,7 @@ exports.scheduledFirestoreExport = onSchedule({schedule: "every 12 hours", memor
 });
 
 
-exports.slackBudgetAlert = onMessagePublished({topic: "Launch-Your-Legacy-budget-alert-slack", region: "us-central1"}, (event) => {
+exports.slackBudgetAlert = onMessagePublished({topic: "Launch-Your-Legacy-budget-alert-slack", region: "us-central1"}, async (event) => {
 	
 	// Decode the message data if it's base64 encoded
 	// console.log(message.attributes);
@@ -152,7 +152,7 @@ exports.slackBudgetAlert = onMessagePublished({topic: "Launch-Your-Legacy-budget
 	
 	// console.log('Context:', context);
   
-	var url = commonService.slackFirebaseBilling
+	var url = await commonService.getWebhookUrl("slackFirebaseBilling")
 	if(url){
 	  let messageText = {
 			"blocks": [

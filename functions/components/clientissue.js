@@ -5,9 +5,10 @@ const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret, defineString } = require("firebase-functions/params");
 const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
-
+const workshop = require('./workshop');
 var IncomingWebhook = require('@slack/client').IncomingWebhook; // Slack Webhook
 const axios = require("axios");
+
 
 exports.ticketfromwebsite = onRequest(async (req,res) => {
   console.log("Data", req.body);
@@ -178,6 +179,11 @@ exports.ticketMsgNotification = onDocumentCreated('/clientissue/{docid}/messages
       //   ticketMsgData['message'],
       //   null,
       // );
+      try {
+       
+      } catch (err) {
+        console.log("newuser support watii:", err)
+      }
       await commonService.saveNotificationRecord({
         title: "Ticket No :" + ticketData['issueno'],
         message: ticketMsgData['message'],
@@ -235,142 +241,144 @@ exports.ticketMsgNotification = onDocumentCreated('/clientissue/{docid}/messages
   }
 });
 
-exports.slackCustomerSupport = onDocumentWritten("clientissue/{id}",async (change)=>{
-  const beforeData = change.data.before.exists ? change.data.before.data() : null;
-  const afterData = change.data.after.exists ? change.data.after.data() : null;
-  if( beforeData == null || beforeData['status']['status'].toLowerCase() != afterData['status']['status'].toLowerCase() || beforeData != null && beforeData['category'] != afterData['category']) {
+exports.slackCustomerSupport = onDocumentWritten("clientissue/{id}", async (change)=>{
+	const beforeData = change.data.before.exists ? change.data.before.data() : null;
+	const afterData = change.data.after.exists ? change.data.after.data() : null;
+  console.log("Client Issue Updated", change.data.after.ref.path)
+  console.log(beforeData['status']['status'].toLowerCase() , "=====", afterData['status']['status'].toLowerCase())
+	if( beforeData == null || beforeData['status']['status'].toLowerCase() != afterData['status']['status'].toLowerCase() || beforeData != null && beforeData['category'] != afterData['category']) {
+    if(afterData['status']['status'].toLowerCase() == 'closed'){
+      console.log("Sending Notification To Participant")
+      // await sendPushNotification(
+      //   afterData['clientid'],
+      //   afterData['id'],
+      //   "Ticket No : " +afterData['issueno'],
+      //   "This Ticket has been Resolved",
+      //   null
+      // )
+      await commonService.saveNotificationRecord({
+        title: "Ticket No :" + afterData['issueno'],
+        message: "This Ticket has been Resolved",
+        subtitle: null,
+        date: admin.firestore.FieldValue.serverTimestamp(),
+        landingpage: null,
+        logged: false,
+        profileid: afterData["assign"],
+        sticky: false,
+        notificationtype: "supportticket",
+        notificationimage: null,
+        metadata: {
+          ticketid: afterData['id'],
+          messageid: change.data.after.id
+        }
+      });
+    }
 
-    if(afterData['status']['status'].toLowerCase() == 'closed'){
-      console.log("Sending Notification To Participant")
-      // await sendPushNotification(
-      //   afterData['clientid'],
-      //   afterData['id'],
-      //   "Ticket No : " +afterData['issueno'],
-      //   "This Ticket has been Resolved",
-      //   null
-      // )
-      await commonService.saveNotificationRecord({
-        title: "Ticket No :" + afterData['issueno'],
-        message: "This Ticket has been Resolved",
-        subtitle: null,
-        date: admin.firestore.FieldValue.serverTimestamp(),
-        landingpage: null,
-        logged: false,
-        profileid: afterData["assign"],
-        sticky: false,
-        notificationtype: "supportticket",
-        notificationimage: null,
-        metadata: {
-          ticketid: afterData['id'],
-          messageid: change.data.after.id
-        }
-      });
-    }
+    var reportedby;
+    var assignedto = [];
+    var status = beforeData == null ? afterData['status']['status'] : `From ${beforeData['status']['status']} To ${afterData['status']['status']}`;
+    var category = beforeData != null && beforeData['category'] != afterData['category'] ? `From ${'*'+beforeData['category']+"*"} To ${"*"+afterData['category']+"*"}` : "*"+afterData['category']+"*";
+    // await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
+    //   reportedby = profile.data()["name"]
+    // }).catch(e => {console.log(e)})
+    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(async profile => {
+      if (profile.exists) {
+        reportedby = profile.data()["name"];
+      } else {
+        await admin.firestore().collection("new_user_data").doc(afterData["reportedBy"]).get().then(newProfile => {
+          if (newProfile.exists) {
+            reportedby = newProfile.data()["name"];
+          }
+        }).catch(e => { console.log(e) });
+      }
+    }).catch(e => { console.log(e) });
+    for (let i = 0; i < afterData["assign"].length; i++) {
+      const element = afterData["assign"][i];
+      await admin.firestore().collection("profile_data").doc(element).get().then(profile=>{
+        assignedto.push(profile.data()["name"])
+      }).catch(e => {console.log(e)})
+    }
+    var url
+      if(commonService.production){
+        url = await commonService.getWebhookUrl("slackTicketingSystem") // Production
+      }
+      else{
+        url = await commonService.getWebhookUrl("slackDevTest") // Test
+      }
+		console.log("WebHook URL", url)
+    var webhook = new IncomingWebhook(url);
 
-    var reportedby;
-    var assignedto = [];
-    var status = beforeData == null ? afterData['status']['status'] : `From ${beforeData['status']['status']} To ${afterData['status']['status']}`;
-    var category = beforeData != null && beforeData['category'] != afterData['category'] ? `From ${'*'+beforeData['category']+"*"} To ${"*"+afterData['category']+"*"}` : "*"+afterData['category']+"*";
-    // await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(profile=>{
-    //   reportedby = profile.data()["name"]
-    // }).catch(e => {console.log(e)})
-    await admin.firestore().collection("profile_data").doc(afterData["reportedBy"]).get().then(async profile => {
-      if (profile.exists) {
-        reportedby = profile.data()["name"];
-      } else {
-        await admin.firestore().collection("new_user_data").doc(afterData["reportedBy"]).get().then(newProfile => {
-          if (newProfile.exists) {
-            reportedby = newProfile.data()["name"];
-          }
-        }).catch(e => { console.log(e) });
-      }
-    }).catch(e => { console.log(e) });
-    for (let i = 0; i < afterData["assign"].length; i++) {
-      const element = afterData["assign"][i];
-      await admin.firestore().collection("profile_data").doc(element).get().then(profile=>{
-        assignedto.push(profile.data()["name"])
-      }).catch(e => {console.log(e)})
-    }
-    var url
-      if(commonService.production){
-        url = commonService.slackTicketingSystem // Production
-      }
-      else{
-        url = commonService.slackDevTest // Test
-      }
-    var webhook = new IncomingWebhook(url);
-
-    let message = {
-      "blocks" : [
-        {
-          "type" : "divider"
-        },
-        {
-          "type": "header",
-          "text": {
-            "type": "plain_text",
-            "text": `Ticket Captured : ${afterData['issueno'].toString()}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Client Name* : ${afterData['name']}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Reported Date* : ${afterData['reporteddate'].toDate().toDateString()}`
-          }
-        },
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Reported By* : ${reportedby}`
-          }
-        },         
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Category* : ${category}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Assigned To* : ${assignedto.join(', ')}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Status* : ${status}`
-          }
-        },        
-        {
-          "type": "section",
-          "text": {
-            "type": "mrkdwn",
-            "text": `*Issue* : ${afterData['issue']}`
-          }
-        },
-      ]
-    }
-    await webhook.send(message, function(err, header, statusCode, body) {
-      if (err) {
-        console.log('Error:', err);
-      } else {
-        console.log('Received', statusCode, 'from Slack');
-      }
-    });
-  }
+    let message = {
+      "blocks" : [
+        {
+          "type" : "divider"
+        },
+        {
+          "type": "header",
+          "text": {
+            "type": "plain_text",
+            "text": `Ticket Captured : ${afterData['issueno'].toString()}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Client Name* : ${afterData['name']}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Reported Date* : ${afterData['reporteddate'].toDate().toDateString()}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Reported By* : ${reportedby}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Category* : ${category}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Assigned To* : ${assignedto.join(', ')}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Status* : ${status}`
+          }
+        },
+        {
+          "type": "section",
+          "text": {
+            "type": "mrkdwn",
+            "text": `*Issue* : ${afterData['issue']}`
+          }
+        },
+      ]
+    }
+    await webhook.send(message, function(err, header, statusCode, body) {
+      if (err) {
+        console.log('Error:', err);
+      } else {
+        console.log('Received', statusCode, 'from Slack');
+      }
+    });
+  }
 });
 
 //harish
@@ -1119,3 +1127,284 @@ async function throwParticipantMetaDataException(exception) {
   await admin.firestore().collection('participantmetadata exception').add(data)
 }
 
+// ── CONFIG ──────────────────────────────────────────────────────────
+const TICKETS_COLLECTION = "clientissue"; // source collection
+// ────────────────────────────────────────────────────────────────────
+
+// Lazy-require Chromium so it doesn't load on unrelated cold starts.
+let _chromium = null, _puppeteer = null;
+function loadBrowserDeps() {
+  if (!_chromium) _chromium = require("@sparticuz/chromium");
+  if (!_puppeteer) _puppeteer = require("puppeteer-core");
+  return { chromium: _chromium, puppeteer: _puppeteer };
+}
+
+exports.slackDigest = onSchedule(
+  {
+    schedule: "30 11,18 * * *",
+    timeZone: "Asia/Kolkata",
+    region: "asia-south1",
+    memory: "2GiB",
+    timeoutSeconds: 540
+  },
+  async () => {
+    await sendSlackDigest();
+  }
+);
+
+// ── 1. Data ─────────────────────────────────────────────────────────
+async function computeReportData() {
+  const snap = await admin.firestore().collection(TICKETS_COLLECTION).get();
+  const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const now = new Date();
+
+  const openTickets = all.filter((t) => (t.status?.status || "").toLowerCase() === "open");
+  const closedTickets = all.filter((t) => (t.status?.status || "").toLowerCase() === "closed");
+
+  const categories = Array.from(
+    new Set(openTickets.map((t) => t.category).filter((c) => !!c))
+  ).sort();
+
+  const toDate = (raw) => {
+    if (!raw) return null;
+    if (typeof raw.toDate === "function") return raw.toDate();
+    if (typeof raw.seconds === "number") return new Date(raw.seconds * 1000);
+    if (raw instanceof Date) return raw;
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const rows = categories.map((category) => {
+    const cat = openTickets.filter((t) => t.category === category);
+    const closedCat = closedTickets.filter((t) => t.category === category);
+
+    let closedLast24 = 0;
+    let last24 = 0, hrs48 = 0, hrs72 = 0, days7 = 0, month1 = 0, moreThan1Month = 0;
+    let last24Unresponded = 0, hrs48Unresponded = 0, hrs72Unresponded = 0;
+    let days7Unresponded = 0, month1Unresponded = 0, moreThan1MonthUnresponded = 0;
+
+    for (const t of cat) {
+      const reportedDate = toDate(t.reporteddate);
+      if (!reportedDate) continue;
+      const diffHours = (now.getTime() - reportedDate.getTime()) / (1000 * 60 * 60);
+      const diffDays = diffHours / 24;
+      const chatStatus = t.chatstatus;
+      const isUnresponded = [null, undefined, "new"].includes(
+        chatStatus != null ? String(chatStatus).toLowerCase() : chatStatus
+      );
+
+      if (diffHours <= 24) { last24++; if (isUnresponded) last24Unresponded++; }
+      else if (diffHours <= 48) { hrs48++; if (isUnresponded) hrs48Unresponded++; }
+      else if (diffHours <= 72) { hrs72++; if (isUnresponded) hrs72Unresponded++; }
+      else if (diffDays <= 7) { days7++; if (isUnresponded) days7Unresponded++; }
+      else if (diffDays <= 30) { month1++; if (isUnresponded) month1Unresponded++; }
+      else { moreThan1Month++; if (isUnresponded) moreThan1MonthUnresponded++; }
+    }
+
+    for (const t of closedCat) {
+      const closedDate = toDate(t.status?.date) || toDate(t.date);
+      if (!closedDate) continue;
+      const diffHours = (now.getTime() - closedDate.getTime()) / 3600 / 1000;
+      if (diffHours <= 24) closedLast24++;
+    }
+
+    return {
+      category,
+      total: cat.length,
+      totalUnresponded:
+        last24Unresponded + hrs48Unresponded + hrs72Unresponded +
+        days7Unresponded + month1Unresponded + moreThan1MonthUnresponded,
+      closedLast24,
+      last24, last24Unresponded,
+      hrs48, hrs48Unresponded,
+      hrs72, hrs72Unresponded,
+      days7, days7Unresponded,
+      month01: month1, month01Unresponded: month1Unresponded,
+      moreThan01: moreThan1Month, moreThan01Unresponded: moreThan1MonthUnresponded,
+    };
+  });
+
+  const totals = rows.reduce((acc, r) => {
+    for (const k of Object.keys(r)) {
+      if (k === "category") continue;
+      acc[k] = (acc[k] || 0) + r[k];
+    }
+    return acc;
+  }, {});
+  totals.category = "Total";
+
+  return { rows, totals, generatedAt: now };
+}
+
+// ── 2. HTML ─────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function reportHtml({ rows, totals, generatedAt }) {
+  const istLabel = generatedAt.toLocaleString("en-IN", {
+    dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata",
+  });
+  const cell = (v) => `<td>${v == null ? "" : v}</td>`;
+  const row = (r) => `
+    <tr>
+      <td class="cat">${escapeHtml(r.category)}</td>
+      ${cell(r.total)}
+      ${cell(r.totalUnresponded)}
+      ${cell(r.last24)}
+      ${cell(r.last24)}${cell(r.last24Unresponded)}
+      ${cell(r.hrs48)}${cell(r.hrs48Unresponded)}
+      ${cell(r.hrs72)}${cell(r.hrs72Unresponded)}
+      ${cell(r.days7)}${cell(r.days7Unresponded)}
+      ${cell(r.month01)}${cell(r.month01Unresponded)}
+      ${cell(r.moreThan01)}${cell(r.moreThan01Unresponded)}
+      ${cell(r.closedLast24)}
+    </tr>`;
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin: 0; padding: 24px; background: #ffffff; color: #1f2937; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+  table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13px; }
+  thead th { background: #1f2937; color: white; padding: 10px 8px; border: 1px solid #111827; font-weight: 600; text-align: center; vertical-align: middle; white-space: pre-line; }
+  thead .sub-th { background: #374151; font-weight: 500; font-size: 11px; }
+  td { padding: 8px 10px; border: 1px solid #e5e7eb; text-align: center; }
+  td.cat { text-align: left; font-weight: 500; min-width: 180px; }
+  tbody tr:nth-child(even) td { background: #f9fafb; }
+  tr.total td { background: #fef3c7 !important; font-weight: 700; border-top: 2px solid #92400e; }
+</style></head><body>
+  <h1>Daily Support SLA Report</h1>
+  <div class="sub">${escapeHtml(istLabel)} IST · ${rows.length} categories</div>
+  <table>
+    <thead>
+      <tr>
+        <th rowspan="2">Category</th>
+        <th rowspan="2">Total Open\nTickets</th>
+        <th rowspan="2">Total\nUnresponded</th>
+        <th rowspan="2">Tickets open\nin the last 24</th>
+        <th colspan="2">24 Hours</th>
+        <th colspan="2">48 Hours</th>
+        <th colspan="2">72 Hours</th>
+        <th colspan="2">07 Days</th>
+        <th colspan="2">1 Month</th>
+        <th colspan="2">More than\n1 month</th>
+        <th rowspan="2">Tickets closed\nin the last 24</th>
+      </tr>
+      <tr>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+        <th class="sub-th">Open</th><th class="sub-th">Unresp.</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(row).join("")}
+      <tr class="total">
+        <td class="cat">Total</td>
+        ${cell(totals.total)}
+        ${cell(totals.totalUnresponded)}
+        ${cell(totals.last24)}
+        ${cell(totals.last24)}${cell(totals.last24Unresponded)}
+        ${cell(totals.hrs48)}${cell(totals.hrs48Unresponded)}
+        ${cell(totals.hrs72)}${cell(totals.hrs72Unresponded)}
+        ${cell(totals.days7)}${cell(totals.days7Unresponded)}
+        ${cell(totals.month01)}${cell(totals.month01Unresponded)}
+        ${cell(totals.moreThan01)}${cell(totals.moreThan01Unresponded)}
+        ${cell(totals.closedLast24)}
+      </tr>
+    </tbody>
+  </table>
+</body></html>`;
+}
+
+// ── 3. Render HTML → PNG via Chromium ───────────────────────────────
+async function renderHtmlToPng(html) {
+  const { chromium, puppeteer } = loadBrowserDeps();
+  const browser = await puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: { width: 1800, height: 900, deviceScaleFactor: 2 },
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    const dims = await page.evaluate(() => ({
+      w: Math.ceil(document.body.scrollWidth) + 24,
+      h: Math.ceil(document.body.scrollHeight) + 24,
+    }));
+    await page.setViewport({ width: dims.w, height: dims.h, deviceScaleFactor: 2 });
+    return await page.screenshot({ type: "png", fullPage: true });
+  } finally {
+    await browser.close();
+  }
+}
+
+// ── 4. Upload PNG → Firebase Storage, return public URL ─────────────
+async function uploadPng(pngBuffer) {
+  const filename = `support-digests/digest-${Date.now()}.png`;
+  const b = admin.storage().bucket();
+  const file = b.file(filename);
+  await file.save(pngBuffer, {
+    contentType: "image/png",
+    metadata: { cacheControl: "public, max-age=604800" },
+  });
+  try {
+    await file.makePublic();
+    return `https://storage.googleapis.com/${b.name}/${encodeURIComponent(filename)}`;
+  } catch (e) {
+    const [signed] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 7 * 24 * 3600 * 1000,
+    });
+    return signed;
+  }
+}
+
+// ── Orchestration: build the image, return its URL ──────────────────
+async function generateDailyReportImage() {
+  const data = await computeReportData();
+  const html = reportHtml(data);
+  const png = await renderHtmlToPng(html);
+  const url = await uploadPng(png);
+  return { url, rows: data.rows.length, totals: data.totals };
+}
+
+// ── Slack send: image-only, tags the channel ────────────────────────
+async function sendSlackDigest() {
+  let reportImageUrl = null;
+  try {
+    const r = await generateDailyReportImage();
+    reportImageUrl = r.url;
+    console.log(`digest: image rendered (${r.rows} rows) -> ${reportImageUrl}`);
+  } catch (e) {
+    console.warn("digest: report image failed", e.message || e);
+  }
+
+  const message = { text: "<!channel>" };
+  if (reportImageUrl) {
+    message.attachments = [{
+      fallback: "Daily Support SLA Report",
+      image_url: reportImageUrl,
+      color: "#1f2937",
+    }];
+  } else {
+    message.text = "<!channel> Daily SLA report image unavailable.";
+  }
+
+  const url = await getWebhookUrl('Centralised Customer Support');
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(message),
+  });
+  if (!res.ok) console.error("Slack digest send failed", res.status, await res.text());
+
+  return { sent: true, reportImageUrl };
+}
