@@ -4129,6 +4129,54 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
   var messageData = snapshot.data.data();
   var sender_uid = messageData["sender_uid"];
 
+    // Handle notification for Channel Communication message in app
+  if (messageData['channelarchiveid']) {
+    console.log('Handling notification for channel Communication message in app');
+
+    await admin.firestore().collection("supportchat").doc(chatid).update({
+      last_modification: admin.firestore.FieldValue.serverTimestamp(),
+      last_sender_uid:   sender_uid,
+    }).catch(e => console.log('Chat error', e));
+
+    // Send push notification
+    const profileIds = messageData['members'] || [];
+    if (profileIds.length > 0) {
+      const channelSnap = await admin.firestore()
+        .collection('supportchat')
+        .doc(chatid)
+        .get();
+      const channelName = channelSnap.data()?.group_name;
+
+      await commonService.saveNotificationRecord({
+        title:            `📢 ${channelName}`,
+        message:          `New update! Tap to view the message.`,
+        subtitle:         null,
+        date:             admin.firestore.FieldValue.serverTimestamp(),
+        landingpage:      null,
+        logged:           false,
+        profileid:        profileIds,
+        sticky:           false,
+        notificationtype: 'channel',
+        notificationimage: null,
+        metadata: {
+            type:             'channel',
+            channelid:        chatid,
+            click_action:     'FLUTTER_NOTIFICATION_CLICK',
+            ...messageData,
+            parameterConfig:  JSON.stringify(messageData['parameterConfig'] || []),
+            buttons:          JSON.stringify(messageData['buttons'] || []),
+            files:            JSON.stringify(messageData['files'] || []),
+            links:            JSON.stringify(messageData['links'] || []),
+        }
+      });
+
+      console.log('Push notification queued for', profileIds.length, 'participants');
+    }
+
+    return;
+  }
+
+
   console.log("Message Data", messageData);
 
   var sender_name = null;
@@ -5345,3 +5393,88 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       });
     }
   });
+
+  //Channel Communication in App
+  exports.AppChannelCommunication = onDocumentCreated('channelarchive/{docid}',
+    async (event) => {
+      const channelArchive   = event.data;
+      const channelData  = channelArchive.data();
+      const channelRef   = channelArchive.ref;
+      const senderName = (await admin.firestore().collection('profile_data').doc(channelData['createdby']).get()).data()?.['name'] || '';
+
+
+      console.log('AppChannelCommunication triggered for:', channelArchive.id);
+
+      if (channelData['status'] !== 'created') {
+        console.log('Skipping — status is not created:', channelData['status']);
+        return;
+      }
+
+      try {
+        const channelId       = channelData['channelid'];
+        const profileIds      = channelData['profileid']      || [];
+        const htmlbody        = channelData['htmlbody']        || '';
+        const textbody        = channelData['textbody']        || '';
+        const parameterConfig = channelData['parameterConfig'] || [];
+        const files           = channelData['files']           || [];
+        const links           = channelData['links']           || [];
+        const headertype      = channelData['headertype']      || null;
+        const headervalue     = channelData['headervalue']     || null;
+        const footer          = channelData['footer']          || null;
+        const buttons         = channelData['buttons']         || [];
+        const category        = channelData['category']        || '';
+
+        if (!channelId)         throw new Error('channelid is missing from archive');
+        if (!profileIds.length) throw new Error('profileid array is empty');
+
+        // Write to messages doc 
+        const msgRef = admin.firestore().collection('supportchat').doc(channelId).collection('messages').doc();
+
+        await msgRef.set({
+          messageid:        msgRef.id,
+          htmlbody:         htmlbody,
+          textbody:         textbody,
+          parameterConfig:  parameterConfig,
+          members:          profileIds,
+          pending:          profileIds,
+          read_by:          [],
+          sender_uid:       channelData['createdby'],
+          sender_name:      senderName,
+          files:            files,
+          links:            links,
+          headertype:       headertype,
+          headervalue:      headervalue,
+          footer:           footer,
+          buttons:          buttons,
+          category:         category,
+          templateid:       channelData['templateid'] || '',
+          time:             admin.firestore.FieldValue.serverTimestamp(),
+          channelarchiveid: channelArchive.id,
+        });
+
+        console.log('Message doc written:', msgRef.id);
+        const pendingCountUpdate = {};
+        for(const pid of profileIds){
+          pendingCountUpdate[`pendingcount.${pid}`] = admin.firestore.FieldValue.increment(1);
+        }
+        await admin.firestore().collection('supportchat').doc(channelId).update({
+          ...pendingCountUpdate,
+          last_message: textbody,
+        });
+        await channelRef.update({
+          status:    'sent',
+          sentat:    admin.firestore.FieldValue.serverTimestamp(),
+          messageid: msgRef.id,
+        });
+
+        console.log('AppChannelCommunication completed successfully');
+
+      } catch (err) {
+        console.error('AppChannelCommunication error:', err);
+        await channelRef.update({
+          status: 'error',
+          error:  err.message || 'Unknown error',
+        }).catch(e => console.error('Failed to update error status:', e));
+      }
+    }
+  );
