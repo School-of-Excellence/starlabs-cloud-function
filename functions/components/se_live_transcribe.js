@@ -21,10 +21,11 @@
  *    Writes transcript_text / transcript_raw onto the live assignment doc.
  *
  * Required secrets:
- *   RUNPOD_API_KEY          — RunPod API key
- *   SE_TRANSCRIBE_CALLBACK_URL — full HTTPS URL of this project's
- *                                seLiveTranscribeCallback function
- *                                e.g. https://us-central1-fir-sample-aae4a.cloudfunctions.net/seLiveTranscribeCallback
+ *   RUNPOD_API_KEY — RunPod API key
+ *
+ * Callback URL (no secret): resolved by resolveCallbackUrl() from
+ *   classify/se_transcribe { callbackurl }  — optional override
+ *   else derived            https://us-central1-<project>.cloudfunctions.net/seLiveTranscribeCallback
  */
 
 const admin = require("firebase-admin");
@@ -33,10 +34,40 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 
 const runpodApiKey = defineSecret("RUNPOD_API_KEY");
-// const callbackUrl  = defineSecret("SE_TRANSCRIBE_CALLBACK_URL");
 
 const ENDPOINT_ID = "5bghabyldgu2tj";
 const RUNPOD_RUN_URL = `https://api.runpod.ai/v2/${ENDPOINT_ID}/run`;
+
+// ── callback URL ──────────────────────────────────────────────────────────────
+// Where RunPod POSTs the finished job. This used to be the SE_TRANSCRIBE_CALLBACK_URL
+// secret; that secret was removed in c4013e5 ("Move Slack webhooks to Firestore,
+// remove hardcoded URLs") which left this whole function commented out and
+// unbuildable. It is now resolved the same way as the other runtime config in this
+// codebase — an optional Firestore override with a derived default:
+//
+//   classify/se_transcribe { callbackurl: "https://..." }   ← optional override
+//   otherwise              https://us-central1-<project>.cloudfunctions.net/seLiveTranscribeCallback
+//
+// The derived default is the address of THIS project's own seLiveTranscribeCallback,
+// so no environment needs configuring for the pipeline to work.
+const CALLBACK_CONFIG_DOCID = "se_transcribe";
+
+// .trim() is load-bearing and applied to BOTH sources: a trailing newline makes
+// RunPod's webhook POST silently fail (malformed URL) and the transcript never comes
+// back. That was the root cause fixed in 932d23f — do not remove it.
+async function resolveCallbackUrl() {
+  try {
+    const snap = await admin.firestore().collection("classify").doc(CALLBACK_CONFIG_DOCID).get();
+    const configured = snap.exists ? (snap.data() || {}).callbackurl : null;
+    if (configured && String(configured).trim()) return String(configured).trim();
+  } catch (err) {
+    console.warn(`resolveCallbackUrl: classify/${CALLBACK_CONFIG_DOCID} read failed, using derived URL:`, err.message);
+  }
+  const project = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  if (!project) throw new Error("cannot derive callback URL: no GCLOUD_PROJECT in env");
+  return `https://us-central1-${project}.cloudfunctions.net/seLiveTranscribeCallback`.trim();
+}
+exports.resolveCallbackUrl = resolveCallbackUrl;
 
 // ── trigger gate ──────────────────────────────────────────────────────────────
 // Pure decision: submit a transcription job iff `dropboxlink` is present AND just
@@ -178,85 +209,83 @@ function formatOutput(rawOutput, profileName) {
 }
 
 // ── 1. Submit ─────────────────────────────────────────────────────────────────
-// exports.seLiveTranscribeSubmit = onDocumentWritten(
-//   { document: "live assignment/{id}", secrets: [runpodApiKey, callbackUrl] },
-//   async (event) => {
-//     // Doc deleted — nothing to do.
-//     if (!event.data.after.exists) return null;
+exports.seLiveTranscribeSubmit = onDocumentWritten(
+  { document: "live assignment/{id}", secrets: [runpodApiKey] },
+  async (event) => {
+    // Doc deleted — nothing to do.
+    if (!event.data.after.exists) return null;
 
-//     const before = event.data.before.data() || {};
-//     const after  = event.data.after.data()  || {};
+    const before = event.data.before.data() || {};
+    const after  = event.data.after.data()  || {};
 
-//     // Only act when the dropbox URL is present AND just changed. Because none of
-//     // this pipeline's own write-backs alter `dropboxlink`, the queued/processing/
-//     // captured/failed writes all fall out here (link unchanged) — no loop, no
-//     // duplicate-submission race.
-//     if (!shouldSubmitTranscription(before, after)) return null;
+    // Only act when the dropbox URL is present AND just changed. Because none of
+    // this pipeline's own write-backs alter `dropboxlink`, the queued/processing/
+    // captured/failed writes all fall out here (link unchanged) — no loop, no
+    // duplicate-submission race.
+    if (!shouldSubmitTranscription(before, after)) return null;
 
-//     const docId      = event.params.id;
-//     const profileId  = after.participantid || after.profile_id || null;
-//     const profileName = after.profile_name || "";
-//     const videoUrl   = after.dropboxlink.trim();
+    const docId      = event.params.id;
+    const profileId  = after.participantid || after.profile_id || null;
+    const profileName = after.profile_name || "";
+    const videoUrl   = after.dropboxlink.trim();
 
-//     const db = admin.firestore();
+    const db = admin.firestore();
 
-//     // Mark as queued immediately. This write does not change dropboxlink, so it
-//     // will not re-trigger this function. Clear any prior error from a past run.
-//     await db.collection("live assignment").doc(docId).set(
-//       {
-//         transcriptCaptureStatus: "queued",
-//         transcriptQueuedAt: admin.firestore.FieldValue.serverTimestamp(),
-//         transcriptCaptureLastError: admin.firestore.FieldValue.delete(),
-//       },
-//       { merge: true }
-//     );
+    // Mark as queued immediately. This write does not change dropboxlink, so it
+    // will not re-trigger this function. Clear any prior error from a past run.
+    await db.collection("live assignment").doc(docId).set(
+      {
+        transcriptCaptureStatus: "queued",
+        transcriptQueuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        transcriptCaptureLastError: admin.firestore.FieldValue.delete(),
+      },
+      { merge: true }
+    );
 
-//     try {
-//       const body = {
-//         input: { audio_url: videoUrl, profileid: profileId, profile_name: profileName },
-//         // .trim() is load-bearing: a trailing newline in the secret makes RunPod's
-//         // webhook POST silently fail (malformed URL) → the transcript never comes back.
-//         webhook: callbackUrl.value().trim(),
-//       };
+    try {
+      const body = {
+        input: { audio_url: videoUrl, profileid: profileId, profile_name: profileName },
+        webhook: await resolveCallbackUrl(),
+      };
 
-//       const resp = await fetch(RUNPOD_RUN_URL, {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//           Authorization: `Bearer ${runpodApiKey.value()}`,
-//         },
-//         body: JSON.stringify(body),
-//       });
+      const resp = await fetch(RUNPOD_RUN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${runpodApiKey.value()}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-//       if (!resp.ok) {
-//         const text = await resp.text();
-//         throw new Error(`RunPod ${resp.status}: ${text.slice(0, 300)}`);
-//       }
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`RunPod ${resp.status}: ${text.slice(0, 300)}`);
+      }
 
-//       const data = await resp.json();
-//       const jobId = data.id;
-//       if (!jobId) throw new Error(`RunPod response missing job id: ${JSON.stringify(data).slice(0, 300)}`);
+      const data = await resp.json();
+      const jobId = data.id;
+      if (!jobId) throw new Error(`RunPod response missing job id: ${JSON.stringify(data).slice(0, 300)}`);
 
-//       await db.collection("live assignment").doc(docId).set(
-//         { runpodJobId: jobId, transcriptCaptureStatus: "processing" },
-//         { merge: true }
-//       );
+      await db.collection("live assignment").doc(docId).set(
+        { runpodJobId: jobId, transcriptCaptureStatus: "processing" },
+        { merge: true }
+      );
 
-//       console.log(`seLiveTranscribeSubmit: submitted job ${jobId} for doc ${docId} (${profileId})`);
-//     } catch (err) {
-//       console.error(`seLiveTranscribeSubmit: failed for doc ${docId}:`, err.message);
-//       await db.collection("live assignment").doc(docId).set(
-//         {
-//           transcriptCaptureStatus: "failed",
-//           transcriptCaptureLastError: String(err.message),
-//           transcriptCaptureFailedAt: admin.firestore.FieldValue.serverTimestamp(),
-//         },
-//         { merge: true }
-//       );
-//     }
-//     return null;
-//   }
-// );
+      console.log(`seLiveTranscribeSubmit: submitted job ${jobId} for doc ${docId} (${profileId})`);
+    } catch (err) {
+      console.error(`seLiveTranscribeSubmit: failed for doc ${docId}:`, err.message);
+      await db.collection("live assignment").doc(docId).set(
+        {
+          transcriptCaptureStatus: "failed",
+          transcriptCaptureLastError: String(err.message),
+          transcriptCaptureFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+    return null;
+  }
+);
 
 // ── 2. Callback ───────────────────────────────────────────────────────────────
 exports.seLiveTranscribeCallback = onRequest(
