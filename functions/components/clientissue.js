@@ -1162,7 +1162,7 @@ async function computeReportData() {
   const closedTickets = all.filter((t) => (t.status?.status || "").toLowerCase() === "closed");
 
   const categories = Array.from(
-    new Set(openTickets.map((t) => t.category).filter((c) => !!c))
+    new Set(all.map((t) => t.category).filter((c) => !!c))
   ).sort();
 
   const toDate = (raw) => {
