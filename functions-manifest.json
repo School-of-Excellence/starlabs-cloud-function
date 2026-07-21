@@ -169,6 +169,13 @@
       "codebase": "default"
     },
     {
+      "name": "clearParticipantReady",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
@@ -797,6 +804,13 @@
       "codebase": "default"
     },
     {
+      "name": "slackDigest",
+      "type": "onSchedule",
+      "file": "components/clientissue.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "slackLoveLetter",
       "type": "onDocumentCreated",
       "file": "components/interimreport.js",
@@ -1004,7 +1018,7 @@
     },
     {
       "name": "videoAskHLS",
-      "type": "onSchedule",
+      "type": "onDocumentCreated",
       "file": "components/content.js",
       "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
