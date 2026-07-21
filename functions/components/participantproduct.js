@@ -375,7 +375,7 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
       eventTime.enddate = queueData["queueenddate"].toDate();
 
       const queueId = participantProductData['eventref'].id;
-      const counterRef = admin.firestore().collection("queue_token_counter").doc(queueId);
+      const counterRef = admin.firestore().collection("queue_token_counter").doc("tokennumber");
       const queueCapacity = queueData["totalcapacity"] || 999;
       const deliveryRef = newDocRef.path;
 
@@ -401,8 +401,8 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
           const lastValue = lastTokenSnap.empty ? 0 : (lastTokenSnap.docs[0].data().tokennumber || 0);
           console.log(`Initializing counter for queue: ${queueId} with value: ${lastValue}`);
           await counterRef.set({
-            value: lastValue,
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+            tokennumber: lastValue,
+            // lastUpdated: admin.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         }
 
@@ -418,14 +418,14 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
           try {
             await admin.firestore().runTransaction(async (transaction) => {
               const snap = await transaction.get(counterRef);
-              const currentValue = snap.exists ? (snap.data().value || 0) : 0;
+              const currentValue = snap.exists ? (snap.data().tokennumber || 0) : 0;
               const next = currentValue + 1;
 
               // ✅ Only 1 read + 1 write — minimal contention window
               transaction.set(counterRef, {
-                value: next,
-                lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-                lastDelivery: newDocRef
+                tokennumber: next,
+                // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                // lastDelivery: newDocRef
               }, { merge: true });
 
               tokenno = next;

@@ -226,6 +226,14 @@ exports.ConvertUrltoHLS = onDocumentWritten({
     publitio.uploadRemoteFile({file_url: newData['videoUrl'], privacy: 1, option_hls: 1}).then(async data => {
       console.log("Video Change", data)
       if(data.code == 201){
+        var previousPublitioId = previousData["responsepublitio"] ? previousData["responsepublitio"]["id"] : null
+        if(previousPublitioId){
+          await publitio.call('/files/delete/' + previousPublitioId, 'DELETE').then(deleteData => {
+            console.log("Previous Publitio file deleted", previousPublitioId, deleteData)
+          }).catch(error => {
+            console.log("Error deleting previous Publitio file", previousPublitioId, error)
+          })
+        }
         await change.data.after.ref.update({
           convertedtohls: true,
           hsl_preview: data['url_preview'],
