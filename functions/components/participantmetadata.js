@@ -702,7 +702,7 @@ function arraysEqual(arr1, arr2) {
 exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation request/{docid}",async (change) => {
   let olddoc = change.data.before.data()
   let newdoc = change.data.after.data()
-  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid']
+  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid'];
   if([null,undefined].includes(olddoc)){console.log("onCreate");}
   else if(olddoc != null && newdoc != null){console.log('onUpdate');}
   else if([null,undefined].includes(newdoc)){console.log("onDelete");}
@@ -782,6 +782,7 @@ exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation r
     }
   }
 })
+
 
 exports.atcdata_to_pmd = onDocumentWritten({document: "atc_apha/{docid}", database: "firestore-atc"},async (change) => {
 
