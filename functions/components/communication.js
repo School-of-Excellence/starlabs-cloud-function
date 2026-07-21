@@ -4141,11 +4141,9 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     // Send push notification
     const profileIds = messageData['members'] || [];
     if (profileIds.length > 0) {
-      const channelSnap = await admin.firestore()
-        .collection('supportchat')
-        .doc(chatid)
-        .get();
+      const channelSnap = await admin.firestore().collection('supportchat').doc(chatid).get();
       const channelName = channelSnap.data()?.group_name;
+      
 
       await commonService.saveNotificationRecord({
         title:            `📢 ${channelName}`,
@@ -4160,9 +4158,11 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         notificationimage: null,
         metadata: {
             type:             'channel',
+            chatType:         'channel',
+            groupname:        channelName,
             channelid:        chatid,
             click_action:     'FLUTTER_NOTIFICATION_CLICK',
-            ...messageData,
+            // ...messageData,
             parameterConfig:  JSON.stringify(messageData['parameterConfig'] || []),
             buttons:          JSON.stringify(messageData['buttons'] || []),
             files:            JSON.stringify(messageData['files'] || []),
