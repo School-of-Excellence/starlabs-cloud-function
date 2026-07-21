@@ -513,12 +513,11 @@ exports.productNextModeUpdate = onSchedule({schedule : "05 00 * * *", region: "a
 })
 
 exports.onEventApprovalProductMode = onDocumentWritten("event participation request/{docid}", async (change) => {
-  console.log('onEventApprovalProductMode : ')
   var snapshot = change.data
   var beforeData = snapshot.before.exists ? snapshot.before.data() : {}
   var afterData = snapshot.after.exists ? snapshot.after.data() : {}
-  var nextmodedate
-  if(!["approved", "attended"].includes(beforeData["status"]) && ["approved", "attended"].includes(beforeData["status"])){
+  var nextmodedate = null;
+  if(!["approved", "attended"].includes(beforeData["status"]) && ["approved", "attended"].includes(afterData["status"])){
     var eventData = (await admin.firestore().doc(afterData["eventref"].path).get()).data()
     var eventStart = eventData["start_date"].toDate()
     var eventEnd = eventData["start_date"].toDate()
@@ -550,31 +549,37 @@ exports.onEventApprovalProductMode = onDocumentWritten("event participation requ
 
   }
 
-  console.log('request belong to an event : ', afterData['eventref']?.parent.id === 'event collection')
+  // console.log('request belong to an event : ', afterData['eventref']?.parent.id === 'event collection')
 
   if (change.data.after.exists) {
-    console.log('automatic communication starts');
+    
+    try {
+      // console.log('automatic communication starts');
 
-    const oldStatus = beforeData['status']?.toLowerCase() ?? null;
-    const currentStatus = afterData["status"]?.toLowerCase() ?? '';
-    const isEventReq = afterData['eventref']?.parent.id === 'event collection';
-    const isHeroEvent = afterData['heroevent'] ?? null;
-    const isStatusApproved = ([null, undefined, '' , 'requested'].includes(oldStatus) && currentStatus === 'approved');
+      let profileid = ![null, undefined].includes(beforeData) ? afterData['profileid'] : beforeData['profileid'];
+      const profileData = (await admin.firestore().doc(`profile_data/${profileid}`).get()).data();
+      const event = (await admin.firestore().doc(`event collection/${afterData['eventref']?.id}`).get()).data() ?? {};
+      const arenaEvent = (await admin.firestore().doc(`arena events/${afterData['arenaeventid']}`).get()).data() ?? {};
 
-    if (isEventReq && isHeroEvent && isStatusApproved) {
-      try {
-        
+      // console.log('Participant name : ', profileData['name']);
+      // console.log('Approved for event : ', event['name'])
+      // console.log('Arean Event : ', arenaEvent['title'])
+
+      const oldStatus = beforeData['status']?.toLowerCase() ?? null;
+      const currentStatus = afterData["status"]?.toLowerCase() ?? '';
+      const isEventReq = afterData['eventref']?.parent.id === 'event collection';
+      const isHeroEvent = arenaEvent['heroevent'] ?? null;
+      const isStatusApproved = ([null, undefined, '', 'requested'].includes(oldStatus) && currentStatus === 'approved');
+
+      // console.log(isEventReq, isHeroEvent, isStatusApproved);
+      
+      if (isEventReq && isHeroEvent && isStatusApproved) {
+  
         let emailTemplateAlias = 'template_for_approve_v1';
         let postMarkTemplateId = '45296277';
         let watiTemplate = 'approved_msg';
         let appNotificationTitle = `You're Approved for ${event['name'] ?? ''}`;
         let appNotificationMessage = `Your request to participate in ${event['name'] ?? ''} has been approved. We'll share the next steps and further details with you soon.`;
-
-        const profileData = (await admin.firestore().doc(`profile_data/${profileid}`).get()).data();
-        const event = (await admin.firestore().doc(`event collection/${afterData['eventref']?.id}`).get()).data() ?? {};
-
-        console.log('Participant name : ', profileData['name']);
-        console.log('Approved for event : ', event['name'])
 
         console.log('sending email');
 
@@ -676,9 +681,9 @@ exports.onEventApprovalProductMode = onDocumentWritten("event participation requ
           console.log('Error sending App Notification : ', error);
         }
 
-      } catch (error) {
-        console.log(error)
       }
+    } catch (error) {
+      console.log(error)
     }
   }
 })
