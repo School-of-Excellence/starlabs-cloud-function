@@ -3383,7 +3383,7 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc(docData['queueto'])
+  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc("tokennumber")
   const counterSnap = await queueTokenCounterRef.get()
   if(!counterSnap.exists){
     let lastValue = 0
@@ -3391,9 +3391,9 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
       lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
     })
     await queueTokenCounterRef.set({
-      value: lastValue,
-      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-      lastDelivery: null
+      tokennumber: lastValue,
+      // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      // lastDelivery: null
     },{merge:true})
   }
 
@@ -3477,12 +3477,12 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             try{
               await admin.firestore().runTransaction(async (transaction) => {
                 const counterTxnSnap = await transaction.get(queueTokenCounterRef)
-                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().value || 0) : 0
+                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().tokennumber || 0) : 0
                 const next = currentValue + 1
                 transaction.set(queueTokenCounterRef,{
-                  value: next,
-                  lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-                  lastDelivery: deliverablesRef
+                  tokennumber: next,
+                  // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  // lastDelivery: deliverablesRef
                 },{merge:true})
                 currentTokenNo = next
               })
