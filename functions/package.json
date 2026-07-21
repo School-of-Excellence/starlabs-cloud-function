@@ -27,6 +27,7 @@
     "atc:generation-preview": "node scripts/atc-generation-doc-preview.js",
     "atc:generate-for-queue": "node scripts/atc-generate-for-queue.js",
     "atc:validate-structure": "node scripts/atc-validate-structure.js",
+    "atc:rollup-reconcile": "node scripts/atc-rollup-reconcile.js",
     "graph:refresh": "$(cat graphify-out/.graphify_python) scripts/graphify-refresh.py",
     "graph:query": "graphify query"
   },
