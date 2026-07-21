@@ -3,8 +3,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
 const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./queue-required-stage-aiatc-creation/atc_helpers");
-const { resolveStageData } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { buildUpLifeAspirationReport, pickPreviousStage, crossedGenerateStages } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData, resolveActiveStages } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
 const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -445,23 +445,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai.
-    // Triggered for the stage that JUST completed (the previous stage). processStage
-    // gates internally on that stage's atcrequiredstages entry having generateatc===true.
+    // Ensure a queue_atc_generation doc exists for EVERY generateatc stage this
+    // token has already crossed — not just the one it happened to move past on THIS
+    // write.
+    //
+    // The old behaviour created a doc for a single transition (pickPreviousStage:
+    // the move from a generateatc stage to the stage right after it). Anything that
+    // didn't land on exactly that transition slipped through forever, with no retry:
+    // a stage skip / variation reorder, a form submitted after the move (own source
+    // empty at trigger time), a trigger error, or a crossing that predated the
+    // pipeline. processStage is idempotent (dedups on profile+token+queue+stage+
+    // sourceref), so re-checking every crossed generateatc stage on each token write
+    // is a self-healing reconciliation: a doc that already exists is a no-op, and a
+    // missing one is filled as soon as its own source resolves. (Still forward-only —
+    // a terminal token that never gets another write needs the one-time backfill.)
     try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
+      const activeStages = await resolveActiveStages(queueData, afterData, admin.firestore());
+      const stagesToEnsure = crossedGenerateStages(queueData, afterData["currentstage"], activeStages);
+      if (!stagesToEnsure.length){console.log("no crossed generateatc stage to ensure")}
+      for (const stage of stagesToEnsure){
         await processStage({
           queueData,
           queueRef: queueDocSnap.ref,
           tokenData: afterData,
           queueTokenId,
-          currentStage: previousStage,
+          currentStage: stage,
         });
       }
     }catch (error){
