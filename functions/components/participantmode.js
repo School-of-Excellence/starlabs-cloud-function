@@ -513,6 +513,7 @@ exports.productNextModeUpdate = onSchedule({schedule : "05 00 * * *", region: "a
 })
 
 exports.onEventApprovalProductMode = onDocumentWritten("event participation request/{docid}", async (change) => {
+  console.log('onEventApprovalProductMode : ')
   var snapshot = change.data
   var beforeData = snapshot.before.exists ? snapshot.before.data() : {}
   var afterData = snapshot.after.exists ? snapshot.after.data() : {}
@@ -547,6 +548,138 @@ exports.onEventApprovalProductMode = onDocumentWritten("event participation requ
       }
     }
 
+  }
+
+  console.log('request belong to an event : ', afterData['eventref']?.parent.id === 'event collection')
+
+  if (change.data.after.exists) {
+    console.log('automatic communication starts');
+
+    const oldStatus = beforeData['status']?.toLowerCase() ?? null;
+    const currentStatus = afterData["status"]?.toLowerCase() ?? '';
+    const isEventReq = afterData['eventref']?.parent.id === 'event collection';
+    const isHeroEvent = afterData['heroevent'] ?? null;
+    const isStatusApproved = ([null, undefined, '' , 'requested'].includes(oldStatus) && currentStatus === 'approved');
+
+    if (isEventReq && isHeroEvent && isStatusApproved) {
+      try {
+        
+        let emailTemplateAlias = 'template_for_approve_v1';
+        let postMarkTemplateId = '45296277';
+        let watiTemplate = 'approved_msg';
+        let appNotificationTitle = `You're Approved for ${event['name'] ?? ''}`;
+        let appNotificationMessage = `Your request to participate in ${event['name'] ?? ''} has been approved. We'll share the next steps and further details with you soon.`;
+
+        const profileData = (await admin.firestore().doc(`profile_data/${profileid}`).get()).data();
+        const event = (await admin.firestore().doc(`event collection/${afterData['eventref']?.id}`).get()).data() ?? {};
+
+        console.log('Participant name : ', profileData['name']);
+        console.log('Approved for event : ', event['name'])
+
+        console.log('sending email');
+
+        const clientModel = {
+          name: profileData['name'] ?? '',
+          eventname: event['name'] ?? ''
+        }
+
+        try {
+          await commonService.createEmailArchiveDocument({
+            emailData: clientModel,
+            datamodel: clientModel,
+            attachments: [],
+            emailTo: [profileData["email"]],
+            emailMap: { [profileData["email"]]: profileid },
+            fileURL: '',
+            from: 'fulfillment@antanoharini.com',
+            notes: '',
+            profileId: [profileid],
+            postmarkTemplateId: postMarkTemplateId,
+            templateAlias: emailTemplateAlias,
+          });
+          console.log('Successfully send Email');
+        } catch (error) {
+          console.log('Error sending email : ', error);
+        }
+
+        // wait configurations object
+        let waticontent = {
+          phonenumber: profileData['number'],
+          body: {
+            parameters: [
+              { name: 'name', },
+              { name: 'Event', value: event['name'] ?? '' },
+            ],
+            broadcast_name: watiTemplate,
+            template_name: watiTemplate
+          }
+        }
+
+        // parameter creation for wati communication
+        const parameterConfig = waticontent['body']['parameters'].map(param => {
+          if (param.name === 'name') {
+            return ({
+              excelColumn: null,
+              fillType: 'metadata',
+              metadataField: 'name',
+              name: param.name,
+              staticValue: null
+            })
+          } else {
+            return {
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }
+          }
+        });
+
+        console.log('Triggered Wati Archive Creation');
+
+        try {
+          await commonService.createWatiArchiveDocument({
+            numbers: [waticontent.phonenumber],
+            numbermap: { [`${waticontent.phonenumber}`]: profileid },
+            broadcastname: 'Individual',
+            paramFillMode: 'static',
+            parameterConfig: parameterConfig,
+            params: [],
+            profileid: [profileid],
+            templateid: null,
+            watitemplateid: watiTemplate,
+          });
+          console.log('Successfully send whatsapp')
+        } catch (error) {
+          console.log('Error sending Whatsapp : ', error);
+        }
+
+        console.log('sending app notification');
+
+        // app notification
+
+        try {
+          await commonService.saveNotificationRecord({
+            title: appNotificationTitle ?? '',
+            message: appNotificationMessage,
+            subtitle: null,
+            date: admin.firestore.FieldValue.serverTimestamp(),
+            landingpage: null,
+            logged: true,
+            profileid: [profileid],
+            sticky: false,
+            notificationimage: null,
+          });
+          console.log('Successfully send App Notification');
+        } catch (error) {
+          console.log('Error sending App Notification : ', error);
+        }
+
+      } catch (error) {
+        console.log(error)
+      }
+    }
   }
 })
 
