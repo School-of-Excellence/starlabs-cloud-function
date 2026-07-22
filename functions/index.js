@@ -81,6 +81,7 @@ exports.ticketCreated = clientIssueSystem.ticketCreated // c - "clientissue/{id}
 exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/{id}"
 exports.autoCloseTickets = clientIssueSystem.autoCloseTickets
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
+exports.slackDigest = clientIssueSystem.slackDigest // scheduler - 11.30AM and 6.30PM
 
 // Negligence rating + CS coaching functions were EXTRACTED to the customer-support
 // repo and now deploy from there (project starlabs-test, codebase "cs-coaching").
@@ -168,6 +169,7 @@ exports.biginvitationAccepted = queueSystem.biginvitationAccepted // u - "biginv
 exports.studioZoomLink = queueSystem.studioZoomLink // c - "live assignment/{id}"
 exports.studioZoomLinkDeactivate = queueSystem.studioZoomLinkDeactivate // u - "live assignment/{id}"
 exports.studioZoomLinkRegenerate = queueSystem.studioZoomLinkRegenerate // on request
+exports.clearParticipantReady = queueSystem.clearParticipantReady // onRequest — sendBeacon lobby-leave
 // exports.watiQueueWelcomeNotification = queueSystem.watiQueueWelcomeNotification // w - "/queue_token/{queuetokenid}"
 exports.queueParticipantPositionUpdate = queueSystem.queueParticipantPositionUpdate // c - "queue stage log/{queueStageLogId}"
 exports.particpantFormSubmit_SlackIntegration = queueSystem.particpantFormSubmit_SlackIntegration // c - "formsByClient/{id}" 
