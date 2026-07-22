@@ -176,6 +176,7 @@ exports.notifyMobileApp = onDocumentCreated({
         landingpage: notificationData["landingpage"],
         sticky: notificationData["sticky"],
         metaData,
+        receivingapp: receivingApp,
         recordid: snapshot.data.id
       });
     }
@@ -1204,6 +1205,7 @@ async function storeNotificationLogs(appUsers, data) {
         landingpage: data.landingpage,
         sticky: data.sticky,
         metadata: data.metaData,
+        receivingapp: data.receivingapp || null,
         read: false,
         recordid: data.recordid
       });
@@ -1298,10 +1300,11 @@ exports.SupportDeskToSlack = onDocumentCreated('/supportdesk/{docid}/messages/{m
   var url
   var snapshot = snapshotdata.data
   if(commonService.production){
-    url = commonService.slackLogSupport;
+    
+    url = await commonService.getWebhookUrl("slackLogSupport")
   }
   else{
-    url = commonService.slackDevTest
+    url = await commonService.getWebhookUrl("slackDevTest")
   }
 
   var webhook = new IncomingWebhook(url);
@@ -1830,244 +1833,516 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
   });
 
 });
-
 async function sendBatchEmailArchive(emailArchiveId, serversMap) {
- 
-  // ── 1. Fetch archive doc ─────────────────────────────────────────────────
-  let archiveData = null;
-  let newDocRef   = null;
- 
-  await admin.firestore().collection('email archive').doc(emailArchiveId).get().then((doc) => {
-    if (doc.exists) {
-      archiveData = doc.data();
-      newDocRef   = doc.ref;
-    }
-  });
- 
-  if (!archiveData || !newDocRef) {
-    return 'No Archive Data Found';
-  }
- 
-  // ── 2. Resolve Postmark server token ─────────────────────────────────────
-  const selectedSecret = serversMap[archiveData['servername']].value();
- 
-  if (!selectedSecret) {
-    console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
-    await newDocRef.update({ status: "failed", error: `Invalid server name: ${archiveData['servername']}` });
-    throw new Error(`Invalid server name: ${archiveData['servername']}`);
-  }
- 
-  const postmarkClient = new postmark.ServerClient(selectedSecret);
- 
-  // ── 3. Load participant metadata ─────────────────────────────────────────
-  const mapProfile      = {};
-  const mapProfileEmail = {};
- 
-  const query = archiveData['profileid'].length < 30
-    ? admin.firestore().collection("participant metadata").where('profileid', 'in', archiveData['profileid'])
-    : admin.firestore().collection("participant metadata");
- 
-  await query.get().then((snap) => {
-    snap.docs.forEach((d) => {
-      const p = d.data();
-      mapProfile[p['profileid']] = p;
-      mapProfileEmail[p['email']] = p;
-    });
-  });
- 
-  const datamodel       = archiveData.datamodel || {};
-  const variableConfigs = datamodel['_variableConfigs'] || {};
-  const sheetFileUrl    = datamodel['_sheetFileUrl'] || null;
- 
-  const needsSheet = Object.values(variableConfigs).some(src => src === 'sheet');
- 
-  // ── 4. Load sheet (if needed) ────────────────────────────────────────────
-  let sheetData = null;
- 
-  if (needsSheet && sheetFileUrl) {
-    try {
-      sheetData = await fetchAndParseSheet(sheetFileUrl);
-      console.log('Sheet data loaded successfully');
-    } catch (error) {
-      console.error('Error loading sheet data:', error);
-      await newDocRef.update({ status: "failed", error: "Failed to load sheet data" });
-      return 'Failed to load sheet data';
-    }
-  }
- 
-  // ── 5. Fetch and base64-encode attachments ───────────────────────────────
-  let postmarkAttachments = [];
- 
-  const rawAttachments = archiveData['postmarkAttachments'] || archiveData['attachments'] || [];
- 
-  if (rawAttachments.length > 0) {
-    console.log(`Processing ${rawAttachments.length} attachment(s)...`);
-    postmarkAttachments = await buildPostmarkAttachmentsFromUrls(rawAttachments);
-    console.log(`${postmarkAttachments.length} attachment(s) ready for Postmark`);
-  }
- 
-  // ── 6. Build per-recipient email list ────────────────────────────────────
-  const batchEmailList = [];
-  let   emailList      = [];
- 
-  for (let i = 0; i < archiveData['emailid'].length; i++) {
-    const profileId   = archiveData['profileid'][i];
-    const emailId     = archiveData['emailid'][i];
-    const profileData = mapProfile[profileId] || {};
- 
-    // ── Build the templateModel for this recipient ──────────────────────
-    let templateModel = {};
- 
-    // Legacy / automated path
-    if (archiveData.variableoption === 'automated') {
-      templateModel = Array.isArray(archiveData.datamodel) ? archiveData.datamodel : (archiveData.datamodel || []);
- 
-    } else if (Object.keys(variableConfigs).length > 0) {
-      // Per-variable source resolution
-      templateModel = buildPerVariableModel({
-        variableConfigs,
-        datamodel,
-        profileData,
-        emailId,
-        sheetData,
-      });
- 
-    } else {
-      // Legacy fallback (single variableoption)
-      if (archiveData.variableoption === 'static') {
-        templateModel = archiveData.datamodel || {};
- 
-      } else if (archiveData.variableoption === 'analytics') {
-        templateModel = extractAnalyticsVariables(profileData, archiveData.datamodel);
- 
-      } else if (archiveData.variableoption === 'sheet' && sheetData) {
-        templateModel = extractSheetVariables(archiveData['body'], emailId, sheetData);
- 
-      } else {
-        templateModel = extractTemplateVariables(archiveData['body'], profileData);
-      }
-    }
- 
-    console.log(`Variables for ${emailId}:`, templateModel);
- 
-    const mailOptions = {
-      From:          archiveData['from'] || "support@intl.soexcellence.com",
-      To:            emailId,
-      Cc: archiveData['cc'] || null,
-      Bcc: archiveData['bcc'] || null,
-      TemplateAlias: archiveData['templateid'],
-      TemplateModel: templateModel,
-      Tag:           archiveData['broadcastname'],
-      Attachments:   postmarkAttachments,
-    };
-    
-    // Batch in groups of 400 (Postmark limit)
-    if (i !== 0 && i % 400 === 0) {
-      batchEmailList.push(emailList);
-      emailList = [];
-    }
-    emailList.push(mailOptions);
-  }
-  batchEmailList.push(emailList);
- 
-  // ── 7. Send batches via Postmark ─────────────────────────────────────────
-  for (let i = 0; i < batchEmailList.length; i++) {
-    const mailelement = batchEmailList[i];
- 
-    try {
-      const info = await postmarkClient.sendEmailBatchWithTemplates(mailelement);
- 
-      console.log("Batch sent:", info);
- 
-      // Mark completed on last batch
-      if ((i + 1) === batchEmailList.length) {
-        await newDocRef.update({ status: "completed" })
-          .catch(err => console.error("Error marking completed:", err));
-      }
- 
-      // Collect message IDs and response map
-      const msgIds = info.map(e => e.MessageID).filter(Boolean);
-      const responseMap = info.reduce((acc, item) => {
-        if (item.To && item.MessageID) acc[item.To] = item.MessageID;
-        return acc;
-      }, {});
- 
-      await newDocRef.update({
-        postmark_msgid: msgIds.length === 0
-          ? []
-          : admin.firestore.FieldValue.arrayUnion(...msgIds),
-        response: responseMap,
-        sent: info.map(e => e.To).filter(Boolean),
-      }).catch(err => console.error("Error updating msgids:", err));
- 
-      // Write per-email send logs
-      const sentLogBatch = admin.firestore().batch();
- 
-      for (const log of info) {
-        const docRef = admin.firestore().collection("email logs").doc();
- 
-        if (log['ErrorCode'] === 406 || log['Message'] !== 'OK') {
-          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-          const emails = log['Message'].match(emailRegex) || [];
- 
-          sentLogBatch.set(docRef, {
-            email:          emails[0] || null,
-            profileid:      mapProfileEmail[emails[0]]?.['profileid'] || null,
-            postmark_msgid: log['MessageID'] || null,
-            msgstatus:      "not-sent",
-            errormsg:       log['Message'] || null,
-            templateid:     archiveData['templateid'],
-            emailarchiveid: archiveData['docid'],
-            time:           admin.firestore.FieldValue.serverTimestamp(),
-          });
-        } else {
-          sentLogBatch.set(docRef, {
-            email:          log['To'] || null,
-            profileid:      mapProfileEmail[log['To']]?.['profileid'] || null,
-            postmark_msgid: log['MessageID'] || null,
-            msgstatus:      "sent",
-            templateid:     archiveData['templateid'],
-            emailarchiveid: archiveData['docid'],
-            time:           admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-      }
-      
-      await sentLogBatch.commit().then(async()=>{
-        if (archiveData['participantjourneyproductid'] != null) {
-          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
-            emailsent: true
-          }).then(() => {
-            console.log('participantjourneyproduct updated Successfully');
-          }).catch((error) => {
-            console.error('Error while updating Participant Journey Product', error)
-          });
-        }
-      }).catch(async (err) =>  {
-        console.error("Error writing email logs:", err);
-        if (archiveData['participantjourneyproductid'] != null) {
-          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
-            emailsent: false
-          }).then(() => {
-            console.log('participantjourneyproduct updated Successfully');
-          }).catch((error) => {
-            console.error('Error while updating Participant Journey Product', error)
-          });
-        }
-      });
- 
-    } catch (error) {
-      console.error('Error sending email batch:', error);
-      await newDocRef.update({
-        ...archiveData,
-        mailstatus: 'not delivered',
-        error: error.message || 'Unknown error',
-      }).catch(err => console.error("Error updating archive:", err));
-    }
-  }
- 
-  return 'Emails Sent Successfully';
+
+  // ── 1. Fetch archive doc ─────────────────────────────────────────────────
+  let archiveData = null;
+  let newDocRef   = null;
+
+  await admin.firestore().collection('email archive').doc(emailArchiveId).get().then((doc) => {
+    if (doc.exists) {
+      archiveData = doc.data();
+      newDocRef   = doc.ref;
+    }
+  });
+
+  if (!archiveData || !newDocRef) {
+    return 'No Archive Data Found';
+  }
+
+  // ── 2. Resolve Postmark server token ─────────────────────────────────────
+  const selectedSecret = serversMap[archiveData['servername']]?.value();
+
+  if (!selectedSecret) {
+    console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
+    await newDocRef.update({ status: "failed", error: `Invalid server name: ${archiveData['servername']}` });
+    throw new Error(`Invalid server name: ${archiveData['servername']}`);
+  }
+
+  const postmarkClient = new postmark.ServerClient(selectedSecret);
+
+  // ── 3. Load participant metadata ─────────────────────────────────────────
+  const mapProfile      = {};
+  const mapProfileEmail = {};
+
+  const profileIds = archiveData['profileid'] || [];
+
+  const query = profileIds.length < 30
+    ? admin.firestore().collection("participant metadata").where('profileid', 'in', profileIds)
+    : admin.firestore().collection("participant metadata");
+
+  await query.get().then((snap) => {
+    snap.docs.forEach((d) => {
+      const p = d.data();
+      if (profileIds.includes(p['profileid'])) {
+        mapProfile[p['profileid']] = p;
+        mapProfileEmail[p['email']] = p;
+      }
+    });
+  });
+
+  // ── 3b. Fallback: look up missing profiles in new_user_data ──────────────
+  let missingIds = profileIds.filter(id => !mapProfile[id]);
+
+  if (missingIds.length > 0) {
+    console.log(`${missingIds.length} profile(s) not in participant metadata, checking new_user_data...`);
+
+    const fallbackQuery = missingIds.length < 30
+      ? admin.firestore().collection("new_user_data").where('profileid', 'in', missingIds)
+      : admin.firestore().collection("new_user_data");
+
+    await fallbackQuery.get().then((snap) => {
+      snap.docs.forEach((d) => {
+        const p = d.data();
+        if (missingIds.includes(p['profileid'])) {
+          mapProfile[p['profileid']] = p;
+          mapProfileEmail[p['email']] = p;
+        }
+      });
+    });
+
+    missingIds = missingIds.filter(id => !mapProfile[id]);
+  }
+
+  // ── 3c. Fail if any profile is in neither collection ─────────────────────
+  if (missingIds.length > 0) {
+    const msg = `Profile(s) not found in participant metadata or new_user_data: ${missingIds.join(', ')}`;
+    console.error(msg);
+    await newDocRef.update({ status: "failed", error: msg })
+      .catch(err => console.error("Error updating archive:", err));
+    throw new Error(msg);
+  }
+
+  const datamodel       = archiveData.datamodel || {};
+  const variableConfigs = datamodel['_variableConfigs'] || {};
+  const sheetFileUrl    = datamodel['_sheetFileUrl'] || null;
+
+  const needsSheet = Object.values(variableConfigs).some(src => src === 'sheet');
+
+  // ── 4. Load sheet (if needed) ────────────────────────────────────────────
+  let sheetData = null;
+
+  if (needsSheet && sheetFileUrl) {
+    try {
+      sheetData = await fetchAndParseSheet(sheetFileUrl);
+      console.log('Sheet data loaded successfully');
+    } catch (error) {
+      console.error('Error loading sheet data:', error);
+      await newDocRef.update({ status: "failed", error: "Failed to load sheet data" });
+      return 'Failed to load sheet data';
+    }
+  }
+
+  // ── 5. Fetch and base64-encode attachments ───────────────────────────────
+  let postmarkAttachments = [];
+
+  const rawAttachments = archiveData['postmarkAttachments'] || archiveData['attachments'] || [];
+
+  if (rawAttachments.length > 0) {
+    console.log(`Processing ${rawAttachments.length} attachment(s)...`);
+    postmarkAttachments = await buildPostmarkAttachmentsFromUrls(rawAttachments);
+    console.log(`${postmarkAttachments.length} attachment(s) ready for Postmark`);
+  }
+
+  // ── 6. Build per-recipient email list ────────────────────────────────────
+  const batchEmailList = [];
+  let   emailList      = [];
+
+  for (let i = 0; i < archiveData['emailid'].length; i++) {
+    const profileId   = archiveData['profileid'][i];
+    const emailId     = archiveData['emailid'][i];
+    const profileData = mapProfile[profileId] || {};
+
+    // ── Build the templateModel for this recipient ──────────────────────
+    let templateModel = {};
+
+    // Legacy / automated path
+    if (archiveData.variableoption === 'automated') {
+      templateModel = Array.isArray(archiveData.datamodel) ? archiveData.datamodel : (archiveData.datamodel || []);
+
+    } else if (Object.keys(variableConfigs).length > 0) {
+      // Per-variable source resolution
+      templateModel = buildPerVariableModel({
+        variableConfigs,
+        datamodel,
+        profileData,
+        emailId,
+        sheetData,
+      });
+
+    } else {
+      // Legacy fallback (single variableoption)
+      if (archiveData.variableoption === 'static') {
+        templateModel = archiveData.datamodel || {};
+
+      } else if (archiveData.variableoption === 'analytics') {
+        templateModel = extractAnalyticsVariables(profileData, archiveData.datamodel);
+
+      } else if (archiveData.variableoption === 'sheet' && sheetData) {
+        templateModel = extractSheetVariables(archiveData['body'], emailId, sheetData);
+
+      } else {
+        templateModel = extractTemplateVariables(archiveData['body'], profileData);
+      }
+    }
+
+    console.log(`Variables for ${emailId}:`, templateModel);
+
+    const mailOptions = {
+      From:          archiveData['from'] || "support@intl.soexcellence.com",
+      To:            emailId,
+      Cc: archiveData['cc'] || null,
+      Bcc: archiveData['bcc'] || null,
+      TemplateAlias: archiveData['templateid'],
+      TemplateModel: templateModel,
+      Tag:           archiveData['broadcastname'],
+      Attachments:   postmarkAttachments,
+    };
+
+    // Batch in groups of 400 (Postmark limit)
+    if (i !== 0 && i % 400 === 0) {
+      batchEmailList.push(emailList);
+      emailList = [];
+    }
+    emailList.push(mailOptions);
+  }
+  batchEmailList.push(emailList);
+
+  // ── 7. Send batches via Postmark ─────────────────────────────────────────
+  for (let i = 0; i < batchEmailList.length; i++) {
+    const mailelement = batchEmailList[i];
+
+    try {
+      const info = await postmarkClient.sendEmailBatchWithTemplates(mailelement);
+
+      console.log("Batch sent:", info);
+
+      // Mark completed on last batch
+      if ((i + 1) === batchEmailList.length) {
+        await newDocRef.update({ status: "completed" })
+          .catch(err => console.error("Error marking completed:", err));
+      }
+
+      // Collect message IDs and response map
+      const msgIds = info.map(e => e.MessageID).filter(Boolean);
+      const responseMap = info.reduce((acc, item) => {
+        if (item.To && item.MessageID) acc[item.To] = item.MessageID;
+        return acc;
+      }, {});
+
+      await newDocRef.update({
+        postmark_msgid: msgIds.length === 0
+          ? []
+          : admin.firestore.FieldValue.arrayUnion(...msgIds),
+        response: responseMap,
+        sent: info.map(e => e.To).filter(Boolean),
+      }).catch(err => console.error("Error updating msgids:", err));
+
+      // Write per-email send logs
+      const sentLogBatch = admin.firestore().batch();
+
+      for (const log of info) {
+        const docRef = admin.firestore().collection("email logs").doc();
+
+        if (log['ErrorCode'] === 406 || log['Message'] !== 'OK') {
+          const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+          const emails = log['Message'].match(emailRegex) || [];
+
+          sentLogBatch.set(docRef, {
+            email:          emails[0] || null,
+            profileid:      mapProfileEmail[emails[0]]?.['profileid'] || null,
+            postmark_msgid: log['MessageID'] || null,
+            msgstatus:      "not-sent",
+            errormsg:       log['Message'] || null,
+            templateid:     archiveData['templateid'],
+            emailarchiveid: archiveData['docid'],
+            time:           admin.firestore.FieldValue.serverTimestamp(),
+          });
+        } else {
+          sentLogBatch.set(docRef, {
+            email:          log['To'] || null,
+            profileid:      mapProfileEmail[log['To']]?.['profileid'] || null,
+            postmark_msgid: log['MessageID'] || null,
+            msgstatus:      "sent",
+            templateid:     archiveData['templateid'],
+            emailarchiveid: archiveData['docid'],
+            time:           admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      await sentLogBatch.commit().then(async () => {
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: true
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      }).catch(async (err) => {
+        console.error("Error writing email logs:", err);
+        if (archiveData['participantjourneyproductid'] != null) {
+          await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+            emailsent: false
+          }).then(() => {
+            console.log('participantjourneyproduct updated Successfully');
+          }).catch((error) => {
+            console.error('Error while updating Participant Journey Product', error)
+          });
+        }
+      });
+
+    } catch (error) {
+      console.error('Error sending email batch:', error);
+      await newDocRef.update({
+        ...archiveData,
+        mailstatus: 'not delivered',
+        error: error.message || 'Unknown error',
+      }).catch(err => console.error("Error updating archive:", err));
+    }
+  }
+
+  return 'Emails Sent Successfully';
 }
+// async function sendBatchEmailArchive(emailArchiveId, serversMap) {
+ 
+//   // ── 1. Fetch archive doc ─────────────────────────────────────────────────
+//   let archiveData = null;
+//   let newDocRef   = null;
+ 
+//   await admin.firestore().collection('email archive').doc(emailArchiveId).get().then((doc) => {
+//     if (doc.exists) {
+//       archiveData = doc.data();
+//       newDocRef   = doc.ref;
+//     }
+//   });
+ 
+//   if (!archiveData || !newDocRef) {
+//     return 'No Archive Data Found';
+//   }
+ 
+//   // ── 2. Resolve Postmark server token ─────────────────────────────────────
+//   const selectedSecret = serversMap[archiveData['servername']].value();
+ 
+//   if (!selectedSecret) {
+//     console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
+//     await newDocRef.update({ status: "failed", error: `Invalid server name: ${archiveData['servername']}` });
+//     throw new Error(`Invalid server name: ${archiveData['servername']}`);
+//   }
+ 
+//   const postmarkClient = new postmark.ServerClient(selectedSecret);
+ 
+//   // ── 3. Load participant metadata ─────────────────────────────────────────
+//   const mapProfile      = {};
+//   const mapProfileEmail = {};
+ 
+//   const query = archiveData['profileid'].length < 30
+//     ? admin.firestore().collection("participant metadata").where('profileid', 'in', archiveData['profileid'])
+//     : admin.firestore().collection("participant metadata");
+ 
+//   await query.get().then((snap) => {
+//     snap.docs.forEach((d) => {
+//       const p = d.data();
+//       mapProfile[p['profileid']] = p;
+//       mapProfileEmail[p['email']] = p;
+//     });
+//   });
+ 
+//   const datamodel       = archiveData.datamodel || {};
+//   const variableConfigs = datamodel['_variableConfigs'] || {};
+//   const sheetFileUrl    = datamodel['_sheetFileUrl'] || null;
+ 
+//   const needsSheet = Object.values(variableConfigs).some(src => src === 'sheet');
+ 
+//   // ── 4. Load sheet (if needed) ────────────────────────────────────────────
+//   let sheetData = null;
+ 
+//   if (needsSheet && sheetFileUrl) {
+//     try {
+//       sheetData = await fetchAndParseSheet(sheetFileUrl);
+//       console.log('Sheet data loaded successfully');
+//     } catch (error) {
+//       console.error('Error loading sheet data:', error);
+//       await newDocRef.update({ status: "failed", error: "Failed to load sheet data" });
+//       return 'Failed to load sheet data';
+//     }
+//   }
+ 
+//   // ── 5. Fetch and base64-encode attachments ───────────────────────────────
+//   let postmarkAttachments = [];
+ 
+//   const rawAttachments = archiveData['postmarkAttachments'] || archiveData['attachments'] || [];
+ 
+//   if (rawAttachments.length > 0) {
+//     console.log(`Processing ${rawAttachments.length} attachment(s)...`);
+//     postmarkAttachments = await buildPostmarkAttachmentsFromUrls(rawAttachments);
+//     console.log(`${postmarkAttachments.length} attachment(s) ready for Postmark`);
+//   }
+ 
+//   // ── 6. Build per-recipient email list ────────────────────────────────────
+//   const batchEmailList = [];
+//   let   emailList      = [];
+ 
+//   for (let i = 0; i < archiveData['emailid'].length; i++) {
+//     const profileId   = archiveData['profileid'][i];
+//     const emailId     = archiveData['emailid'][i];
+//     const profileData = mapProfile[profileId] || {};
+ 
+//     // ── Build the templateModel for this recipient ──────────────────────
+//     let templateModel = {};
+ 
+//     // Legacy / automated path
+//     if (archiveData.variableoption === 'automated') {
+//       templateModel = Array.isArray(archiveData.datamodel) ? archiveData.datamodel : (archiveData.datamodel || []);
+ 
+//     } else if (Object.keys(variableConfigs).length > 0) {
+//       // Per-variable source resolution
+//       templateModel = buildPerVariableModel({
+//         variableConfigs,
+//         datamodel,
+//         profileData,
+//         emailId,
+//         sheetData,
+//       });
+ 
+//     } else {
+//       // Legacy fallback (single variableoption)
+//       if (archiveData.variableoption === 'static') {
+//         templateModel = archiveData.datamodel || {};
+ 
+//       } else if (archiveData.variableoption === 'analytics') {
+//         templateModel = extractAnalyticsVariables(profileData, archiveData.datamodel);
+ 
+//       } else if (archiveData.variableoption === 'sheet' && sheetData) {
+//         templateModel = extractSheetVariables(archiveData['body'], emailId, sheetData);
+ 
+//       } else {
+//         templateModel = extractTemplateVariables(archiveData['body'], profileData);
+//       }
+//     }
+ 
+//     console.log(`Variables for ${emailId}:`, templateModel);
+ 
+//     const mailOptions = {
+//       From:          archiveData['from'] || "support@intl.soexcellence.com",
+//       To:            emailId,
+//       Cc: archiveData['cc'] || null,
+//       Bcc: archiveData['bcc'] || null,
+//       TemplateAlias: archiveData['templateid'],
+//       TemplateModel: templateModel,
+//       Tag:           archiveData['broadcastname'],
+//       Attachments:   postmarkAttachments,
+//     };
+    
+//     // Batch in groups of 400 (Postmark limit)
+//     if (i !== 0 && i % 400 === 0) {
+//       batchEmailList.push(emailList);
+//       emailList = [];
+//     }
+//     emailList.push(mailOptions);
+//   }
+//   batchEmailList.push(emailList);
+ 
+//   // ── 7. Send batches via Postmark ─────────────────────────────────────────
+//   for (let i = 0; i < batchEmailList.length; i++) {
+//     const mailelement = batchEmailList[i];
+ 
+//     try {
+//       const info = await postmarkClient.sendEmailBatchWithTemplates(mailelement);
+ 
+//       console.log("Batch sent:", info);
+ 
+//       // Mark completed on last batch
+//       if ((i + 1) === batchEmailList.length) {
+//         await newDocRef.update({ status: "completed" })
+//           .catch(err => console.error("Error marking completed:", err));
+//       }
+ 
+//       // Collect message IDs and response map
+//       const msgIds = info.map(e => e.MessageID).filter(Boolean);
+//       const responseMap = info.reduce((acc, item) => {
+//         if (item.To && item.MessageID) acc[item.To] = item.MessageID;
+//         return acc;
+//       }, {});
+ 
+//       await newDocRef.update({
+//         postmark_msgid: msgIds.length === 0
+//           ? []
+//           : admin.firestore.FieldValue.arrayUnion(...msgIds),
+//         response: responseMap,
+//         sent: info.map(e => e.To).filter(Boolean),
+//       }).catch(err => console.error("Error updating msgids:", err));
+ 
+//       // Write per-email send logs
+//       const sentLogBatch = admin.firestore().batch();
+ 
+//       for (const log of info) {
+//         const docRef = admin.firestore().collection("email logs").doc();
+ 
+//         if (log['ErrorCode'] === 406 || log['Message'] !== 'OK') {
+//           const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+//           const emails = log['Message'].match(emailRegex) || [];
+ 
+//           sentLogBatch.set(docRef, {
+//             email:          emails[0] || null,
+//             profileid:      mapProfileEmail[emails[0]]?.['profileid'] || null,
+//             postmark_msgid: log['MessageID'] || null,
+//             msgstatus:      "not-sent",
+//             errormsg:       log['Message'] || null,
+//             templateid:     archiveData['templateid'],
+//             emailarchiveid: archiveData['docid'],
+//             time:           admin.firestore.FieldValue.serverTimestamp(),
+//           });
+//         } else {
+//           sentLogBatch.set(docRef, {
+//             email:          log['To'] || null,
+//             profileid:      mapProfileEmail[log['To']]?.['profileid'] || null,
+//             postmark_msgid: log['MessageID'] || null,
+//             msgstatus:      "sent",
+//             templateid:     archiveData['templateid'],
+//             emailarchiveid: archiveData['docid'],
+//             time:           admin.firestore.FieldValue.serverTimestamp(),
+//           });
+//         }
+//       }
+      
+//       await sentLogBatch.commit().then(async()=>{
+//         if (archiveData['participantjourneyproductid'] != null) {
+//           await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+//             emailsent: true
+//           }).then(() => {
+//             console.log('participantjourneyproduct updated Successfully');
+//           }).catch((error) => {
+//             console.error('Error while updating Participant Journey Product', error)
+//           });
+//         }
+//       }).catch(async (err) =>  {
+//         console.error("Error writing email logs:", err);
+//         if (archiveData['participantjourneyproductid'] != null) {
+//           await admin.firestore().collection('participantjourneyproduct').doc(archiveData['participantjourneyproductid']).update({
+//             emailsent: false
+//           }).then(() => {
+//             console.log('participantjourneyproduct updated Successfully');
+//           }).catch((error) => {
+//             console.error('Error while updating Participant Journey Product', error)
+//           });
+//         }
+//       });
+ 
+//     } catch (error) {
+//       console.error('Error sending email batch:', error);
+//       await newDocRef.update({
+//         ...archiveData,
+//         mailstatus: 'not delivered',
+//         error: error.message || 'Unknown error',
+//       }).catch(err => console.error("Error updating archive:", err));
+//     }
+//   }
+ 
+//   return 'Emails Sent Successfully';
+// }
  
  
 // ════════════════════════════════════════════════════════════════════════════
@@ -3571,9 +3846,9 @@ exports.slackLoginEvent = onDocumentCreated("loginlog/{docid}",async (change) =>
   const data = change.data.data()
   let url = null
   if(commonService.production === true){
-    url = commonService.slackAppLogin
+    url = await commonService.getWebhookUrl("slackAppLogin")
   }else{
-    url = commonService.slackDevTest
+    url = await commonService.getWebhookUrl("slackDevTest")
   }
   if(url != null){
     const googleSheetsUrl = "https://script.google.com/a/macros/soexcellence.com/s/AKfycbxGoEUHufRqlcZEZ2hffcDYf07bnw9_Nr_Kmvz9qkNmcVcmdRTfCUkFoNKNjPgxUVAg/exec"
@@ -3853,6 +4128,54 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
   var chatid = snapshot.params.chatid;
   var messageData = snapshot.data.data();
   var sender_uid = messageData["sender_uid"];
+
+    // Handle notification for Channel Communication message in app
+  if (messageData['channelarchiveid']) {
+    console.log('Handling notification for channel Communication message in app');
+
+    await admin.firestore().collection("supportchat").doc(chatid).update({
+      last_modification: admin.firestore.FieldValue.serverTimestamp(),
+      last_sender_uid:   sender_uid,
+    }).catch(e => console.log('Chat error', e));
+
+    // Send push notification
+    const profileIds = messageData['members'] || [];
+    if (profileIds.length > 0) {
+      const channelSnap = await admin.firestore().collection('supportchat').doc(chatid).get();
+      const channelName = channelSnap.data()?.group_name;
+      
+
+      await commonService.saveNotificationRecord({
+        title:            `📢 ${channelName}`,
+        message:          `New update! Tap to view the message.`,
+        subtitle:         null,
+        date:             admin.firestore.FieldValue.serverTimestamp(),
+        landingpage:      null,
+        logged:           false,
+        profileid:        profileIds,
+        sticky:           false,
+        notificationtype: 'channel',
+        notificationimage: null,
+        metadata: {
+            type:             'channel',
+            chatType:         'channel',
+            groupname:        channelName,
+            channelid:        chatid,
+            click_action:     'FLUTTER_NOTIFICATION_CLICK',
+            // ...messageData,
+            parameterConfig:  JSON.stringify(messageData['parameterConfig'] || []),
+            buttons:          JSON.stringify(messageData['buttons'] || []),
+            files:            JSON.stringify(messageData['files'] || []),
+            links:            JSON.stringify(messageData['links'] || []),
+        }
+      });
+
+      console.log('Push notification queued for', profileIds.length, 'participants');
+    }
+
+    return;
+  }
+
 
   console.log("Message Data", messageData);
 
@@ -4209,14 +4532,13 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     let url;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
-        ? commonService.slackWorkshopsubscribersactivity
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
+        : await commonService.getWebhookUrl("slackDevTest");
     } else {
       url = commonService.production
-        ? commonService.slackWorkshopQandA
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopQandA")
+        : await commonService.getWebhookUrl("slackDevTest");
     }
-    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
 
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -4338,11 +4660,11 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const profilename = profile["name"];
     // var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"];
     // var workshopTitle = (await admin.firestore().doc(data["workshopref"].path).get()).data()["detailpage"]["title"];
-    // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+
     var url;
     // var workshopTitle = (await data["workshopref"].get()).data()["detailpage"]["title"];
     // let activeworkshop = (await data["workshopref"].get()).data()["active"];
-    // // var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+
     // const slackChannel = (await data["workshopref"].get()).data()["workshopactivitychannel"];
     // const workshopDoc = await data["workshopref"].get();
     const workshopDoc = await admin.firestore().doc(data["workshopref"].path).get();
@@ -4356,14 +4678,13 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     const slackChannel = workshopData['workshopactivitychannel'] || null;
     if (slackChannel === 'workshop-subscriber-activity') {
       url = commonService.production
-        ? commonService.slackWorkshopsubscribersactivity
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
+        : await commonService.getWebhookUrl("slackDevTest");
     } else {
       url = commonService.production
-        ? commonService.slackWorkshopQandA
-        : commonService.slackDevTest;
+        ? await commonService.getWebhookUrl("slackWorkshopQandA")
+        : await commonService.getWebhookUrl("slackDevTest");
     }
-    // var url =  commonService.slackDevTest;
     if (url != null) {
     // if (url != null && activeworkshop == true) {
       var webhook = new commonService.IncomingWebhook(url);
@@ -4402,7 +4723,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         res.status(400).send('Message is required');
         return;
       }
-      var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+      var url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopQandA") : await commonService.getWebhookUrl("slackDevTest");
       if (url != null) {
         var webhook = new commonService.IncomingWebhook(url);
         
@@ -5057,7 +5378,7 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
     const profile = await getProfileData(data["profileid"]);
     if (!profile) return;
     const profilename = profile["name"];
-    var url = commonService.production ? commonService.slackWorkshopQandA : commonService.slackDevTest;
+    var url = commonService.production ? await commonService.getWebhookUrl("slackWorkshopQandA") : await commonService.getWebhookUrl("slackDevTest");
     if (url != null) {
       var webhook = new commonService.IncomingWebhook(url);
       var message = `👤 *${profilename}* enquired | 📱 ${data["phone"]} | 🛒 ${product ?? "No Product"} | 💬 ${question}`;
@@ -5072,3 +5393,88 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       });
     }
   });
+
+  //Channel Communication in App
+  exports.AppChannelCommunication = onDocumentCreated('channelarchive/{docid}',
+    async (event) => {
+      const channelArchive   = event.data;
+      const channelData  = channelArchive.data();
+      const channelRef   = channelArchive.ref;
+      const senderName = (await admin.firestore().collection('profile_data').doc(channelData['createdby']).get()).data()?.['name'] || '';
+
+
+      console.log('AppChannelCommunication triggered for:', channelArchive.id);
+
+      if (channelData['status'] !== 'created') {
+        console.log('Skipping — status is not created:', channelData['status']);
+        return;
+      }
+
+      try {
+        const channelId       = channelData['channelid'];
+        const profileIds      = channelData['profileid']      || [];
+        const htmlbody        = channelData['htmlbody']        || '';
+        const textbody        = channelData['textbody']        || '';
+        const parameterConfig = channelData['parameterConfig'] || [];
+        const files           = channelData['files']           || [];
+        const links           = channelData['links']           || [];
+        const headertype      = channelData['headertype']      || null;
+        const headervalue     = channelData['headervalue']     || null;
+        const footer          = channelData['footer']          || null;
+        const buttons         = channelData['buttons']         || [];
+        const category        = channelData['category']        || '';
+
+        if (!channelId)         throw new Error('channelid is missing from archive');
+        if (!profileIds.length) throw new Error('profileid array is empty');
+
+        // Write to messages doc 
+        const msgRef = admin.firestore().collection('supportchat').doc(channelId).collection('messages').doc();
+
+        await msgRef.set({
+          messageid:        msgRef.id,
+          htmlbody:         htmlbody,
+          textbody:         textbody,
+          parameterConfig:  parameterConfig,
+          members:          profileIds,
+          pending:          profileIds,
+          read_by:          [],
+          sender_uid:       channelData['createdby'],
+          sender_name:      senderName,
+          files:            files,
+          links:            links,
+          headertype:       headertype,
+          headervalue:      headervalue,
+          footer:           footer,
+          buttons:          buttons,
+          category:         category,
+          templateid:       channelData['templateid'] || '',
+          time:             admin.firestore.FieldValue.serverTimestamp(),
+          channelarchiveid: channelArchive.id,
+        });
+
+        console.log('Message doc written:', msgRef.id);
+        const pendingCountUpdate = {};
+        for(const pid of profileIds){
+          pendingCountUpdate[`pendingcount.${pid}`] = admin.firestore.FieldValue.increment(1);
+        }
+        await admin.firestore().collection('supportchat').doc(channelId).update({
+          ...pendingCountUpdate,
+          last_message: textbody,
+        });
+        await channelRef.update({
+          status:    'sent',
+          sentat:    admin.firestore.FieldValue.serverTimestamp(),
+          messageid: msgRef.id,
+        });
+
+        console.log('AppChannelCommunication completed successfully');
+
+      } catch (err) {
+        console.error('AppChannelCommunication error:', err);
+        await channelRef.update({
+          status: 'error',
+          error:  err.message || 'Unknown error',
+        }).catch(e => console.error('Failed to update error status:', e));
+      }
+    }
+  );

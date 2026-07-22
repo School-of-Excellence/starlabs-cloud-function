@@ -29,7 +29,7 @@ const cors = require("cors");
 const { alertAtc } = require("../queue-required-stage-aiatc-creation/atc_alerts");
 const { requeueJob, DEFAULT_COLLECTION } = require("./pod_jobs");
 const { shouldStartPod } = require("../queue-required-stage-aiatc-creation/atc_helpers");
-const { launchPod, getPodBearer, terminatePod } = require("./pod_controller");
+const { launchPod, getPodBearer, terminatePod, getPodStatus } = require("./pod_controller");
 
 const corsHandler = cors({ origin: true });
 const sharedSecret = defineSecret("FUNCTIONS_SHARED_SECRET");
@@ -320,7 +320,11 @@ async function terminateAndReset(cfg, podid, collectionName, finalState = STATES
 }
 
 // ── atcPodLifecycle — the state-machine clock ────────────────────────────────
-// every 2 min: IDLE→launch gate (batched), LOADING→ready poll (+ load timeout).
+// PRIMARY job: the IDLE→launch gate (batched). LOADING→READY discovery and
+// failed-boot HALT are now driven by the controller PUSH (podWorkerUpdate
+// ready/unhealthy, fired the instant the pod reports in). The LOADING branch
+// below stays as a slow BACKSTOP — it only acts if a push was dropped — so the
+// 10-min cadence is fine (no need for a tight poll).
 exports.atcPodLifecycle = onSchedule(
   { schedule: "every 10 minutes", secrets: [sharedSecret] },
   async () => {
@@ -345,6 +349,33 @@ exports.atcPodLifecycle = onSchedule(
     if (state === STATES.READY) return; // drain Job owns this phase
 
     if (state === STATES.LOADING) {
+      // Fast-fail on a dead pod: ask the controller for the DURABLE pod status
+      // (Firestore pod_launches doc — survives termination). In LOADING the worker
+      // never terminates its OWN pod (self-terminates only happen from READY on
+      // drain/halt), so ANY status=failed OR status=terminated reported here means
+      // the pod is dead and will never become ready — whether it's a boot failure,
+      // a reconcile sweep (hung/gone), or a manual/out-of-band terminate
+      // (reason "manual"). HALT now instead of waiting out the 30-min load timeout.
+      // Soft: any controller/query error just falls through to the health poll +
+      // load-timeout guard below (unchanged behaviour).
+      try {
+        const ps = await getPodStatus(cfg.podid);
+        const crashed = ps && (ps.status === "failed" || ps.status === "terminated");
+        if (crashed) {
+          const why = ps.termination_reason || ps.failed_stage || `pod ${ps.status}`;
+          const reason = `pod ${ps.status} before ready (${why})`;
+          await markUnhealthy({ podid: cfg.podid, reason, collectionName });
+          await terminateAndReset(cfg, cfg.podid, collectionName, STATES.HALTED);
+          await alertAtc("critical", `Pod ${cfg.podid} ${ps.status} before ready (${why}) — halted, manual reset needed.`, {
+            stage: "PodLifecycle", webhookUrl: cfg.SLACK_WEBHOOK_URL,
+          });
+          return;
+        }
+      } catch (e) {
+        logger.warn("atcPodLifecycle: getPodStatus check failed — falling back to health/timeout",
+          { error: e.message, controllerStatus: e.controllerStatus });
+      }
+
       // Load-timeout guard: a pod stuck loading past the window is halted.
       const startedMs = toMillis(cfg.launchedAt) || toMillis(cfg.launchStartedAt);
       const loadTimeout = Number(cfg.loadTimeoutMinutes ?? DEFAULT_LOAD_TIMEOUT_MINUTES);

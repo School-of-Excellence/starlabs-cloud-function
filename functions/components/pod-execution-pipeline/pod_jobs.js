@@ -121,7 +121,7 @@ async function writeJobResult({ result, podId, modelName }) {
 //   attempts >= max → status:"error"   (leaves the pending pool permanently)
 // Ownership-guarded: won't stomp a job already re-claimed by another pod.
 // Returns {ok, requeued|errored, attempts, reason}.
-async function requeueJob({ collectionName, path, reason, podId, maxAttempts = DEFAULT_MAX_ATTEMPTS }) {
+async function requeueJob({ collectionName, path, reason, podId, maxAttempts = DEFAULT_MAX_ATTEMPTS, toBack = false }) {
   const ref = atcDb.doc(path);
   return atcDb.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -150,15 +150,21 @@ async function requeueJob({ collectionName, path, reason, podId, maxAttempts = D
       }, { merge: true });
       return { ok: true, errored: true, attempts };
     }
-    tx.set(ref, {
+    const requeue = {
       status: "pending",
       attempts,
       requeueReason: reason || "requeue",
       claimedBy: FieldValue.delete(),
       startedAt: FieldValue.delete(),
       lastupdatedat: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    return { ok: true, requeued: true, attempts };
+    };
+    // Retry-last: bump the FIFO sort key so the job goes to the BACK of the pending
+    // queue (claimNextJob orders by createdAt asc). Lets the drain make progress on
+    // other jobs before re-trying a (usually transient) empty output, instead of
+    // immediately re-claiming the same oldest doc and burning attempts back-to-back.
+    if (toBack) requeue.createdAt = FieldValue.serverTimestamp();
+    tx.set(ref, requeue, { merge: true });
+    return { ok: true, requeued: true, attempts, toBack };
   });
 }
 
