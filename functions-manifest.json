@@ -728,8 +728,9 @@
     },
     {
       "name": "seLiveTranscribeSubmit",
-      "type": "UNKNOWN",
+      "type": "onRequest",
       "file": "components/se_live_transcribe.js",
+      "triggerPath": "live assignment/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
