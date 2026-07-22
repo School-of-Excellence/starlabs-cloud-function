@@ -105,23 +105,55 @@ exports.watsonEventParticipation = onRequest({ cors: true }, async (req, res) =>
         const eventRef = db.collection('event collection').doc(eventid);
         const reqSnap = await db.collection('event participation request')
             .where('eventref', '==', eventRef)
-            .where('status', 'in', ['approved', 'attended'])
+            .where('status', 'in', ['approved'])
             .get();
 
         const rows = [];
-        const productRefs = [];
-        const seenProducts = new Set();
+        const arenaRefs = [];
+        const seenArena = new Set();
         reqSnap.docs.forEach((d) => {
             const x = d.data() || {};
             const productid = x.productref ? x.productref.id : null;
-            rows.push({ docid: x.docid || d.id, profileid: x.profileid || null, productid, status: x.status || null });
-            if (x.productref && productid && !seenProducts.has(productid)) {
-                seenProducts.add(productid);
-                productRefs.push(x.productref);
+            // arenaeventid on the participation request -> doc in `arena events`.
+            const arenaeventid = x.arenaeventid
+                ? (typeof x.arenaeventid === 'string' ? x.arenaeventid : (x.arenaeventid.id || null))
+                : null;
+            rows.push({
+                docid: x.docid || d.id, profileid: x.profileid || null,
+                productid, productref: x.productref || null, arenaeventid, status: x.status || null,
+            });
+            // Deduped: the requests for one event share (essentially) one arena event,
+            // so this is a single arena-events read regardless of participant count.
+            if (arenaeventid && !seenArena.has(arenaeventid)) {
+                seenArena.add(arenaeventid);
+                arenaRefs.push(db.collection('arena events').doc(arenaeventid));
             }
         });
 
-        // Join product names in one batched read.
+        // Read the referenced arena event(s); keep only participants whose arena
+        // event has heroevent === true.
+        const heroMap = {};
+        if (arenaRefs.length) {
+            const arenaDocs = await db.getAll(...arenaRefs);
+            arenaDocs.forEach((ad) => {
+                if (ad.exists) { heroMap[ad.id] = (ad.data() || {}).heroevent === true; }
+            });
+        }
+        const heroRows = rows.filter((r) => r.arenaeventid && heroMap[r.arenaeventid] === true);
+        // Not a hero event -> nothing to return; skip the product read entirely.
+        if (!heroRows.length) {
+            return res.status(200).json({ eventid, count: 0, participants: [] });
+        }
+
+        // Join product names in one batched read — only for the hero participants.
+        const productRefs = [];
+        const seenProducts = new Set();
+        heroRows.forEach((r) => {
+            if (r.productref && r.productid && !seenProducts.has(r.productid)) {
+                seenProducts.add(r.productid);
+                productRefs.push(r.productref);
+            }
+        });
         const productMap = {};
         if (productRefs.length) {
             const productDocs = await db.getAll(...productRefs);
@@ -130,7 +162,11 @@ exports.watsonEventParticipation = onRequest({ cors: true }, async (req, res) =>
             });
         }
 
-        const participants = rows.map((r) => ({ ...r, product: productMap[r.productid] || r.productid || '' }));
+        const participants = heroRows.map((r) => ({
+            docid: r.docid, profileid: r.profileid, productid: r.productid,
+            arenaeventid: r.arenaeventid, status: r.status,
+            product: productMap[r.productid] || r.productid || '',
+        }));
         return res.status(200).json({ eventid, count: participants.length, participants });
     } catch (err) {
         console.error('watsonEventParticipation error', err);
