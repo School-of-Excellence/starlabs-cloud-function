@@ -169,6 +169,13 @@
       "codebase": "default"
     },
     {
+      "name": "clearParticipantReady",
+      "type": "onRequest",
+      "file": "components/queuesystem.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
@@ -721,8 +728,9 @@
     },
     {
       "name": "seLiveTranscribeSubmit",
-      "type": "UNKNOWN",
+      "type": "onRequest",
       "file": "components/se_live_transcribe.js",
+      "triggerPath": "live assignment/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -793,6 +801,13 @@
       "type": "onDocumentCreated",
       "file": "components/clientissue.js",
       "triggerPath": "clientissue/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "slackDigest",
+      "type": "onSchedule",
+      "file": "components/clientissue.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
