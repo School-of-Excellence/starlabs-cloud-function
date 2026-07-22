@@ -3,8 +3,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
 const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./queue-required-stage-aiatc-creation/atc_helpers");
-const { resolveStageData } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { buildUpLifeAspirationReport, pickPreviousStage, crossedGenerateStages } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData, resolveActiveStages } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
 const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -446,23 +446,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai.
-    // Triggered for the stage that JUST completed (the previous stage). processStage
-    // gates internally on that stage's atcrequiredstages entry having generateatc===true.
+    // Ensure a queue_atc_generation doc exists for EVERY generateatc stage this
+    // token has already crossed — not just the one it happened to move past on THIS
+    // write.
+    //
+    // The old behaviour created a doc for a single transition (pickPreviousStage:
+    // the move from a generateatc stage to the stage right after it). Anything that
+    // didn't land on exactly that transition slipped through forever, with no retry:
+    // a stage skip / variation reorder, a form submitted after the move (own source
+    // empty at trigger time), a trigger error, or a crossing that predated the
+    // pipeline. processStage is idempotent (dedups on profile+token+queue+stage+
+    // sourceref), so re-checking every crossed generateatc stage on each token write
+    // is a self-healing reconciliation: a doc that already exists is a no-op, and a
+    // missing one is filled as soon as its own source resolves. (Still forward-only —
+    // a terminal token that never gets another write needs the one-time backfill.)
     try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
+      const activeStages = await resolveActiveStages(queueData, afterData, admin.firestore());
+      const stagesToEnsure = crossedGenerateStages(queueData, afterData["currentstage"], activeStages);
+      if (!stagesToEnsure.length){console.log("no crossed generateatc stage to ensure")}
+      for (const stage of stagesToEnsure){
         await processStage({
           queueData,
           queueRef: queueDocSnap.ref,
           tokenData: afterData,
           queueTokenId,
-          currentStage: previousStage,
+          currentStage: stage,
         });
       }
     }catch (error){
@@ -3426,10 +3434,19 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  let tokenno = null 
-  await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
-    tokenno = queueTokenSnap.docs[0].data()["tokennumber"]
-  })
+  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc("tokennumber")
+  const counterSnap = await queueTokenCounterRef.get()
+  if(!counterSnap.exists){
+    let lastValue = 0
+    await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
+      lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
+    })
+    await queueTokenCounterRef.set({
+      tokennumber: lastValue,
+      // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      // lastDelivery: null
+    },{merge:true})
+  }
 
   // every profile to deliverables && participantdeliverysequence && queuetoken && particpantproductstatus update&& close existing deliverables && add new product to that profile
   let batch = admin.firestore().batch()
@@ -3503,9 +3520,37 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
         if(delivery[0].type === "queue" && deliverablesRef != null){
           //create queue token
           const queuedocid = admin.firestore().collection("queue_token").doc().id
+          let currentTokenNo = null
+          let attempts = 0
+          const maxAttempts = 15
+          while(currentTokenNo === null && attempts < maxAttempts){
+            attempts++
+            try{
+              await admin.firestore().runTransaction(async (transaction) => {
+                const counterTxnSnap = await transaction.get(queueTokenCounterRef)
+                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().tokennumber || 0) : 0
+                const next = currentValue + 1
+                transaction.set(queueTokenCounterRef,{
+                  tokennumber: next,
+                  // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  // lastDelivery: deliverablesRef
+                },{merge:true})
+                currentTokenNo = next
+              })
+            }catch(error){
+              console.log(`Counter attempt ${attempts} failed for profile ${tokenelement['profile_id']}:`,error.message)
+              if(attempts >= maxAttempts){
+                console.error(`Failed to acquire token number after ${maxAttempts} attempts for profile: ${tokenelement['profile_id']}`)
+                break;
+              }
+              const delay = Math.min(50 * Math.pow(2,attempts) + Math.random() * 200, 5000)
+              await new Promise(resolve => setTimeout(resolve,delay))
+            }
+          }
+
           let queueData = {
             docid: queuedocid,
-            tokennumber: tokenno + 1 + i,
+            tokennumber: currentTokenNo,
             profile_name: tokenelement['profile_name'],
             profile_id: tokenelement['profile_id'],
             currentstage: queuefirststage,
