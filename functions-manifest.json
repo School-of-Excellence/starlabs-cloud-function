@@ -172,7 +172,7 @@
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
-      "triggerPath": "buffermix archive/{docid}",
+      "triggerPath": "/participantvideoask/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -1004,7 +1004,7 @@
     },
     {
       "name": "videoAskHLS",
-      "type": "onSchedule",
+      "type": "onDocumentCreated",
       "file": "components/content.js",
       "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
