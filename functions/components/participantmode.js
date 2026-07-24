@@ -575,17 +575,17 @@ exports.onEventApprovalProductMode = onDocumentWritten("event participation requ
       
       if (isEventReq && isHeroEvent && isStatusApproved) {
   
-        let emailTemplateAlias = 'template_for_approve_v1';
-        let postMarkTemplateId = '45296277';
-        let watiTemplate = 'approved_msg';
-        let appNotificationTitle = `You're Approved for ${event['name'] ?? ''}`;
-        let appNotificationMessage = `Your request to participate in ${event['name'] ?? ''} has been approved. We'll share the next steps and further details with you soon.`;
+        let emailTemplateAlias = 'eventapproval';
+        let postMarkTemplateId = '45827491';
+        let watiTemplate = 'event_approval';
+        let appNotificationTitle = `Congratulations! Your participation for ${event['name'] ?? ''} has been confirmed.`;
+        let appNotificationMessage = `We'll keep you updated with important information and guidelines as the event approaches.`;
 
         console.log('sending email');
 
         const clientModel = {
           name: profileData['name'] ?? '',
-          eventname: event['name'] ?? ''
+          event: event['name'] ?? ''
         }
 
         try {
@@ -613,7 +613,7 @@ exports.onEventApprovalProductMode = onDocumentWritten("event participation requ
           body: {
             parameters: [
               { name: 'name', },
-              { name: 'Event', value: event['name'] ?? '' },
+              { name: 'event', value: event['name'] ?? '' },
             ],
             broadcast_name: watiTemplate,
             template_name: watiTemplate
