@@ -3,8 +3,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
 const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./queue-required-stage-aiatc-creation/atc_helpers");
-const { resolveStageData } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { buildUpLifeAspirationReport, pickPreviousStage, crossedGenerateStages } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData, resolveActiveStages } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
 const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -143,7 +143,8 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
-        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        if (!isPrepStage && !isGuidedOrientation) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
@@ -445,23 +446,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai.
-    // Triggered for the stage that JUST completed (the previous stage). processStage
-    // gates internally on that stage's atcrequiredstages entry having generateatc===true.
+    // Ensure a queue_atc_generation doc exists for EVERY generateatc stage this
+    // token has already crossed — not just the one it happened to move past on THIS
+    // write.
+    //
+    // The old behaviour created a doc for a single transition (pickPreviousStage:
+    // the move from a generateatc stage to the stage right after it). Anything that
+    // didn't land on exactly that transition slipped through forever, with no retry:
+    // a stage skip / variation reorder, a form submitted after the move (own source
+    // empty at trigger time), a trigger error, or a crossing that predated the
+    // pipeline. processStage is idempotent (dedups on profile+token+queue+stage+
+    // sourceref), so re-checking every crossed generateatc stage on each token write
+    // is a self-healing reconciliation: a doc that already exists is a no-op, and a
+    // missing one is filled as soon as its own source resolves. (Still forward-only —
+    // a terminal token that never gets another write needs the one-time backfill.)
     try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
+      const activeStages = await resolveActiveStages(queueData, afterData, admin.firestore());
+      const stagesToEnsure = crossedGenerateStages(queueData, afterData["currentstage"], activeStages);
+      if (!stagesToEnsure.length){console.log("no crossed generateatc stage to ensure")}
+      for (const stage of stagesToEnsure){
         await processStage({
           queueData,
           queueRef: queueDocSnap.ref,
           tokenData: afterData,
           queueTokenId,
-          currentStage: previousStage,
+          currentStage: stage,
         });
       }
     }catch (error){
@@ -695,14 +704,14 @@ exports.onQueueStageChange = onDocumentWritten({
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
-          }else if(queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link'){
+          } else if (queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link') {
             console.log("action type link");
             //email
             let clientModel = {
-              name:profiledata['name'],
-              stage:afterData['currentstage'],
-              url:queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
-              productname:afterData['productname']
+              name: profiledata['name'],
+              stage: afterData['currentstage'],
+              url: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
+              productname: afterData['productname']
             }
             console.log("sending link email");
             // await commonService.postmarkClient.sendEmailWithTemplate({
@@ -715,25 +724,25 @@ exports.onQueueStageChange = onDocumentWritten({
             // });
 
             await commonService.createEmailArchiveDocument({
-              emailData : clientModel,
-              datamodel : clientModel,
-              attachments : [],
-              emailTo : [profiledata["email"]],
-              emailMap : {[profiledata["email"]] : profiledata['profileid']},
-              fileURL : '',
-              from:'starlabs@excellenceinstallation.com',
-              notes : '',
-              profileId : [profileid],
+              emailData: clientModel,
+              datamodel: clientModel,
+              attachments: [],
+              emailTo: [profiledata["email"]],
+              emailMap: { [profiledata["email"]]: profiledata['profileid'] },
+              fileURL: '',
+              from: 'starlabs@excellenceinstallation.com',
+              notes: '',
+              profileId: [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link',
+              templateAlias: 'queue_stage_actiontype_link',
               type: 'queue',
-              metadata: {...afterData}
+              metadata: { ...afterData }
             });
 
             // mobileapp
             console.log("sending app notification");
             await commonService.saveNotificationRecord({
-              title: "Hello "+profiledata['name'],
+              title: "Hello " + profiledata['name'],
               message: `You are ready for the ${afterData['currentstage']} stage, Our specialist will invite you for the ${afterData['currentstage']}, and you’ll receive the call link via WhatsApp and Email.`,
               subtitle: null,
               date: admin.firestore.FieldValue.serverTimestamp(),
@@ -743,7 +752,7 @@ exports.onQueueStageChange = onDocumentWritten({
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {...afterData},
+              metadata: { ...afterData },
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -753,47 +762,89 @@ exports.onQueueStageChange = onDocumentWritten({
             //   logtype: null
             // })
             //wati
-            let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
-            let waticontent = {
-              phonenumber : `${profiledata['number']}`,
-              body : {
-                parameters: [
-                  {name: 'name', value: profiledata['name']},
-                  {name: 'stage', value: afterData['currentstage']},
-                  {name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource']}
-                ],
-                broadcast_name: 'queue_stage_linktype_v4',
-                template_name: 'queue_stage_linktype_v4'
+            let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+            if (afterData['currentstage'] === 'In Evolution Mapping Activity') {
+              console.log("sending evolution mapping template");
+
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] }
+                  ],
+                  broadcast_name: 'em_now_available_48hrs',
+                  template_name: 'em_now_available_48hrs'
+                }
               }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'em_now_available_48hrs',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
+
+              await admin.firestore().collection("liveevolutionmapping").doc(profileid).set({
+                lastupdated: admin.firestore.FieldValue.serverTimestamp(),
+              }, { merge: true });
+
+            } else {
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] },
+                    { name: 'stage', value: afterData['currentstage'] },
+                    { name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'] }
+                  ],
+                  broadcast_name: 'queue_stage_linktype_v4',
+                  template_name: 'queue_stage_linktype_v4'
+                }
+              }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'queue_stage_linktype_v4',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
             }
-            console.log('wati content',waticontent);
-            // await commonService.sendToWhatsappViaWati(waticontent);
-
-          
-            const parameterConfig = waticontent['body']['parameters'].map(param => ({
-              excelColumn: null,
-              fillType: 'static',
-              metadataField: null,
-              name: param.name,
-              staticValue: param.value
-            }));
-            console.log('Triggered Wati Archive Creation');
-
-            const response = await commonService.createWatiArchiveDocument({
-              numbers: [parseInt(waticontent['phonenumber'])],
-              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-              broadcastname: 'Individual',
-              paramFillMode: 'static',
-              parameterConfig: parameterConfig,
-              params: [],
-              profileid: [profileid],
-              templateid: null,
-              watitemplateid: 'queue_stage_linktype_v4',
-              type: 'queue',
-              metadata: {...afterData}
-            });
-            console.log('WATI ARCHIVE RESPONSE', response);
-            
           } //action type link
         }
       }
@@ -2645,6 +2696,18 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
         if (joined) { spec.joinedAt = now; spec.joinedAtZoom = zoomTime; spec.leftAt = null; }
         else { spec.leftAt = now; spec.leftAtZoom = zoomTime; }
         patch.specialists = { [key]: spec };
+      }
+
+      // Fast "call ended" signal. When the host ends the meeting for everyone, the
+      // disconnect arrives here as a participant_left whose `leave_reason` reads like
+      // "Host ended the meeting" — and it fires well before the separate
+      // meeting.ended webhook (which Zoom is slow to emit for a host-only/empty
+      // meeting, ~10s). Stamp meetingEndedAt from this fast event so the studio flips
+      // to "ended" immediately even when no participant ever joined. A plain leave
+      // (specialist stepping out) has a different reason, so this never mis-fires.
+      if (!joined && /ended the meeting/i.test(p.leave_reason || '')) {
+        patch.meetingEndedAt = now;
+        patch.endedMeetingId = meetingId != null ? Number(meetingId) : null;
       }
 
       await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
