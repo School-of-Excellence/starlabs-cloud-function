@@ -529,10 +529,10 @@ exports.watiQueueWelcomeNotification = onDocumentWritten("/queue_token/{queuetok
           if(!excludequeuestage.includes(newdoc['currentstage'])){
             var url
             if(commonService.production){
-              url = commonService.slackEvent // Production
+              url = await commonService.getWebhookUrl("slackEvent") // Production
             }
             else{
-              url = commonService.slackDevTest // Test
+              url = await commonService.getWebhookUrl("slackDevTest") // Test
             }
             if(url != undefined){
               var webhook = new commonService.IncomingWebhook(url);
@@ -1535,103 +1535,89 @@ async function updateParticipantMetadataTierAccess(profileidArg,path){
   }
 }
 
-exports.testVoipCall = onRequest(async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-
-  const email  = req.query.email  || req.body.email;
-  const action = req.query.action || req.body.action || 'trigger';
-  const stage  = req.query.stage  || req.body.stage  || 'Test Stage';
-
-  if (!email) {
-    res.status(400).json({ error: 'email is required' });
-    return;
+exports.slackContentConsumption = onDocumentCreated("content analytics/{docid}", async (document) => {
+  var snapshot = document.data
+  var data = snapshot.data()
+  var videoname = data["videoname"]
+  var profilename = (await admin.firestore().collection("profile_data").doc(data["profileid"]).get()).data()["name"]
+  var url = null
+  if(commonService.production){
+    url = await commonService.getWebhookUrl("slackLogVideoWatch")
   }
-
-  const tokenSnap = await admin.firestore()
-    .collection('FCM_token')
-    .where('email', '==', email)
-    .where('active', '==', true)
-    .limit(1)
-    .get();
-
-  if (tokenSnap.empty) {
-    res.status(404).json({ error: 'No active FCM token found for ' + email });
-    return;
+  else{
+    url = await commonService.getWebhookUrl("slackDevTest")
   }
-
-  const fcmToken = tokenSnap.docs[0].data().FCM_id;
-
-  await admin.messaging().send({
-    token: fcmToken,
-    android: { priority: 'high' },
-    data: {
-      type:      'studio_invitation_call',
-      action:    action,
-      docid:     'test-doc-' + Date.now().toString(),
-      localtest: 'true',
-      stage:     stage,
-    }
-  });
-
-  res.json({
-    success: true,
-    message: action === 'trigger'
-      ? 'Call triggered to ' + email
-      : 'Call cut for ' + email
-  });
-});
-
-exports.testVoipCallnew = onRequest(async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-
-  console.log('Incoming request params:', JSON.stringify(req.query));
-  console.log('Incoming request body:', JSON.stringify(req.body));
-
-  const email  = req.query.email  || req.body.email;
-  const action = req.query.action || req.body.action || 'trigger';
-  const stage  = req.query.stage  || req.body.stage  || 'Test Stage';
-
-  if (!email) {
-    res.status(400).json({ error: 'email is required' });
-    return;
+  if(url != null){
+    var webhook = new commonService.IncomingWebhook(url);
+    var message = `${profilename} has started ${data["type"] == "solarvoice" ? "Listening to" : "watching the video"} - ${videoname}
+    To get full details:
+    https://app.posthog.com/person/${data['profileid']}#activeTab=events
+    `;
+    console.log(message.toString())
+    webhook.send(message, function(err, header, statusCode, body) {
+      if (err) {
+        console.log('Error:', err);
+      } else {
+        console.log('Received', statusCode, 'from Slack');
+      }
+    });
   }
+})
 
-  const tokenSnap = await admin.firestore()
-    .collection('FCM_token')
-    .where('email', '==', email)
-    .where('active', '==', true)
-    .limit(1)
-    .get();
-
-  if (tokenSnap.empty) {
-    res.status(404).json({ error: 'No active FCM token found for ' + email });
-    return;
+exports.slackInterimCrossOver = onDocumentCreated("/interim crossover/{docid}",async (snap) => {
+  var context = snap.data
+  const data = context.data()
+  let url = null
+  if(commonService.production === true){
+    url = await commonService.getWebhookUrl("slackEvolutionProgress") // production
+  }else{
+    url = await commonService.getWebhookUrl("slackDevTest") //test
   }
-
-  const fcmToken = tokenSnap.docs[0].data().FCM_id;
-  const docid = 'test-doc-' + Date.now().toString();
-
-  await admin.messaging().send({
-    token: fcmToken,
-    android: { priority: 'high' },
-    data: {
-      type:      'studio_invitation_call',
-      action:    action,
-      docid:     docid,
-      localtest: 'true',
-      stage:     stage,
-    }
-  });
-
-  res.json({
-    success: true,
-    message: action === 'trigger'
-      ? 'Call triggered to ' + email
-      : 'Call cut for ' + email,
-    docid,
-  });
-});
-
+  if(url != null){
+    // admin.firestore().collection("participant AEL").doc(newData[data['aelid']]).get().then(snap => {
+      // if(snap.exists){
+        admin.firestore().collection("profile_data").doc(data['profileid']).get().then( profileSnap => {
+          if(profileSnap.exists){
+            let message = {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": `*${profileSnap.data()['name']}*`
+                  }
+                },
+                {
+                  "type": "rich_text",
+                  "elements": []
+                }
+              ]
+            }
+            for (const key in data['metric']) {
+              message.blocks[0].elements.push({
+                  "type": "rich_text_section",
+                  "elements": [
+                    {
+                      "type": "text",
+                      "text": `${key} : ${data['metric']['startpoint']} to ${data['metric']['endpoint']}`
+                    }
+                  ]
+                })
+            }
+            var webhook = new commonService.IncomingWebhook(url);
+            webhook.send(message,function(err, header, statusCode, body) {
+              if (err) {
+                console.log('Error:', err);
+              } else {
+                console.log('Received', statusCode, 'from Slack');
+              }
+            });
+          }else console.log("profile data doc not found");
+        })
+      // }else console.log("participant AEL doc not found");
+    // })
+  }
+})
 
 /*
 exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (snapshotdata) =>{

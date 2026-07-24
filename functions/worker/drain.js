@@ -25,7 +25,8 @@ const admin = require("firebase-admin");
 if (!admin.apps.length) admin.initializeApp();
 
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { claimNextJob, writeJobResult, requeueJob, DEFAULT_COLLECTION } = require("../components/pod_jobs");
+const { claimNextJob, writeJobResult, requeueJob, DEFAULT_COLLECTION } = require("../components/pod-execution-pipeline/pod_jobs");
+const { validateAtcStructure } = require("../components/queue-required-stage-aiatc-creation/atc_helpers");
 
 const db = admin.firestore();
 const WORKER_DOC = "pod_worker";
@@ -77,23 +78,30 @@ async function callInfer({ apiUrl, bearerToken, model, maxTokens, job }) {
 // Best-effort signal to the cloud function that the queue is drained so it can
 // terminate the pod (the function holds the controller credentials; the Job does
 // not). If unreachable, the controller's own idle watchdog tears the pod down.
-async function signalDrained(podid) {
+// Best-effort lifecycle push to the cloud function (it holds the controller
+// credentials; the Job does not).
+//   event "drained" → queue empty  → terminate pod → state IDLE (may relaunch)
+//   event "halt"    → job budget hit → terminate pod → state HALTED (needs
+//                     a manual reset before it will run again; leftover jobs
+//                     stay `pending`, nothing is requeued/lost)
+// If unreachable, the controller's own idle watchdog tears the pod down.
+async function signalLifecycle(podid, event, detail) {
   const url = process.env.PODWORKER_UPDATE_URL;
   const apiKey = process.env.FUNCTIONS_SHARED_SECRET;
   if (!url || !apiKey) {
-    console.log("drain: PODWORKER_UPDATE_URL/secret not set — skipping drained signal (idle watchdog will reap)");
+    console.log(`drain: PODWORKER_UPDATE_URL/secret not set — skipping ${event} signal (idle watchdog will reap)`);
     return;
   }
   try {
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-      body: JSON.stringify({ podid, event: "drained" }),
+      body: JSON.stringify({ podid, event, detail }),
       signal: AbortSignal.timeout(30000),
     });
-    console.log("drain: drained signal sent", { status: r.status });
+    console.log(`drain: ${event} signal sent`, { status: r.status });
   } catch (e) {
-    console.warn("drain: drained signal failed", { error: e.message });
+    console.warn(`drain: ${event} signal failed`, { error: e.message });
   }
 }
 
@@ -104,6 +112,10 @@ async function main() {
   const maxAttempts = Number(cfg.maxAttempts || 3);
   const model = cfg.model || "unknown";
   const maxTokens = Number(cfg.maxTokens || 0) || undefined;
+  // Optional per-run job budget: stop after this many successful jobs and HALT
+  // the worker (needs a manual reset) instead of draining the whole queue.
+  // 0 / unset = unlimited (drain until empty, the original behaviour).
+  const maxJobsPerRun = Number(cfg.maxJobsPerRun || 0);
 
   if (cfg.state !== "READY" || !podid || !apiUrl || !bearerToken) {
     console.log("drain: not READY or missing pod info — exiting", { state: cfg.state });
@@ -111,7 +123,8 @@ async function main() {
   }
 
   let processed = 0;
-  // Drain loop — exits when no pending jobs remain.
+  let budgetHalt = false;
+  // Drain loop — exits when no pending jobs remain (or the job budget is hit).
   for (;;) {
     const job = await claimNextJob({ collectionName, podId: podid });
     if (!job) break; // drained → done
@@ -120,12 +133,34 @@ async function main() {
 
     try {
       const result = await callInfer({ apiUrl, bearerToken, model, maxTokens, job });
+      // Quality gate: only a well-formed ATC counts as done. Reject BOTH an empty
+      // response AND a non-empty one that lacks a usable ATC structure — e.g. the
+      // reasoning model exhausts its context and stops before emitting the
+      // ---JSON--- block, or emits truncated/unparseable JSON. Finalizing either
+      // would ship a blank-structure ATC that never regenerates. Requeue to the
+      // BACK of the queue, attempts-capped, so we try other jobs first and give
+      // this one another shot later. Doesn't count toward the per-run job budget
+      // (only a real ATC does).
+      const structure = validateAtcStructure(result.output);
+      if (!structure.ok) {
+        const r = await requeueJob({
+          collectionName, path: job.path, reason: `bad atc output: ${structure.reason}`, podId: podid,
+          maxAttempts, toBack: true,
+        });
+        console.warn("drain: bad atc output — requeued to back", { job: job.jobId, reason: structure.reason, attempts: r.attempts, errored: !!r.errored });
+        continue; // try the next job; a malformed ATC is not a completed job
+      }
       await writeJobResult({
         result: { path: job.path, ...result },
         podId: podid,
         modelName: model,
       });
       processed++;
+      if (maxJobsPerRun > 0 && processed >= maxJobsPerRun) {
+        budgetHalt = true;
+        console.log("drain: job budget reached — halting", { processed, maxJobsPerRun });
+        break;
+      }
     } catch (e) {
       // Inference failed/timed out → requeue with attempts cap (poison-pill safe).
       const r = await requeueJob({
@@ -139,10 +174,15 @@ async function main() {
   }
 
   await workerRef().set({ currentJobPath: FieldValue.delete(), workerRunning: false, lastUpdateAt: FieldValue.serverTimestamp() }, { merge: true });
-  console.log("drain: finished", { processed });
+  console.log("drain: finished", { processed, budgetHalt });
   // Tell the cloud function to terminate the pod via the controller (it holds the
   // deployer credentials). Falls back to the controller idle watchdog if missed.
-  await signalDrained(podid);
+  //   budget hit → HALT (won't relaunch); queue empty → normal drained → IDLE.
+  if (budgetHalt) {
+    await signalLifecycle(podid, "halt", `job budget reached (${processed})`);
+  } else {
+    await signalLifecycle(podid, "drained");
+  }
 }
 
 main().then(() => process.exit(0)).catch((e) => {

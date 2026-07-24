@@ -27,7 +27,7 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
       const awsSecret = AWS_SECRET.value();
 
       const s3 = new AWS_ClientS3.S3Client({
-        region: "us-east-1",
+        region: "ap-south-1",
         credentials: {
           accessKeyId: awsAccessKey,
           secretAccessKey: awsSecret,
@@ -35,14 +35,14 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
       });
 
       const command = new AWS_ClientS3.GetObjectCommand({
-        Bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-meet-recordings-test",
+        Bucket: commonService.production ? "openvidu-meet-recordings-prod" : "openvidu-meet-recordings-dev",
         Key: videoKey,
       });
 
-      const url = await AWS_S3Request.getSignedUrl(s3, command, { expiresIn: 300 }); // 5 min
+      const url = await AWS_S3Request.getSignedUrl(s3, command, { expiresIn: 600 }); // 10 min
       res.status(200).json({ url });
     } catch (error) {
-      console.error("unable to Get Signed URL:", error);
+      console.error("Unable to Get Signed URL:", error);
       return res.status(500).json({ error: error.message || error.toString() });
     }
   })

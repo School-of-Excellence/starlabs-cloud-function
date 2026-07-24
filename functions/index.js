@@ -3,7 +3,7 @@ const commonService = require("./components/service");
 const ticketSystem = require("./components/ticketsystem");
 const achievementSystem = require("./components/achievements");
 const appointmentSystem = require("./components/appointment");
-const atcSystem = require("./components/ATC");
+const atcSystem = require("./components/queue-required-stage-aiatc-creation/ATC");
 const bigAssignmentSystem = require("./components/big-assignment");
 const bigLevelAggregate = require("./components/big-level-aggregate");
 const clientIssueSystem = require("./components/clientissue");
@@ -23,16 +23,15 @@ const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
-const runpodLLMRunning = require("./components/runpod_ai")
-const queue_atc_generation = require("./components/queue_atc_generation")
-const podWorker = require("./components/pod_worker")
-const seAtcUsage = require("./scope-enhancement-atc-pipeline/se_atc_usage")
-const StudioCall = require("./components/cutStudiocall")
+const runpodLLMRunning = require("./components/pod-execution-pipeline/runpod_ai")
+const queue_atc_generation = require("./components/queue-required-stage-aiatc-creation/queue_atc_generation")
+const podWorker = require("./components/pod-execution-pipeline/pod_worker")
+const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
+const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
+const seLiveTranscribe = require("./components/se_live_transcribe")
+const changework = require("./components/livechangeworknoti")
 
-//Voipcalls
-// exports.testVoipCall = appointmentSystem.testVoipCall;
-// exports.testVoipCallnew = appointmentSystem.testVoipCallnew;
-exports.cutStudioCall = StudioCall.cutStudioCall
+exports.liveChangeWorkStatusNotification = changework.liveChangeWorkStatusNotification;
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -63,7 +62,9 @@ exports.appointmentremainder = appointmentSystem.appointmentremainder // schedul
 exports.procedureOnWrite = atcSystem.procedureOnWrite // w - "/atc_alpha/{atc_id}/corrections/{adjustmentid}/procedures/{procedureid}"
 exports.validateATCtoAlpha = atcSystem.validateATCtoAlpha // u - "atc_to_validate/{id}"
 exports.updateAuthorUIDInAtcAlpha = atcSystem.updateAuthorUIDInAtcAlpha // w - "atc_alpha/{atcalphaid}"
-exports.onAtcAlphaCreate = atcSystem.onAtcAlphaCreate // c - "atc_alpha/{atcid}"
+// REMOVED (2026-07-01 scope-down): rubrics scoring (S3) — onAtcAlphaCreate +
+// processAtcAlphaDoc were deleted from ATC.js entirely, not just unwired. Restore
+// from backup/s2-s3-code-removed-2026-07-01T12-42-21Z/ATC.js.pre-removal if needed.
 
 //big-assignments
 exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipantAssignment // c - "big assignment/{docid}"
@@ -83,6 +84,7 @@ exports.ticketCreated = clientIssueSystem.ticketCreated // c - "clientissue/{id}
 exports.ticketCreatedV2 = clientIssueSystem.ticketCreatedV2 // c - "clientissue/{id}"
 exports.autoCloseTickets = clientIssueSystem.autoCloseTickets
 exports.dashboardcustomersupport = clientIssueSystem.dashboardcustomersupport // w - "clientissue/{id}"
+exports.slackDigest = clientIssueSystem.slackDigest // scheduler - 11.30AM and 6.30PM
 
 // Negligence rating + CS coaching functions were EXTRACTED to the customer-support
 // repo and now deploy from there (project starlabs-test, codebase "cs-coaching").
@@ -102,13 +104,12 @@ exports.postmarkResponseCapture = communication.postmarkResponseCapture // on re
 // exports.sendValidationMail = communication.sendValidationMail; // onRequest
 exports.sendWhatsAppBroadcastCreated = communication.sendWhatsAppBroadcastCreated // c - 'wati archive/{docid}'
 exports.sendWhatsAppBroadcast = communication.sendWhatsAppBroadcast // c - 'On Request'
-exports.slackLoginEvent = communication.slackLoginEvent // c - "loginlog/{docid}"
+// exports.slackLoginEvent = communication.slackLoginEvent // c - "loginlog/{docid}"
 // exports.createTwilioWhatsAppTemplate = communication.createTwilioWhatsAppTemplate // c - 'twilio_templates/{docid}'
 
 //contentSystem
 exports.communityPostHLS = contentSystem.communityPostHLS // w - '/community post/{id}'
 exports.videoAskHLS = contentSystem.videoAskHLS // c - '/participantvideoask/{id}'
-exports.slackContentConsumption = contentSystem.slackContentConsumption // c - "content analytics/{docid}"
 exports.buffermixToRecommendedPlaylist = contentSystem.buffermixToRecommendedPlaylist // c - "buffermix archive/{docid}"
 exports.ConvertUrltoHLS = contentSystem.ConvertUrltoHLS // w - '/episodes/{id}'
 exports.UnconvertedUrltoHLS = contentSystem.UnconvertedUrltoHLS // schedule 'every 6 hours'
@@ -126,7 +127,6 @@ exports.slackBudgetAlert = exportsAndAlerts.slackBudgetAlert // onMessagePublish
 exports.dailyFirestoreAuditAnalysis = exportsAndAlerts.dailyFirestoreAuditAnalysis // Everyday firestore read & write count
 // 
 //interim report
-exports.slackInterimCrossOver = interimReportSystem.slackInterimCrossOver // c - "/interim crossover/{docid}"
 exports.slackLoveLetter = interimReportSystem.slackLoveLetter // c - "/love letter/{docid}"
 exports.slackAskAH = interimReportSystem.slackAskAH //  c - "/ask AH/{docid}"
 exports.ATCevolutionProgress = interimReportSystem.ATCevolutionProgress
@@ -172,6 +172,7 @@ exports.biginvitationAccepted = queueSystem.biginvitationAccepted // u - "biginv
 exports.studioZoomLink = queueSystem.studioZoomLink // c - "live assignment/{id}"
 exports.studioZoomLinkDeactivate = queueSystem.studioZoomLinkDeactivate // u - "live assignment/{id}"
 exports.studioZoomLinkRegenerate = queueSystem.studioZoomLinkRegenerate // on request
+exports.clearParticipantReady = queueSystem.clearParticipantReady // onRequest — sendBeacon lobby-leave
 // exports.watiQueueWelcomeNotification = queueSystem.watiQueueWelcomeNotification // w - "/queue_token/{queuetokenid}"
 exports.queueParticipantPositionUpdate = queueSystem.queueParticipantPositionUpdate // c - "queue stage log/{queueStageLogId}"
 exports.particpantFormSubmit_SlackIntegration = queueSystem.particpantFormSubmit_SlackIntegration // c - "formsByClient/{id}" 
@@ -179,7 +180,7 @@ exports.inviteToStudio = queueSystem.inviteToStudio // c - "studioinvitation/{do
 exports.onQueueTokenCreateUpdateProductMode = queueSystem.onQueueTokenCreateUpdateProductMode // c -"queue_token/{docid}"
 exports.onQueueDateChange = queueSystem.onQueueDateChange // u - "queue generation/{docid}"
 exports.onEventDateChange = queueSystem.onEventDateChange // u - "event collection/{docid}"
-exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest
+exports.zoomActivitylog = queueSystem.zoomActivitylog // onrequest — includes inline recording.transcript_completed handling (handleRecordingTranscriptCompleted)
 exports.bulkReadyInvitation = queueSystem.bulkReadyInvitation // c - "bulk invitation/{docid}"
 exports.invitationAccepted = queueSystem.invitationAccepted // u - "studioinvitation/{docid}"
 exports.queueavtest = queueSystem.queueavtest //  c - "queue avtest/{docid}"
@@ -204,6 +205,8 @@ exports.evolutionFamilyWishlistOnWrite = wishlist.evolutionFamilyWishlistOnWrite
 
 // Watson
 exports.dashboardPaymentplanWatsonRequest = watsonUpdates.dashboardPaymentplanWatsonRequest
+exports.watsonEventParticipation = watsonUpdates.watsonEventParticipation
+exports.syncETicketEligibility = watsonUpdates.syncETicketEligibility
 
 // Chat
 exports.ChatxNotification = communication.ChatxNotification
@@ -218,7 +221,14 @@ exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackinteg
 exports.workshopQandA = communication.workshopQandA
 exports.workshopFormsSubmission = communication.workshopFormsSubmission
 exports.workshopAssignment = communication.workshopAssignment
-
+//workshop payment
+exports.createWorkshopPaymentOrder = workshop.createWorkshopPaymentOrder
+exports.verifyWorkshopPayment      = workshop.verifyWorkshopPayment
+// On-demand recovery for a payment captured on Razorpay but not settled here
+// (e.g. the browser died right after checkout). The background safety-net sweep
+// (`runWorkshopPaymentReconcile`) is NOT its own scheduled function — it is
+// invoked from the existing every-5-minutes `appointmentremainder` schedule.
+exports.reconcileWorkshopPayment   = workshop.reconcileWorkshopPayment
 //workshop communication
 exports.workshopenrolledwatti = workshop.workshopenrolledwatti
 exports.workshopprogressmessage = communication.workshopprogressmessage
@@ -263,7 +273,7 @@ exports.atcJobWatchdog = runpodLLMRunning.atcJobWatchdog // schedule "every 10 m
 exports.atcPodLifecycle = podWorker.atcPodLifecycle // schedule "every 2 minutes" — launch gate + LOADING→READY→drain
 exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drained" + ready/unhealthy pushes
 // LEGACY — the external controller path (launchPod/getPodBearer/terminatePod + Cloud Run drain Job)
-// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/runpod_ai.js
+// replaces the in-pod self-loop and RunPod-direct create/terminate. Kept in components/pod-execution-pipeline/runpod_ai.js
 // for rollback only; NOT deployed. Re-enable to fall back to the self-loop pod worker.
 // exports.run_jobrequest = runpodLLMRunning.run_jobrequest
 // exports.getJobRequest = runpodLLMRunning.getJobRequest
@@ -272,9 +282,20 @@ exports.podWorkerUpdate = podWorker.podWorkerUpdate // onRequest — drain "drai
 // exports.atcPodScheduler = runpodLLMRunning.atcPodScheduler
 
 //queue_atc_generation
-exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate
-exports.onQueueAtcGenerationUpdate = queue_atc_generation.onQueueAtcGenerationUpdate
+exports.onQueueAtcGenerationCreate = queue_atc_generation.onQueueAtcGenerationCreate // S1 generation — STAYS
+// on-demand dashboard actions (callable, Firebase-Auth gated)
+exports.regenerateAtcDoc = atcOnDemand.regenerateAtcDoc // onCall — re-resolve a dataincomplete doc → pending when complete
+exports.rebuildAtcPrompt = atcOnDemand.rebuildAtcPrompt // onCall — rebuild prompt from existing stagedata (pending doc)
+// REMOVED (2026-07-01 scope-down): checkpoint report (S2) + rubrics verdict (S3).
+// onQueueAtcGenerationUpdate, processCheckpointVerificationDoc, extractAndSaveOverallVerdict,
+// and the vice-versa rubrics bridge (maybeTriggerRubricsFromGeneration) were deleted from
+// queue_atc_generation.js entirely, not just unwired. Nothing the pod loop / usage rollup
+// depends on. Restore from backup/s2-s3-code-removed-2026-07-01T12-42-21Z/ if needed.
 
-//scope-enhancement-atc-pipeline — usage dashboard rollup
+//queue-aiatc-generation-pipeline — usage dashboard rollup
 exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" Asia/Kolkata — daily usage rollup
+
+//scope-enhancement live transcription — Firestore trigger submits to RunPod serverless; HTTP callback writes result back
+exports.seLiveTranscribeSubmit   = seLiveTranscribe.seLiveTranscribeSubmit    // w - "live assignment/{id}"
+exports.seLiveTranscribeCallback = seLiveTranscribe.seLiveTranscribeCallback  // onRequest — RunPod webhook
 

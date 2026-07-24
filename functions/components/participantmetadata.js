@@ -6,6 +6,13 @@ const commonService = require('./service');
 const { onSchedule } = require("firebase-functions/scheduler");
 const axios = require("axios");
 
+// True only when running under the Firebase Functions emulator (firebase-tools sets FUNCTIONS_EMULATOR=true
+// in every runtime it spawns). Used to skip external Watson/CRM webhook mirrors under the emulator, where
+// those hosts hang ~60s per call and starve the shared functions runtime. This is deliberately NOT keyed on
+// commonService.production: the real `development` deploy (starlabs-test) is also non-production but IS meant
+// to mirror to the test Watson/CRM, so we must skip only in the emulator — never in a real deploy.
+const IS_EMULATOR = process.env.FUNCTIONS_EMULATOR === "true";
+
 const throwParticipantMetaDataException = require("./service").throwParticipantMetaDataException
 const updateParticipantMetadataTierAccess = require("./eiflix-tier").updateParticipantMetadataTierAccess
 
@@ -63,7 +70,11 @@ exports.profiledata_to_participantmetadata = onDocumentWritten("profile_data/{id
       }
 
       try {
-        await axios.post(WatsonWebhookUrl, {
+        // Skip the external Watson mirror ONLY under the emulator: there this host HANGS ~60s per call
+        // (no prod-firewall on server-side CF HTTP), and the pile-up of 60s-timeout invocations starves the
+        // shared functions runtime and delays the calculateParticipantMode self-cascade past the specs'
+        // polls. Real dev/prod deploys still mirror as before. Fire-and-forget side-effect, never asserted.
+        if (!IS_EMULATOR) await axios.post(WatsonWebhookUrl, {
           profileid: data['profileid'],
           type: 'profile',
           profileimg: ![null, undefined].includes(data['profileimg'])
@@ -305,6 +316,11 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
     const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
+    const refOf = (journey) =>
+      db.doc(
+        `/participantjourneyproduct/${journey["docid"] ?? journey["_docId"]}`,
+      );
+
     const newData = {
       activejourney: null,
       subscriptionstart: null,
@@ -315,6 +331,8 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       lastsubscriptionstart: null,
       lastsubscriptionend: null,
       purchasedate: null,
+      purchaseref: null,
+      lastsubscribedpurchaseref: null,
     };
 
     let ongoingJourney = [];
@@ -351,6 +369,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
             newData.purchasedate = liveJourney["purchasedate"]?.toDate() ?? null;
             newData.subscriptionstart = liveJourney["subscriptionstart"]?.toDate() ?? null;
             newData.subscriptionend = liveJourney["subscriptionend"]?.toDate() ?? null;
+            newData.purchaseref = refOf(liveJourney);
           } else {
             newData.customerstatus = "none";
             newData["participantmode"] = null;
@@ -365,6 +384,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
         newData["lastcompletedjourney"] = completedjourney[0]["journeyref"]?.id ?? null;
         newData["lastsubscriptionstart"] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
         newData["lastsubscriptionend"] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
+        newData.lastsubscribedpurchaseref = refOf(completedjourney[0]);
       } else {
         newData.customerstatus = "none";
         newData["participantmode"] = null;
@@ -375,6 +395,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       newData["lastsubscribedjourney"] = cancelledJourney[0]["journeyref"]?.id ?? null;
       newData["lastsubscriptionstart"] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
       newData["lastsubscriptionend"] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
+      newData.lastsubscribedpurchaseref = refOf(completedjourney[0]);
     } else {
       newData.customerstatus = "none";
       newData["participantmode"] = null;
@@ -395,7 +416,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       }
 
       try {
-        await axios.post(CrmWebhookUrl, {
+        if (!IS_EMULATOR) await axios.post(CrmWebhookUrl, {
           profileid: profileid,
           ...newData
         });
@@ -405,7 +426,11 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       }
 
       try {
-        await axios.post(WatsonWebhookUrl, {
+        // Skip the external Watson mirror ONLY under the emulator: there this host HANGS ~60s per call
+        // (no prod-firewall on server-side CF HTTP), and the pile-up of 60s-timeout invocations starves the
+        // shared functions runtime and delays the calculateParticipantMode self-cascade past the specs'
+        // polls. Real dev/prod deploys still mirror as before. Fire-and-forget side-effect, never asserted.
+        if (!IS_EMULATOR) await axios.post(WatsonWebhookUrl, {
           type: 'subscription',
           profileid: profileid,
           ...newData
@@ -473,7 +498,11 @@ exports.productsdata_to_pmd = onDocumentWritten('participantsproduct/{docid}',as
   let newdoc = change.data.after.data()
   let oldProductStatus
   let newProductStatus
-  let profileid = newdoc['profileid']
+  // Null-safe profileid: on a CREATE there is no `before`, on a DELETE there is no `after`. Reading
+  // newdoc['profileid'] unconditionally threw on every delete (killing this shared-runtime trigger and,
+  // under the emulator's single sequential runtime, starving the very next invocation). Mirror the
+  // correct pattern already used by eventparticipationdata_to_pmd below.
+  let profileid = ![null, undefined].includes(newdoc) ? newdoc['profileid'] : (olddoc ? olddoc['profileid'] : null)
   let mapPackage = {}
   //product status update condition
   if([null,undefined].includes(olddoc)){
@@ -492,7 +521,10 @@ exports.productsdata_to_pmd = onDocumentWritten('participantsproduct/{docid}',as
     console.log("onDelete");
   }
   console.log('product status change',oldProductStatus != newProductStatus);
-  if(oldProductStatus != newProductStatus || olddoc["packageref"] != newdoc["packageref"]){
+  // Null-safe: on CREATE olddoc is undefined, on DELETE newdoc is undefined. When the status is
+  // unchanged (e.g. a create with status:null — the PM-SEED case) the first operand is false and the
+  // packageref comparison is evaluated, so both sides must tolerate an absent snapshot.
+  if(oldProductStatus != newProductStatus || (olddoc || {})["packageref"] != (newdoc || {})["packageref"]){
     //get package name
     await admin.firestore().collection('package').get().then(async packagesnap => {
       for (let i = 0; i < packagesnap.docs.length; i++) {
@@ -602,7 +634,8 @@ exports.productsdata_to_pmd = onDocumentWritten('participantsproduct/{docid}',as
                 }
               };
 
-              const response = await axios.post(webhookUrl, payload);
+              // Emulator only: skip the external CRM mirror (it hangs ~60s) — see the Watson note above.
+              const response = !IS_EMULATOR ? await axios.post(webhookUrl, payload) : { status: 'skipped(emulator)' };
               console.log("Webhook sent:", response.status);
 
             } catch (error) {
@@ -669,7 +702,7 @@ function arraysEqual(arr1, arr2) {
 exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation request/{docid}",async (change) => {
   let olddoc = change.data.before.data()
   let newdoc = change.data.after.data()
-  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid']
+  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid'];
   if([null,undefined].includes(olddoc)){console.log("onCreate");}
   else if(olddoc != null && newdoc != null){console.log('onUpdate');}
   else if([null,undefined].includes(newdoc)){console.log("onDelete");}
@@ -749,6 +782,7 @@ exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation r
     }
   }
 })
+
 
 exports.atcdata_to_pmd = onDocumentWritten({document: "atc_apha/{docid}", database: "firestore-atc"},async (change) => {
 

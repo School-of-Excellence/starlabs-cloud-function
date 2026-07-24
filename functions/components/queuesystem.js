@@ -2,8 +2,10 @@ const admin = require('firebase-admin');
 const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
-const { alertAtc } = require('./atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./atc_helpers");
+const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
+const { buildUpLifeAspirationReport, pickPreviousStage, crossedGenerateStages } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData, resolveActiveStages } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
@@ -30,6 +32,7 @@ const zoomSDkClientId = defineSecret("ZOOM_SDK_CLIENTID");
 const zoomSDKClientSecret = defineSecret("ZOOM_SDK_CLIENTSECRET");
 const zoomWebhookSecretToken = defineSecret("ZOOM_WEBHOOK_SECRET_TOKEN")
 
+const crypto = require("crypto");
 
 exports.onQueueStageChange = onDocumentWritten({
     document: "queue_token/{id}",
@@ -117,7 +120,7 @@ exports.onQueueStageChange = onDocumentWritten({
         // confirmation — decided by the added slot's stage (key).
         const isPrepStage = key === 'Evolution Prep Orientation';
         const isScopeEnhancement = key === 'Scope Enhancement';
-        const isGuidedOrientation = key === 'Guided Pre ATC Orientation';
+        const isGuidedOrientation = key === 'Guided Pre ATC Orientation' || key === 'Guided Self ATC Orientation';
         const isDiagnostics = key === 'Diagnostics';
         const formattedTitle = getSlotTitle(addedValue, key);
 
@@ -140,7 +143,8 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
-        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        if (!isPrepStage && !isGuidedOrientation) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
@@ -189,7 +193,7 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
@@ -442,21 +446,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai
+    // Ensure a queue_atc_generation doc exists for EVERY generateatc stage this
+    // token has already crossed — not just the one it happened to move past on THIS
+    // write.
+    //
+    // The old behaviour created a doc for a single transition (pickPreviousStage:
+    // the move from a generateatc stage to the stage right after it). Anything that
+    // didn't land on exactly that transition slipped through forever, with no retry:
+    // a stage skip / variation reorder, a form submitted after the move (own source
+    // empty at trigger time), a trigger error, or a crossing that predated the
+    // pipeline. processStage is idempotent (dedups on profile+token+queue+stage+
+    // sourceref), so re-checking every crossed generateatc stage on each token write
+    // is a self-healing reconciliation: a doc that already exists is a no-op, and a
+    // missing one is filled as soon as its own source resolves. (Still forward-only —
+    // a terminal token that never gets another write needs the one-time backfill.)
     try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
+      const activeStages = await resolveActiveStages(queueData, afterData, admin.firestore());
+      const stagesToEnsure = crossedGenerateStages(queueData, afterData["currentstage"], activeStages);
+      if (!stagesToEnsure.length){console.log("no crossed generateatc stage to ensure")}
+      for (const stage of stagesToEnsure){
         await processStage({
           queueData,
           queueRef: queueDocSnap.ref,
           tokenData: afterData,
           queueTokenId,
-          currentStage: previousStage,
+          currentStage: stage,
         });
       }
     }catch (error){
@@ -538,10 +552,10 @@ exports.onQueueStageChange = onDocumentWritten({
           if(!excludequeuestage.includes(afterData['currentstage'])){
             var url
             if(commonService.production){
-              url = commonService.slackEvent // Production
+              url = await commonService.getWebhookUrl("slackEvent") // Production
             }
             else{
-              url = commonService.slackDevTest // Test
+              url = await commonService.getWebhookUrl("slackDevTest") // Test
             }
             if(url != undefined){
               var webhook = new commonService.IncomingWebhook(url);
@@ -690,14 +704,14 @@ exports.onQueueStageChange = onDocumentWritten({
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
-          }else if(queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link'){
+          } else if (queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link') {
             console.log("action type link");
             //email
             let clientModel = {
-              name:profiledata['name'],
-              stage:afterData['currentstage'],
-              url:queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
-              productname:afterData['productname']
+              name: profiledata['name'],
+              stage: afterData['currentstage'],
+              url: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
+              productname: afterData['productname']
             }
             console.log("sending link email");
             // await commonService.postmarkClient.sendEmailWithTemplate({
@@ -710,25 +724,25 @@ exports.onQueueStageChange = onDocumentWritten({
             // });
 
             await commonService.createEmailArchiveDocument({
-              emailData : clientModel,
-              datamodel : clientModel,
-              attachments : [],
-              emailTo : [profiledata["email"]],
-              emailMap : {[profiledata["email"]] : profiledata['profileid']},
-              fileURL : '',
-              from:'starlabs@excellenceinstallation.com',
-              notes : '',
-              profileId : [profileid],
+              emailData: clientModel,
+              datamodel: clientModel,
+              attachments: [],
+              emailTo: [profiledata["email"]],
+              emailMap: { [profiledata["email"]]: profiledata['profileid'] },
+              fileURL: '',
+              from: 'starlabs@excellenceinstallation.com',
+              notes: '',
+              profileId: [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link',
+              templateAlias: 'queue_stage_actiontype_link',
               type: 'queue',
-              metadata: {...afterData}
+              metadata: { ...afterData }
             });
 
             // mobileapp
             console.log("sending app notification");
             await commonService.saveNotificationRecord({
-              title: "Hello "+profiledata['name'],
+              title: "Hello " + profiledata['name'],
               message: `You are ready for the ${afterData['currentstage']} stage, Our specialist will invite you for the ${afterData['currentstage']}, and you’ll receive the call link via WhatsApp and Email.`,
               subtitle: null,
               date: admin.firestore.FieldValue.serverTimestamp(),
@@ -738,7 +752,7 @@ exports.onQueueStageChange = onDocumentWritten({
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {...afterData},
+              metadata: { ...afterData },
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -748,47 +762,89 @@ exports.onQueueStageChange = onDocumentWritten({
             //   logtype: null
             // })
             //wati
-            let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
-            let waticontent = {
-              phonenumber : `${profiledata['number']}`,
-              body : {
-                parameters: [
-                  {name: 'name', value: profiledata['name']},
-                  {name: 'stage', value: afterData['currentstage']},
-                  {name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource']}
-                ],
-                broadcast_name: 'queue_stage_linktype_v4',
-                template_name: 'queue_stage_linktype_v4'
+            let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+            if (afterData['currentstage'] === 'In Evolution Mapping Activity') {
+              console.log("sending evolution mapping template");
+
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] }
+                  ],
+                  broadcast_name: 'em_now_available_48hrs',
+                  template_name: 'em_now_available_48hrs'
+                }
               }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'em_now_available_48hrs',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
+
+              await admin.firestore().collection("liveevolutionmapping").doc(profileid).set({
+                lastupdated: admin.firestore.FieldValue.serverTimestamp(),
+              }, { merge: true });
+
+            } else {
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] },
+                    { name: 'stage', value: afterData['currentstage'] },
+                    { name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'] }
+                  ],
+                  broadcast_name: 'queue_stage_linktype_v4',
+                  template_name: 'queue_stage_linktype_v4'
+                }
+              }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'queue_stage_linktype_v4',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
             }
-            console.log('wati content',waticontent);
-            // await commonService.sendToWhatsappViaWati(waticontent);
-
-          
-            const parameterConfig = waticontent['body']['parameters'].map(param => ({
-              excelColumn: null,
-              fillType: 'static',
-              metadataField: null,
-              name: param.name,
-              staticValue: param.value
-            }));
-            console.log('Triggered Wati Archive Creation');
-
-            const response = await commonService.createWatiArchiveDocument({
-              numbers: [parseInt(waticontent['phonenumber'])],
-              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-              broadcastname: 'Individual',
-              paramFillMode: 'static',
-              parameterConfig: parameterConfig,
-              params: [],
-              profileid: [profileid],
-              templateid: null,
-              watitemplateid: 'queue_stage_linktype_v4',
-              type: 'queue',
-              metadata: {...afterData}
-            });
-            console.log('WATI ARCHIVE RESPONSE', response);
-            
           } //action type link
         }
       }
@@ -1017,7 +1073,15 @@ exports.studioZoomLink = onDocumentCreated({
                 // signature: hostSignature,
                 hostsignature: hostSignature,
                 participantsignature: participantSignature,
-                zoomdata: zoomresult.data
+                zoomdata: zoomresult.data,
+                // Keep a history of EVERY Zoom meeting id this call ever had, so the
+                // zoomActivitylog webhook can still map events to this live
+                // assignment after a regenerate overwrites zoomdata.id. Matching on
+                // the mutable zoomdata.id alone drops events during regenerate churn.
+                zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+                // When the join token expires — lets the studio show an accurate
+                // "link expired → regenerate" state (derived from the same TTL).
+                linkExpiresAt: commonService.signatureExpiryDate()
               })
             } catch (zoomError) {
               console.log("Zoom Link Not Generated", zoomError.message);
@@ -1281,10 +1345,10 @@ exports.studioZoomLink = onDocumentCreated({
 async function slackQueueZoomLink(message){
   var url
   if(commonService.production){
-    url = commonService.slackEvent // Production
+    url = await commonService.getWebhookUrl("slackEvent") // Production
   }
   else{
-    url = commonService.slackDevTest // Test
+    url = await commonService.getWebhookUrl("slackDevTest") // Test
   }
   var webhook = new commonService.IncomingWebhook(url);
   await webhook.send(message, function(err, header, statusCode, body) {
@@ -1523,6 +1587,26 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
     method: 'POST'
   });
   const tokenData = await tokenResponse.json();
+
+  // Robust regenerate: END the previous meeting on Zoom FIRST so the host account
+  // is freed and the NEW meeting can start. Without this, if the old meeting is
+  // still live on the account, Zoom rejects the new one with "you have another
+  // meeting in progress" (studio scenarios 1 & 2). Best-effort — a meeting that is
+  // already ended / not found just returns an error we swallow.
+  const oldMeetingId = oldZoomData && oldZoomData['id'];
+  if (oldMeetingId) {
+    try {
+      await axios.put(`https://api.zoom.us/v2/meetings/${oldMeetingId}/status`,
+        { action: 'end' },
+        { headers: { 'Authorization': 'Bearer ' + tokenData.access_token, 'content-type': 'application/json' } });
+      console.log('[regenerate] ended old meeting', oldMeetingId);
+    } catch (e) {
+      console.warn('[regenerate] could not end old meeting', oldMeetingId,
+        'status=', e && e.response && e.response.status,
+        'body=', e && e.response ? JSON.stringify(e.response.data) : (e && e.message));
+    }
+  }
+
   if(selectedEmail != null && selectedEmail != undefined)
   try {
     const email = selectedEmail; //host email id;
@@ -1585,7 +1669,13 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       // signature: hostSignature,
       hostsignature: hostSignature,
       participantsignature: participantSignature,
-      zoomdata: zoomresult.data
+      zoomdata: zoomresult.data,
+      // Append this regenerated meeting id to the history so the webhook can still
+      // map its events after zoomdata.id moves on (see studioZoomLink).
+      zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+      // Refresh the expiry for the new token (same TTL) so the studio's
+      // "expired" state resets after a regenerate.
+      linkExpiresAt: commonService.signatureExpiryDate()
     })
 
     // Send Slack
@@ -1890,33 +1980,14 @@ exports.particpantFormSubmit_SlackIntegration = onDocumentCreated({document: "fo
       formid :  mapform[data["formname"]]
     })
   }
-  // "uP! Life Report" : "https://hooks.slack.com/services/T1E57BR8F/B06FQ6Y9QMC/8QhG9IBClGvvOgTChWe sYq76K", old one
-  // "" : "https://hooks.slack.com/services/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",//Self ATC
-  // "Self ATC - Next Cycle" : "https://hooks.slack.com/services/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",
-  // "":"https://hooks.slack.com/services/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",//Self Evaluation Form
 
-  let mapFormByUrl = {
-    "m44B4RzITTX5lW0XnR47" : "https://hooks.slack.com/services/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",//International Mental Wellness Scaling questionnaire
-    "J04B12dx8tFx4xUuKjT6" : "https://hooks.slack.com/services/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",//DAS Scaling Form
-    "PXG71F09gzNoDCraQFBG" : "https://hooks.slack.com/services/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",//uP! Life Aspiration Report
-    "cWlz1Tu4mty4UU5LmToO" : "https://hooks.slack.com/services/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",//ATC Understanding Validation
-    "jaGY5kDrrhECQsny95Ns" : "https://hooks.slack.com/services/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",//uP! Life Report
-    "QundpMXgXlXiCJYZ7WU4" : "https://hooks.slack.com/services/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",//B!G Life Report / Legacy Life Report / uP! Life Report
-    "pSvB62jcyrgSSUI1WqtC" : "https://hooks.slack.com/services/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",//Guided Pre-ATC
-    "fg5ly2C2uL2DSJyikIsQ" : "https://hooks.slack.com/services/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",//Self Evolution Report
-    "NqcpL7DZvYpSJ7I8H1ZA" : "https://hooks.slack.com/services/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",//CTD Aspiration Form
-    "28VXVYIPcwpbepl977o9" : "https://hooks.slack.com/services/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",//SuP!r Metabolism Aspiration Form
-    "rs8nYVElnKbAJoXDftYN" : "https://hooks.slack.com/services/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",//Application for One-on-One Consultation with Antano & Harini
-    "exUAMbuu8ujg5aZ8Jot2" : "https://hooks.slack.com/services/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", //Your Career Growth – Readiness Form
-    "vsVXu1kQ9wUXO50r4vPW" : "https://hooks.slack.com/services/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" // ATC Predictive Intelligence Form - Level 1
-  }
-  //
   var url = null
   if(commonService.production){
-    url = mapFormByUrl[data['formid']] || null // Production
+    url = await commonService.getWebhookUrl(data['formid'])
+    // mapFormByUrl[data['formid']] || null // Production
   }
   else{
-    url = commonService.slackDevTest // Test
+    url = await commonService.getWebhookUrl("slackDevTest") // Test
   }
   //
   console.log("formname",data['formname']);
@@ -2440,6 +2511,24 @@ exports.onEventDateChange = onDocumentUpdated("event collection/{docid}", async 
 })
 
 
+// Clear a participant's `participantReadyAt` (lobby "waiting" flag) reliably on
+// tab close. The client's own Firestore write during `pagehide` usually never
+// reaches the server (it queues in the closing tab's IndexedDB, which the
+// specialist's separate browser never syncs), leaving the studio stuck on
+// "Participant is waiting". The client sends a `navigator.sendBeacon` here
+// instead — beacons are delivered by the browser even after the page is gone.
+exports.clearParticipantReady = onRequest({ cors: true }, async (req, res) => {
+  const id = (req.query && req.query.liveassignmentid) || (req.body && req.body.liveassignmentid);
+  if (!id) { res.status(400).json({ error: 'missing liveassignmentid' }); return; }
+  try {
+    await admin.firestore().collection('live assignment').doc(String(id)).update({ participantReadyAt: null });
+  } catch (e) {
+    // Best-effort — the doc may not exist or already be cleared.
+    console.warn('clearParticipantReady failed', id, e && e.message);
+  }
+  res.status(200).json(null);
+});
+
 let zoomClipTimings = [];
 let zoomClipCount = 0;
 exports.zoomActivitylog = onRequest({ memory: '2GiB',
@@ -2523,8 +2612,105 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
             }
           }
         })
+
+        // Presence log: stamp meeting end + duration onto `live assignment log`.
+        try {
+          const endObj = request.body.payload.object || {};
+          const la = await getLiveAssignmentByMeeting(endObj.id);
+          if (la) {
+            const patch = {
+              meetingEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+              // Which meeting ended — so the studio can ignore an OLD meeting's end
+              // event after a regenerate (endedMeetingId != current zoomdata.id).
+              endedMeetingId: endObj.id != null ? Number(endObj.id) : null,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+            if (endObj.start_time && endObj.end_time) {
+              patch.meetingStartTimeZoom = endObj.start_time;
+              patch.meetingEndTimeZoom = endObj.end_time;
+              patch.durationSeconds = Math.max(0, Math.round((new Date(endObj.end_time).getTime() - new Date(endObj.start_time).getTime()) / 1000));
+            }
+            await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
+          }
+        } catch (e) { console.warn('live assignment log (meeting.ended) failed', e); }
       }
       //
+      response.status(200).json(null);
+      return;
+    }
+
+    // Meeting started → stamp start time onto `live assignment log`.
+    if (zoomEvent === 'meeting.started') {
+      try {
+        const obj = request.body.payload.object || {};
+        const la = await getLiveAssignmentByMeeting(obj.id);
+        if (la) {
+          await admin.firestore().collection('live assignment log').doc(la.id).set({
+            liveassignmentid: la.id,
+            meetingId: obj.id,
+            meetingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+            meetingStartTimeZoom: obj.start_time || null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      } catch (e) { console.warn('live assignment log (meeting.started) failed', e); }
+      response.status(200).json(null);
+      return;
+    }
+
+    // Participant/host joined or left → derive presence into `live assignment log`.
+    // Identity is keyed by `customer_key` (= our profile id), which the client sets
+    // at join (participant today; specialists once the screen change lands).
+    if (zoomEvent === 'meeting.participant_joined' || zoomEvent === 'meeting.participant_left') {
+      const obj = request.body.payload.object || {};
+      const meetingId = obj.id;
+      const p = obj.participant || {};
+      const la = await getLiveAssignmentByMeeting(meetingId);
+      if (!la) { response.status(200).json(null); return; }
+
+      const joined = zoomEvent === 'meeting.participant_joined';
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const zoomTime = (joined ? p.join_time : p.leave_time) || null;
+      const { role, profileId } = classifyZoomAttendee(p.customer_key, la.data);
+
+      const patch = {
+        liveassignmentid: la.id,
+        meetingId: meetingId,
+        updatedAt: now,
+      };
+
+      if (role === 'participant') {
+        if (joined) {
+          patch.participantInCallAt = now;
+          patch.participantInCallAtZoom = zoomTime;
+          patch.participantLeftAt = null;
+        } else {
+          patch.participantLeftAt = now;
+          patch.participantLeftAtZoom = zoomTime;
+        }
+      } else {
+        // specialist (or not-yet-identifiable host) → map keyed by profile id, with
+        // a Zoom-uid fallback so nothing is lost until customerKey is set for hosts.
+        const key = profileId || ('uid_' + (p.user_id || p.participant_uuid || p.id || 'unknown'));
+        const spec = { name: p.user_name || null, role: role };
+        if (joined) { spec.joinedAt = now; spec.joinedAtZoom = zoomTime; spec.leftAt = null; }
+        else { spec.leftAt = now; spec.leftAtZoom = zoomTime; }
+        patch.specialists = { [key]: spec };
+      }
+
+      // Fast "call ended" signal. When the host ends the meeting for everyone, the
+      // disconnect arrives here as a participant_left whose `leave_reason` reads like
+      // "Host ended the meeting" — and it fires well before the separate
+      // meeting.ended webhook (which Zoom is slow to emit for a host-only/empty
+      // meeting, ~10s). Stamp meetingEndedAt from this fast event so the studio flips
+      // to "ended" immediately even when no participant ever joined. A plain leave
+      // (specialist stepping out) has a different reason, so this never mis-fires.
+      if (!joined && /ended the meeting/i.test(p.leave_reason || '')) {
+        patch.meetingEndedAt = now;
+        patch.endedMeetingId = meetingId != null ? Number(meetingId) : null;
+      }
+
+      await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
       response.status(200).json(null);
       return;
     }
@@ -2563,13 +2749,68 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
       }
     }
 
+    if (zoomEvent === 'recording.transcript_completed') {
+      const meetingId = request.body.payload.object.id;
+      console.log("transcript completed for meetingId", meetingId);
+      await handleRecordingTranscriptCompleted(meetingId);
+      response.status(200).json(null);
+      return;
+    }
+
     response.status(200).json(null);
   } catch (error) {
     console.error("Error processing zoom event:", error);
     response.status(500).json({ error: 'Internal Server Error' });
   }
 });
-  
+
+// ── Presence helpers for `live assignment log` (webhook-derived truth) ────────
+// Resolve the live assignment that owns a Zoom meeting id. The webhook sends the
+// meeting id as a STRING, but we store it as a NUMBER (zoomdata.id + zoomMeetingIds
+// come from the Zoom REST response). So try BOTH forms. Prefer the full meeting-id
+// history (survives regenerate churn); fall back to current zoomdata.id.
+async function getLiveAssignmentByMeeting(meetingId) {
+  try {
+    const num = Number(meetingId);
+    const candidates = [];
+    if (!Number.isNaN(num)) candidates.push(num);          // numeric form (how we store it)
+    candidates.push(String(meetingId));                    // string form (belt-and-braces)
+    const col = admin.firestore().collection('live assignment');
+    for (const v of candidates) {
+      let snap = await col.where('zoomMeetingIds', 'array-contains', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+      snap = await col.where('zoomdata.id', '==', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('[presence] getLiveAssignmentByMeeting ERROR', e && e.message, e);
+    return null;
+  }
+}
+
+// Classify a Zoom attendee by `customer_key` (= our profile id):
+//   participant → customer_key === the live assignment's participantid
+//   specialist  → customer_key ∈ the live assignment's pairing[]
+//   unknown     → no/unrecognised customer_key (e.g. a host before the screen
+//                 change starts setting customerKey for specialists)
+function classifyZoomAttendee(customerKey, la) {
+  if (!customerKey) return { role: 'unknown', profileId: null };
+  const participantId = (la && (la.participantid || (la.token && la.token.profile_id))) || null;
+  if (participantId && customerKey === participantId) {
+    return { role: 'participant', profileId: customerKey };
+  }
+  const pairing = la && Array.isArray(la.pairing) ? la.pairing : [];
+  if (pairing.includes(customerKey)) {
+    return { role: 'specialist', profileId: customerKey };
+  }
+  return { role: 'unknown', profileId: customerKey };
+}
+
 // Main function to fetch, process, and upload video clips
 async function fetchCloudRecording(meetingId, token, liveassignmentData) {
   console.log('Token:', token);
@@ -3166,6 +3407,21 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
     })
   }
 
+  let mapQueueTokenNotesTagsInfo = {}
+  for (let i = 0; i < docData['selectedparticipants'].length; i=i+10) {
+    const tokenDocIdList = docData['selectedparticipants'].slice(i,i+10).map(e => e['docid']);
+    await admin.firestore().collection("queue_token").where("docid","in",tokenDocIdList).get().then(sourceTokenSnap => {
+      for (let j = 0; j < sourceTokenSnap.docs.length; j++) {
+        const sourceTokenData = sourceTokenSnap.docs[j].data();
+        mapQueueTokenNotesTagsInfo[sourceTokenData['docid']] = {
+          notes: sourceTokenData['notes'],
+          notesList: sourceTokenData['notesList'],
+          tags: sourceTokenData['tags']
+        }
+      }
+    })
+  }
+
   //get participant delivery sequence
   let mapParticipantDeleiverySequence = {}
   for (let i = 0; i < docData['selectedparticipants'].length; i=i+10) {
@@ -3190,10 +3446,19 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  let tokenno = null 
-  await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
-    tokenno = queueTokenSnap.docs[0].data()["tokennumber"]
-  })
+  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc("tokennumber")
+  const counterSnap = await queueTokenCounterRef.get()
+  if(!counterSnap.exists){
+    let lastValue = 0
+    await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
+      lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
+    })
+    await queueTokenCounterRef.set({
+      tokennumber: lastValue,
+      // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      // lastDelivery: null
+    },{merge:true})
+  }
 
   // every profile to deliverables && participantdeliverysequence && queuetoken && particpantproductstatus update&& close existing deliverables && add new product to that profile
   let batch = admin.firestore().batch()
@@ -3267,9 +3532,37 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
         if(delivery[0].type === "queue" && deliverablesRef != null){
           //create queue token
           const queuedocid = admin.firestore().collection("queue_token").doc().id
+          let currentTokenNo = null
+          let attempts = 0
+          const maxAttempts = 15
+          while(currentTokenNo === null && attempts < maxAttempts){
+            attempts++
+            try{
+              await admin.firestore().runTransaction(async (transaction) => {
+                const counterTxnSnap = await transaction.get(queueTokenCounterRef)
+                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().tokennumber || 0) : 0
+                const next = currentValue + 1
+                transaction.set(queueTokenCounterRef,{
+                  tokennumber: next,
+                  // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  // lastDelivery: deliverablesRef
+                },{merge:true})
+                currentTokenNo = next
+              })
+            }catch(error){
+              console.log(`Counter attempt ${attempts} failed for profile ${tokenelement['profile_id']}:`,error.message)
+              if(attempts >= maxAttempts){
+                console.error(`Failed to acquire token number after ${maxAttempts} attempts for profile: ${tokenelement['profile_id']}`)
+                break;
+              }
+              const delay = Math.min(50 * Math.pow(2,attempts) + Math.random() * 200, 5000)
+              await new Promise(resolve => setTimeout(resolve,delay))
+            }
+          }
+
           let queueData = {
             docid: queuedocid,
-            tokennumber: tokenno + 1 + i,
+            tokennumber: currentTokenNo,
             profile_name: tokenelement['profile_name'],
             profile_id: tokenelement['profile_id'],
             currentstage: queuefirststage,
@@ -3288,7 +3581,10 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             deliveryRef: deliverablesRef, 
             participantproductid: docData['mapParticipantProduct'][tokenelement['profile_id']],
             transferredfrom: admin.firestore().collection("queue generation").doc(docData['queuefrom']),
-            tokentransferredfrom:admin.firestore().collection("queue_token").doc(tokenelement['docid'])
+            tokentransferredfrom:admin.firestore().collection("queue_token").doc(tokenelement['docid']),
+            notes: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.notes ?? "",
+            notesList: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.notesList ?? [],
+            tags: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.tags ?? [],
           }
           if (participantProductData["requestedslot"]) {
             queueData["selectedstageslot"] = {}
@@ -3509,124 +3805,77 @@ async function resolvePreviousStage({ queueData, tokenData, currentStage }) {
   return pickPreviousStage(stages, currentStage);
 }
 
+// Map a resolver own-source failure reason to a telemetry drop-off reason key
+// (se_atc_telemetry recordDropoff / DASHBOARD-DATA-CONTRACT reason set).
+function ownFailureDropoffReason(reason) {
+  const r = String(reason || "");
+  if (r.startsWith("NO_FORM_SUBMISSION") || r.startsWith("NO_ACTIONRESOURCE")) return "no_form_submission";
+  if (r.startsWith("NO_STUDIO_SESSION")) return "no_studio_session";
+  if (r.startsWith("NO_LIVEASSIGNMENT")) return "no_liveassignment";
+  if (r.startsWith("NO_ZOOM_MEETING") || r.startsWith("LIVEASSIGNMENT_NOT_FOUND")) return "no_zoom_meeting";
+  if (r.startsWith("TRANSCRIPT_NOT_YET_CAPTURED")) return "transcript_fetch_failed";
+  return "unknown_stage_type";
+}
+
 // ---------- Shared stage processor ----------
+// Redesigned workflow (see atc_generation_resolver.js + functions/CLAUDE.md):
+//   * gate on the stage's atcrequiredstages entry having generateatc===true
+//   * resolve own + all pairing sources into a stagedata map (level-by-level
+//     across the transferredfrom chain; zoom transcripts read off live assignment)
+//   * OWN source unresolvable  → drop-off, NO doc (nothing to generate from)
+//   * mandatory pairing missing → create a "dataincomplete" doc (button can retry)
+//   * complete                  → create doc with NO status; S1 builds prompt + sets pending
+// Every downstream field the pod claim-loop / dashboard / rollup depends on
+// (camelCase createdAt/type/queue_token_id/queueref/data/sourceref) is preserved;
+// `stagedata` is added.
 async function processStage({ queueData, queueRef, tokenData, queueTokenId, currentStage }) {
   const adminATC = getFirestore("firestore-atc");
   const adminForms = getFirestore("firestore-forms");
+  const defaultDb = admin.firestore();
   const atcrequiredstages = queueData["atcrequiredstages"] || [];
   const stageCfg = atcrequiredstages.find((s) => s.stage === currentStage);
   if (!stageCfg) return;
 
   const profileid = tokenData["profile_id"];
-  let sourceref = null;
-  let data = null;
 
-  if (stageCfg.type === "form") {
-    const formref = queueData["stageproperty"][currentStage]["actionresource"];
-    if (!formref) return console.log(`no actionresource ref for ${currentStage}`);
-    // formsByClient lives in the firestore-forms database (its queueref is stored
-    // as a firestore-forms ref), so query + match there — not firestore-atc.
-    const snap = await adminForms.collection("formsByClient")
-      .where("profileid", "==", profileid)
-      .where("formid", "==", formref.id)
-      .where("queueref", "==", adminForms.doc(queueRef.path))
-      .orderBy("date", "desc")
-      .get();
-
-    if (snap.docs.length === 0) {
-      await alertAtc("warn", `No form submission found for stage "${currentStage}" — ATC job not created.`, {
-        stage: "Stage 0 form", extra: { profileid, queueTokenId, formid: formref.id },
-      });
-      return console.log(`no form doc for stage ${currentStage}`);
-    }
-    const formDoc = snap.docs[0];
-    sourceref = formDoc.ref;
-
-    const element = formDoc.data();
-    const formData = [];
-    for (const formelement of element["formarray"] || []) {
-      if (["label", "video", "audio"].includes(formelement["type"])) continue;
-      if (!formelement["value"]) continue;
-      formData.push({
-        questions: formelement["fieldname"],
-        answer: formelement["type"] === "date"
-          ? new Date(formelement["value"].toDate()).toISOString().substring(0, 10)
-          : formelement["value"],
-      });
-    }
-    data = await buildUpLifeAspirationReport(formData, element["formname"]);
-  } else if (stageCfg.type === "zoom") {
-    const logSnap = await admin.firestore().collection("queue stage log")
-      .where("currentstage", "==", currentStage)
-      .where("status", "==", "instudio")
-      .where("profile_id", "==", profileid)
-      .where("queueref", "==", queueRef)
-      .orderBy("logdate", "desc")
-      .get();
-
-    if (logSnap.docs.length === 0) {
-      await alertAtc("warn", `No "instudio" queue stage log for stage "${currentStage}" — zoom ATC job not created.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
-      });
-      return console.log(`no queue stage log for ${currentStage}`);
-    }
-    const logDoc = logSnap.docs[0];
-    const logData = logDoc.data();
-    if (!logData["liveassignmentid"]) {
-      await alertAtc("warn", `No liveassignmentid on stage log for "${currentStage}" — cannot fetch transcript.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId },
-      });
-      return console.log("no live assignment id");
-    }
-
-    const liveSnap = await admin.firestore().collection("live assignment")
-      .doc(logData["liveassignmentid"]).get();
-    const liveData = liveSnap.data();
-    if (!liveData || !liveData["zoomdata"]?.["id"]) {
-      await alertAtc("warn", `No zoom meeting id on live assignment for "${currentStage}" — cannot fetch transcript.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, liveassignmentid: logData["liveassignmentid"] },
-      });
-      return console.log("no zoom meeting id");
-    }
-
-    sourceref = liveSnap.ref;
-    let transcript;
-    try {
-      transcript = await getTranscript(liveData["zoomdata"]["id"]);
-    } catch (err) {
-      await alertAtc("critical", `getTranscript failed for stage "${currentStage}": ${err.message}`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
-      });
-      return console.log(`getTranscript failed for ${currentStage}: ${err.toString()}`);
-    }
-    if (!transcript || !transcript.transcript_text || String(transcript.transcript_text).trim() === "") {
-      await alertAtc("warn", `Empty transcript for stage "${currentStage}" — ATC job not created.`, {
-        stage: "Stage 0 zoom", extra: { profileid, queueTokenId, zoomMeetingId: liveData["zoomdata"]["id"] },
-      });
-      return console.log(`empty transcript for ${currentStage}`);
-    }
-    data = {
-      transcript_text: transcript.transcript_text,
-      transcript_raw: transcript.transcript_raw,
-      zoom_topic: transcript.topic,
-      zoom_start_time: transcript.start_time,
-      zoom_duration: transcript.duration,
-    };
-  } else {
-    return console.log(`unknown stage type ${stageCfg.type}`);
+  // Gate: only generateatc===true stages produce a gen doc.
+  if (stageCfg.generateatc !== true) {
+    await recordDropoff("S0", "generateatc_false", { profileid, queueTokenId, stage: currentStage });
+    return console.log(`generateatc!=true for stage ${currentStage} — no gen doc`);
   }
 
+  // Resolve own + pairing sources (shared resolver — parity with the preview).
+  const resolved = await resolveStageData({
+    queueData, queueRef, tokenData, queueTokenId, profileid,
+    stage: currentStage, stageCfg, defaultDb, formsDb: adminForms,
+  });
+
+  // Own-stage source unresolvable → no doc (drop-off), same as old behaviour.
+  if (!resolved.ok) {
+    const dropReason = ownFailureDropoffReason(resolved.reason);
+    await alertAtc("warn", `Own-stage source unresolvable for "${currentStage}" (${resolved.reason}) — ATC job not created.`, {
+      stage: "Stage 0", extra: { profileid, queueTokenId, reason: resolved.reason },
+    });
+    await recordDropoff("S0", dropReason, { profileid, queueTokenId, stage: currentStage });
+    return console.log(`own source unresolvable for ${currentStage}: ${resolved.reason}`);
+  }
+
+  const { stagedata, status, ownSourceref, ownType } = resolved;
+
+  // Dedup: same profile+token+queue+stage with the same own sourceref already exists.
   const existingSnap = await adminATC.collection("queue_atc_generation")
     .where("queueref", "==", adminATC.doc(queueRef.path))
     .where("profileid", "==", profileid)
     .where("queue_token_id", "==", queueTokenId)
     .where("stage", "==", currentStage)
     .get();
-
   if (!existingSnap.empty) {
-    const existingDoc = existingSnap.docs[0];
-    const existingSourceRef = existingDoc.data()["sourceref"];
-    if (existingSourceRef && sourceref && existingSourceRef.path === sourceref.path) {
+    // sourceref is a path STRING now (was a cross-DB DocumentReference); normalize
+    // so dedup still works against any legacy ref-shaped doc too.
+    const srPath = (r) => (typeof r === "string" ? r : (r && r.path) || null);
+    const existingSourceRef = srPath(existingSnap.docs[0].data()["sourceref"]);
+    const ownPath = srPath(ownSourceref);
+    if (existingSourceRef && ownPath && existingSourceRef === ownPath) {
       return console.log(`queue_atc_generation already exists for ${currentStage}`);
     }
   }
@@ -3639,14 +3888,20 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
     queue_token_id: queueTokenId,
     stage: currentStage,
     generateatc: stageCfg.generateatc,
-    type: stageCfg.type,
-    pairingstages: stageCfg.pairingstages || [],
-    sourceref: sourceref,
-    data: data,
+    type: ownType,                              // own-stage type (form|zoom) — byType rollup
+    pairingstages: stageCfg.pairingstages || [], // stored as-is (object/array); read via stagedata, not .includes
+    sourceref: ownSourceref,
+    data: stagedata[currentStage].data,          // own-stage data (backward-compat)
+    stagedata: stagedata,                        // NEW: full resolved own+pairing map
     createdAt: new Date(),
   };
+  // "dataincomplete" blocks S1 + the pod loop until the button completes it.
+  // When complete, leave status UNSET so onQueueAtcGenerationCreate (S1) builds
+  // the prompt and sets "pending" — preserving the create⇒S1⇒(pending⇔prompt) invariant.
+  if (status === "dataincomplete") payload.status = "dataincomplete";
+
   await adminATC.collection("queue_atc_generation").doc(docid).set(payload);
-  console.log(`queue_atc_generation created ${docid} for stage ${currentStage}`);
+  console.log(`queue_atc_generation created ${docid} for stage ${currentStage} (status=${status})`);
 }
 
 // Exposed for integration tests (not deployed functions). onQueueStageChange
@@ -3654,6 +3909,7 @@ async function processStage({ queueData, queueRef, tokenData, queueTokenId, curr
 // ATC logic without the surrounding WATI/Zoom/Slack side effects.
 exports.processStage = processStage;
 exports.resolvePreviousStage = resolvePreviousStage;
+exports.handleRecordingTranscriptCompleted = handleRecordingTranscriptCompleted;
 
 // ---------- Helpers ----------
 async function getTranscript(meetingId) {
@@ -3695,6 +3951,50 @@ async function getTranscript(meetingId) {
     transcript_text: convertVttToLLM(vttContent),
     download_url: transcriptFile.download_url,
   };
+}
+
+// Handles the "recording.transcript_completed" zoomActivitylog branch — this
+// event fires once the transcript specifically is ready (separately from,
+// and later than, "recording.completed"), so unlike that branch there's no
+// timing race here: getTranscript's re-fetch of /meetings/{id}/recordings
+// should reliably find the TRANSCRIPT file at this point.
+// `fetchTranscript` is injectable so tests can avoid hitting the real Zoom API.
+async function handleRecordingTranscriptCompleted(meetingId, { fetchTranscript = getTranscript } = {}) {
+  if (!meetingId) return console.log("handleRecordingTranscriptCompleted: missing meetingId");
+
+  const snapshot = await admin.firestore().collection('live assignment').where('zoomdata.id', '==', meetingId).get();
+  if (snapshot.empty) {
+    return console.log(`handleRecordingTranscriptCompleted: no live assignment for meeting ${meetingId}`);
+  }
+  const liveAssignmentDoc = snapshot.docs[0];
+  if (liveAssignmentDoc.data().transcript_text) {
+    // idempotent guard — Zoom may resend the same webhook event.
+    return console.log(`handleRecordingTranscriptCompleted: transcript already captured for ${liveAssignmentDoc.id}`);
+  }
+
+  try {
+    const result = await fetchTranscript(meetingId);
+    if (!result || !result.transcript_text || !result.transcript_text.trim()) {
+      throw new Error(`empty transcript for meeting ${meetingId}`);
+    }
+    await liveAssignmentDoc.ref.update({
+      transcript_text: result.transcript_text,
+      transcript_raw: result.transcript_raw,
+      zoom_topic: result.topic,
+      zoom_start_time: result.start_time,
+      zoom_duration: result.duration,
+      transcriptCapturedAt: admin.firestore.FieldValue.serverTimestamp(),
+      transcriptCaptureStatus: "captured",
+    });
+    console.log(`handleRecordingTranscriptCompleted: captured transcript for live assignment ${liveAssignmentDoc.id} (meeting ${meetingId})`);
+  } catch (err) {
+    console.error(`handleRecordingTranscriptCompleted: failed for meeting ${meetingId}: ${err.message}`);
+    await liveAssignmentDoc.ref.set({
+      transcriptCaptureStatus: "failed",
+      transcriptCaptureFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      transcriptCaptureLastError: err.message,
+    }, { merge: true });
+  }
 }
 
 function convertVttToLLM(vttText) {

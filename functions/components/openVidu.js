@@ -7,6 +7,9 @@ const cors = require("cors")({ origin: true });
 const functions = require('firebase-functions');
 
 const process = require("process") // NodeJS Process
+// Allow self-signed TLS certs on the OpenVidu endpoint (selfsigned CertificateType).
+// The old account used letsencrypt; this dev deployment does not. Safe for test env.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const axios = require("axios"); // Promise based HTTP Client
 const livekitServer = require("livekit-server-sdk");
 const AWS = require('aws-sdk');
@@ -28,7 +31,7 @@ let autoscaling = null;
 function getEC2() {
   if (!ec2) {
     ec2 = new AWS.EC2({
-      region: 'us-east-1',
+      region: 'ap-south-1',
       accessKeyId: AWS_ACCESS_KEY.value(),
       secretAccessKey: AWS_SECRET.value()
     });
@@ -42,7 +45,7 @@ function getEC2() {
 function getAutoScaling() {
   if (!autoscaling) {
     autoscaling = new AWS.AutoScaling({
-      region: 'us-east-1',
+      region: 'ap-south-1',
       accessKeyId: AWS_ACCESS_KEY.value(),
       secretAccessKey: AWS_SECRET.value()
     });
@@ -86,7 +89,7 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
         try {
             // Initialize AWS
             const autoscaling = new AWS.AutoScaling({
-                region: 'us-east-1',
+                region: 'ap-south-1',
                 accessKeyId: AWS_ACCESS_KEY.value(),
                 secretAccessKey: AWS_SECRET.value()
             });
@@ -309,8 +312,8 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 				output: {
 					case: "s3",
 					value: {
-						bucket: commonService.production ? "openvidu-meet-recordings" : "openvidu-meet-recordings-test",
-						region: "us-east-1",
+						bucket: commonService.production ? "openvidu-meet-recordings-prod" : "openvidu-meet-recordings-dev",
+						region: "ap-south-1",
 						accessKey: awsAccessKey,
 						secret: awsSecret
 					}
@@ -699,7 +702,7 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 
 	// AWS Configuration
 	AWS.config.update({
-		region: 'us-east-1',
+		region: 'ap-south-1',
 		accessKeyId: AWS_ACCESS_KEY.value(),
 		secretAccessKey: AWS_SECRET.value()
 	});
@@ -707,11 +710,6 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 		// 1. Check current master state
 		const masterRunning = await isMasterNodeRunning();
 		console.log(`Master node is currently: ${masterRunning ? 'RUNNING' : 'STOPPED'}`);
-
-    // 2. ✅ NEW: Check and close inactive rooms
-    if (masterRunning) {
-      await checkAndCloseInactiveRooms();
-    }
 
 		// 2. Check for upcoming meetings (for auto-start)
 		const now = admin.firestore.Timestamp.now();
@@ -749,40 +747,38 @@ exports.CheckMasternodeStatus =  onSchedule({schedule: "*/5 * * * *", timeZone: 
 			
 			for (const meeting of meetings) {
 				// Only create if not already pre-created
-				if (!meeting.livekitRoomPreCreated) {
-				try {
-					await createRoomForMeeting(meeting);
-					console.log(` Room pre-created for meeting ${meeting.id}`);
-				} catch (error) {
-					console.error(` Failed to create room for meeting ${meeting.id}:`, error);
-				}
+        if (!meeting.livekitRoomPreCreated) {
+          try {
+            await createRoomForMeeting(meeting);
+            console.log(` Room pre-created for meeting ${meeting.id}`);
+          } catch (error) {
+            console.error(` Failed to create room for meeting ${meeting.id}:`, error);
+          }
 				} else {
-				console.log(`Room already exists for meeting ${meeting.id}`);
+				  console.log(`Room already exists for meeting ${meeting.id}`);
 				}
 			}
 		}
 
-		// 3. Check for active rooms (for auto-stop)
+		// 3. Housekeeping: inactivate empty & idle rooms, then re-count active rooms
 		let activeRooms = 0;
 		if (masterRunning) {
+			await houseKeepRooms();
 			activeRooms = await getActiveRoomsCount();
-			console.log(`Active rooms: ${activeRooms}`);
+			console.log(`Active rooms after housekeeping: ${activeRooms}`);
 		}
 
-
-		// Stop master node if idle
+		// 4. Stop master node if fully idle (no active rooms AND nothing upcoming in 15m)
 		if (masterRunning && activeRooms === 0 && meetings.length === 0) {
-			console.log('No active rooms and no upcoming meetings');
+			console.log('No active rooms and no upcoming meetings - stopping master');
 			await stopMasterNode();
 			console.log('Master node stopped successfully');
 			return null;
 		}
 
-		// Log current state
+		// 5. DC-safe media right-sizing: scale UP to match active rooms (down to 0 happens in stopMasterNode)
 		if (masterRunning) {
-			console.log('Master running - in use');
-		} else {
-			console.log('Master stopped - no meetings scheduled');
+			await reconcileMediaUp(activeRooms);
 		}
 
 		return null;
@@ -820,6 +816,7 @@ async function isMasterNodeRunning() {
  * Check for inactive rooms and close them
  * - Rooms with no live participants (excluding ghost) for >10 minutes
  */
+/* RETIRED 2026-06-30: logic folded into houseKeepRooms() called by CheckMasternodeStatus
 async function checkAndCloseInactiveRooms() {
   try {
     console.log('Checking for inactive rooms...');
@@ -910,6 +907,90 @@ async function checkAndCloseInactiveRooms() {
 
 
 
+
+*/
+
+async function houseKeepRooms() {
+    // Inactivate rooms that are empty AND idle for > 15 minutes.
+    // Occupancy: LiveKit numParticipants is authoritative when reachable (backstop for stale
+    //   participantlive); falls back to Firestore participantlive when LiveKit is unreachable.
+    // Idle: measured from the room doc's own last write time (snap.updateTime) - no egressInfo.
+    const INACTIVE_MS = 15 * 60 * 1000;
+
+    // Authoritative live occupancy from LiveKit (null => unreachable => use participantlive only)
+    let liveCounts = null;
+    try {
+        const roomClient = new livekitServer.RoomServiceClient(
+            LIVEKIT_URL.value(), LIVEKIT_API_KEY.value(), LIVEKIT_API_SECRET.value()
+        );
+        const rooms = await roomClient.listRooms();
+        liveCounts = {};
+        for (const r of rooms) liveCounts[r.name] = r.numParticipants || 0;
+    } catch (e) {
+        console.error('houseKeepRooms: LiveKit listRooms unavailable, using participantlive only:', e && e.message);
+        liveCounts = null;
+    }
+
+    const snap = await admin.firestore().collection('openviduroom').where('active', '==', true).get();
+    const nowMs = Date.now();
+
+    for (const docSnap of snap.docs) {
+        try {
+            const room = docSnap.data();
+            const ghost = room.participantghost;
+            const liveReal = (room.participantlive || []).filter(id => id !== ghost);
+
+            // occupancy - LiveKit authoritative when available, else participantlive
+            const isEmpty = liveCounts !== null
+                ? (liveCounts[docSnap.id] || 0) === 0
+                : liveReal.length === 0;
+
+            // idle - last write to the doc itself
+            const updatedMs = docSnap.updateTime
+                ? docSnap.updateTime.toMillis()
+                : (room.createddate && room.createddate.toMillis ? room.createddate.toMillis() : nowMs);
+            const ageMs = nowMs - updatedMs;
+
+            if (isEmpty && ageMs > INACTIVE_MS) {
+                await docSnap.ref.update({
+                    active: false,
+                    roomstatus: 'finished',
+                    closedReason: 'auto-inactive',
+                    closedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                console.log(`houseKeepRooms: inactivated ${docSnap.id} (empty + idle ${Math.round(ageMs / 60000)}m)`);
+            }
+        } catch (roomErr) {
+            console.error(`houseKeepRooms: skipping room ${docSnap.id}:`, roomErr && roomErr.message);
+        }
+    }
+}
+
+async function reconcileMediaUp(activeRooms) {
+    // DC-safe media scaling: ensure >= 1 media node per active room (CONFIG.maxRoomsPerInstance = 1),
+    // capped at ASG MaxSize. Never scales DOWN here (would risk terminating a node hosting a live
+    // call - LiveKit does not expose room->node mapping). Media returns to 0 via stopMasterNode().
+    try {
+        const autoscaling = getAutoScaling();
+        const result = await autoscaling.describeAutoScalingGroups({
+            AutoScalingGroupNames: [mediaASGName.value()]
+        }).promise();
+        const asg = result.AutoScalingGroups[0];
+        if (!asg) return;
+
+        const target = Math.min(Math.max(activeRooms, 1), asg.MaxSize);
+        if (asg.DesiredCapacity < target) {
+            console.log(`reconcileMediaUp: scaling media ${asg.DesiredCapacity} -> ${target} (active rooms: ${activeRooms})`);
+            await autoscaling.setDesiredCapacity({
+                AutoScalingGroupName: mediaASGName.value(),
+                DesiredCapacity: target,
+                HonorCooldown: false
+            }).promise();
+        }
+    } catch (e) {
+        console.error('reconcileMediaUp failed:', e && e.message);
+    }
+}
 
 async function createRoomForMeeting(meeting) {
   try {
