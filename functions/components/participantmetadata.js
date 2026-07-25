@@ -317,7 +317,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
     const refOf = (journey) =>
-      db.doc(
+      admin.firestore().doc(
         `/participantjourneyproduct/${journey["docid"] ?? journey["_docId"]}`,
       );
 
