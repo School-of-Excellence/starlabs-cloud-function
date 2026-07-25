@@ -3,8 +3,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 //components imports
 const commonService = require('./service');
 const { alertAtc } = require('./queue-required-stage-aiatc-creation/atc_alerts');
-const { buildUpLifeAspirationReport, pickPreviousStage } = require("./queue-required-stage-aiatc-creation/atc_helpers");
-const { resolveStageData } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
+const { buildUpLifeAspirationReport, pickPreviousStage, crossedGenerateStages } = require("./queue-required-stage-aiatc-creation/atc_helpers");
+const { resolveStageData, resolveActiveStages } = require("./queue-required-stage-aiatc-creation/atc_generation_resolver");
 const { recordDropoff } = require("../queue-aiatc-generation-pipeline/se_atc_telemetry");
 // v2 functions
 const { onDocumentCreated , onDocumentWritten , onDocumentUpdated } = require("firebase-functions/v2/firestore");
@@ -120,7 +120,7 @@ exports.onQueueStageChange = onDocumentWritten({
         // confirmation — decided by the added slot's stage (key).
         const isPrepStage = key === 'Evolution Prep Orientation';
         const isScopeEnhancement = key === 'Scope Enhancement';
-        const isGuidedOrientation = key === 'Guided Pre ATC Orientation';
+        const isGuidedOrientation = key === 'Guided Pre ATC Orientation' || key === 'Guided Self ATC Orientation';
         const isDiagnostics = key === 'Diagnostics';
         const formattedTitle = getSlotTitle(addedValue, key);
 
@@ -143,7 +143,8 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
-        if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
+        if (!isPrepStage && !isGuidedOrientation) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
@@ -192,7 +193,7 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_until2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_until2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
 
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
@@ -445,23 +446,31 @@ exports.onQueueStageChange = onDocumentWritten({
       console.log("Touch Point Error - Stage Moved", error.toString())
     }
 
-    // creating queue_atc_generation document where atc is created from ai.
-    // Triggered for the stage that JUST completed (the previous stage). processStage
-    // gates internally on that stage's atcrequiredstages entry having generateatc===true.
+    // Ensure a queue_atc_generation doc exists for EVERY generateatc stage this
+    // token has already crossed — not just the one it happened to move past on THIS
+    // write.
+    //
+    // The old behaviour created a doc for a single transition (pickPreviousStage:
+    // the move from a generateatc stage to the stage right after it). Anything that
+    // didn't land on exactly that transition slipped through forever, with no retry:
+    // a stage skip / variation reorder, a form submitted after the move (own source
+    // empty at trigger time), a trigger error, or a crossing that predated the
+    // pipeline. processStage is idempotent (dedups on profile+token+queue+stage+
+    // sourceref), so re-checking every crossed generateatc stage on each token write
+    // is a self-healing reconciliation: a doc that already exists is a no-op, and a
+    // missing one is filled as soon as its own source resolves. (Still forward-only —
+    // a terminal token that never gets another write needs the one-time backfill.)
     try{
-      const previousStage = await resolvePreviousStage({
-        queueData,
-        tokenData: afterData,
-        currentStage: afterData["currentstage"],
-      });
-      if (!previousStage){console.log("no previous stage resolved")}
-      else{
+      const activeStages = await resolveActiveStages(queueData, afterData, admin.firestore());
+      const stagesToEnsure = crossedGenerateStages(queueData, afterData["currentstage"], activeStages);
+      if (!stagesToEnsure.length){console.log("no crossed generateatc stage to ensure")}
+      for (const stage of stagesToEnsure){
         await processStage({
           queueData,
           queueRef: queueDocSnap.ref,
           tokenData: afterData,
           queueTokenId,
-          currentStage: previousStage,
+          currentStage: stage,
         });
       }
     }catch (error){
@@ -695,14 +704,14 @@ exports.onQueueStageChange = onDocumentWritten({
               });
               console.log('WATI ARCHIVE RESPONSE', response);
 
-          }else if(queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link'){
+          } else if (queueGenerationDocData['stageproperty'][afterData['currentstage']]['actiontype'] === 'link') {
             console.log("action type link");
             //email
             let clientModel = {
-              name:profiledata['name'],
-              stage:afterData['currentstage'],
-              url:queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
-              productname:afterData['productname']
+              name: profiledata['name'],
+              stage: afterData['currentstage'],
+              url: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'],
+              productname: afterData['productname']
             }
             console.log("sending link email");
             // await commonService.postmarkClient.sendEmailWithTemplate({
@@ -715,25 +724,25 @@ exports.onQueueStageChange = onDocumentWritten({
             // });
 
             await commonService.createEmailArchiveDocument({
-              emailData : clientModel,
-              datamodel : clientModel,
-              attachments : [],
-              emailTo : [profiledata["email"]],
-              emailMap : {[profiledata["email"]] : profiledata['profileid']},
-              fileURL : '',
-              from:'starlabs@excellenceinstallation.com',
-              notes : '',
-              profileId : [profileid],
+              emailData: clientModel,
+              datamodel: clientModel,
+              attachments: [],
+              emailTo: [profiledata["email"]],
+              emailMap: { [profiledata["email"]]: profiledata['profileid'] },
+              fileURL: '',
+              from: 'starlabs@excellenceinstallation.com',
+              notes: '',
+              profileId: [profileid],
               postmarkTemplateId: '31423534',
-              templateAlias:'queue_stage_actiontype_link',
+              templateAlias: 'queue_stage_actiontype_link',
               type: 'queue',
-              metadata: {...afterData}
+              metadata: { ...afterData }
             });
 
             // mobileapp
             console.log("sending app notification");
             await commonService.saveNotificationRecord({
-              title: "Hello "+profiledata['name'],
+              title: "Hello " + profiledata['name'],
               message: `You are ready for the ${afterData['currentstage']} stage, Our specialist will invite you for the ${afterData['currentstage']}, and you’ll receive the call link via WhatsApp and Email.`,
               subtitle: null,
               date: admin.firestore.FieldValue.serverTimestamp(),
@@ -743,7 +752,7 @@ exports.onQueueStageChange = onDocumentWritten({
               sticky: false,
               notificationtype: "queue",
               notificationimage: null,
-              metadata: {...afterData},
+              metadata: { ...afterData },
             })
             // await sendNotification({
             //   title: "Hello "+profiledata['name'],
@@ -753,47 +762,89 @@ exports.onQueueStageChange = onDocumentWritten({
             //   logtype: null
             // })
             //wati
-            let countrycode = (![null,undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g,"")
-            let waticontent = {
-              phonenumber : `${profiledata['number']}`,
-              body : {
-                parameters: [
-                  {name: 'name', value: profiledata['name']},
-                  {name: 'stage', value: afterData['currentstage']},
-                  {name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource']}
-                ],
-                broadcast_name: 'queue_stage_linktype_v4',
-                template_name: 'queue_stage_linktype_v4'
+            let countrycode = (![null, undefined].includes(profiledata['countrycode']) ? profiledata['countrycode'] : '+91').replace(/\+/g, "")
+            if (afterData['currentstage'] === 'In Evolution Mapping Activity') {
+              console.log("sending evolution mapping template");
+
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] }
+                  ],
+                  broadcast_name: 'em_now_available_48hrs',
+                  template_name: 'em_now_available_48hrs'
+                }
               }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'em_now_available_48hrs',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
+
+              await admin.firestore().collection("liveevolutionmapping").doc(profileid).set({
+                lastupdated: admin.firestore.FieldValue.serverTimestamp(),
+              }, { merge: true });
+
+            } else {
+              let waticontent = {
+                phonenumber: `${profiledata['number']}`,
+                body: {
+                  parameters: [
+                    { name: 'name', value: profiledata['name'] },
+                    { name: 'stage', value: afterData['currentstage'] },
+                    { name: 'url', value: queueGenerationDocData['stageproperty'][afterData['currentstage']]['actionresource'] }
+                  ],
+                  broadcast_name: 'queue_stage_linktype_v4',
+                  template_name: 'queue_stage_linktype_v4'
+                }
+              }
+              console.log('wati content', waticontent);
+
+              const parameterConfig = waticontent['body']['parameters'].map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }));
+              console.log('Triggered Wati Archive Creation');
+
+              const response = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(waticontent['phonenumber'])],
+                numbermap: { [`${waticontent['phonenumber']}`]: profileid },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: parameterConfig,
+                params: [],
+                profileid: [profileid],
+                templateid: null,
+                watitemplateid: 'queue_stage_linktype_v4',
+                type: 'queue',
+                metadata: { ...afterData }
+              });
+              console.log('WATI ARCHIVE RESPONSE', response);
             }
-            console.log('wati content',waticontent);
-            // await commonService.sendToWhatsappViaWati(waticontent);
-
-          
-            const parameterConfig = waticontent['body']['parameters'].map(param => ({
-              excelColumn: null,
-              fillType: 'static',
-              metadataField: null,
-              name: param.name,
-              staticValue: param.value
-            }));
-            console.log('Triggered Wati Archive Creation');
-
-            const response = await commonService.createWatiArchiveDocument({
-              numbers: [parseInt(waticontent['phonenumber'])],
-              numbermap: { [`${waticontent['phonenumber']}`]: profileid },
-              broadcastname: 'Individual',
-              paramFillMode: 'static',
-              parameterConfig: parameterConfig,
-              params: [],
-              profileid: [profileid],
-              templateid: null,
-              watitemplateid: 'queue_stage_linktype_v4',
-              type: 'queue',
-              metadata: {...afterData}
-            });
-            console.log('WATI ARCHIVE RESPONSE', response);
-            
           } //action type link
         }
       }
@@ -1022,7 +1073,15 @@ exports.studioZoomLink = onDocumentCreated({
                 // signature: hostSignature,
                 hostsignature: hostSignature,
                 participantsignature: participantSignature,
-                zoomdata: zoomresult.data
+                zoomdata: zoomresult.data,
+                // Keep a history of EVERY Zoom meeting id this call ever had, so the
+                // zoomActivitylog webhook can still map events to this live
+                // assignment after a regenerate overwrites zoomdata.id. Matching on
+                // the mutable zoomdata.id alone drops events during regenerate churn.
+                zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+                // When the join token expires — lets the studio show an accurate
+                // "link expired → regenerate" state (derived from the same TTL).
+                linkExpiresAt: commonService.signatureExpiryDate()
               })
             } catch (zoomError) {
               console.log("Zoom Link Not Generated", zoomError.message);
@@ -1528,6 +1587,26 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
     method: 'POST'
   });
   const tokenData = await tokenResponse.json();
+
+  // Robust regenerate: END the previous meeting on Zoom FIRST so the host account
+  // is freed and the NEW meeting can start. Without this, if the old meeting is
+  // still live on the account, Zoom rejects the new one with "you have another
+  // meeting in progress" (studio scenarios 1 & 2). Best-effort — a meeting that is
+  // already ended / not found just returns an error we swallow.
+  const oldMeetingId = oldZoomData && oldZoomData['id'];
+  if (oldMeetingId) {
+    try {
+      await axios.put(`https://api.zoom.us/v2/meetings/${oldMeetingId}/status`,
+        { action: 'end' },
+        { headers: { 'Authorization': 'Bearer ' + tokenData.access_token, 'content-type': 'application/json' } });
+      console.log('[regenerate] ended old meeting', oldMeetingId);
+    } catch (e) {
+      console.warn('[regenerate] could not end old meeting', oldMeetingId,
+        'status=', e && e.response && e.response.status,
+        'body=', e && e.response ? JSON.stringify(e.response.data) : (e && e.message));
+    }
+  }
+
   if(selectedEmail != null && selectedEmail != undefined)
   try {
     const email = selectedEmail; //host email id;
@@ -1590,7 +1669,13 @@ exports.studioZoomLinkRegenerate = onRequest({secrets:[zoomAccountId,zoomClientI
       // signature: hostSignature,
       hostsignature: hostSignature,
       participantsignature: participantSignature,
-      zoomdata: zoomresult.data
+      zoomdata: zoomresult.data,
+      // Append this regenerated meeting id to the history so the webhook can still
+      // map its events after zoomdata.id moves on (see studioZoomLink).
+      zoomMeetingIds: admin.firestore.FieldValue.arrayUnion(zoomresult.data['id']),
+      // Refresh the expiry for the new token (same TTL) so the studio's
+      // "expired" state resets after a regenerate.
+      linkExpiresAt: commonService.signatureExpiryDate()
     })
 
     // Send Slack
@@ -2426,6 +2511,24 @@ exports.onEventDateChange = onDocumentUpdated("event collection/{docid}", async 
 })
 
 
+// Clear a participant's `participantReadyAt` (lobby "waiting" flag) reliably on
+// tab close. The client's own Firestore write during `pagehide` usually never
+// reaches the server (it queues in the closing tab's IndexedDB, which the
+// specialist's separate browser never syncs), leaving the studio stuck on
+// "Participant is waiting". The client sends a `navigator.sendBeacon` here
+// instead — beacons are delivered by the browser even after the page is gone.
+exports.clearParticipantReady = onRequest({ cors: true }, async (req, res) => {
+  const id = (req.query && req.query.liveassignmentid) || (req.body && req.body.liveassignmentid);
+  if (!id) { res.status(400).json({ error: 'missing liveassignmentid' }); return; }
+  try {
+    await admin.firestore().collection('live assignment').doc(String(id)).update({ participantReadyAt: null });
+  } catch (e) {
+    // Best-effort — the doc may not exist or already be cleared.
+    console.warn('clearParticipantReady failed', id, e && e.message);
+  }
+  res.status(200).json(null);
+});
+
 let zoomClipTimings = [];
 let zoomClipCount = 0;
 exports.zoomActivitylog = onRequest({ memory: '2GiB',
@@ -2509,8 +2612,105 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
             }
           }
         })
+
+        // Presence log: stamp meeting end + duration onto `live assignment log`.
+        try {
+          const endObj = request.body.payload.object || {};
+          const la = await getLiveAssignmentByMeeting(endObj.id);
+          if (la) {
+            const patch = {
+              meetingEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+              // Which meeting ended — so the studio can ignore an OLD meeting's end
+              // event after a regenerate (endedMeetingId != current zoomdata.id).
+              endedMeetingId: endObj.id != null ? Number(endObj.id) : null,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+            if (endObj.start_time && endObj.end_time) {
+              patch.meetingStartTimeZoom = endObj.start_time;
+              patch.meetingEndTimeZoom = endObj.end_time;
+              patch.durationSeconds = Math.max(0, Math.round((new Date(endObj.end_time).getTime() - new Date(endObj.start_time).getTime()) / 1000));
+            }
+            await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
+          }
+        } catch (e) { console.warn('live assignment log (meeting.ended) failed', e); }
       }
       //
+      response.status(200).json(null);
+      return;
+    }
+
+    // Meeting started → stamp start time onto `live assignment log`.
+    if (zoomEvent === 'meeting.started') {
+      try {
+        const obj = request.body.payload.object || {};
+        const la = await getLiveAssignmentByMeeting(obj.id);
+        if (la) {
+          await admin.firestore().collection('live assignment log').doc(la.id).set({
+            liveassignmentid: la.id,
+            meetingId: obj.id,
+            meetingStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+            meetingStartTimeZoom: obj.start_time || null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      } catch (e) { console.warn('live assignment log (meeting.started) failed', e); }
+      response.status(200).json(null);
+      return;
+    }
+
+    // Participant/host joined or left → derive presence into `live assignment log`.
+    // Identity is keyed by `customer_key` (= our profile id), which the client sets
+    // at join (participant today; specialists once the screen change lands).
+    if (zoomEvent === 'meeting.participant_joined' || zoomEvent === 'meeting.participant_left') {
+      const obj = request.body.payload.object || {};
+      const meetingId = obj.id;
+      const p = obj.participant || {};
+      const la = await getLiveAssignmentByMeeting(meetingId);
+      if (!la) { response.status(200).json(null); return; }
+
+      const joined = zoomEvent === 'meeting.participant_joined';
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const zoomTime = (joined ? p.join_time : p.leave_time) || null;
+      const { role, profileId } = classifyZoomAttendee(p.customer_key, la.data);
+
+      const patch = {
+        liveassignmentid: la.id,
+        meetingId: meetingId,
+        updatedAt: now,
+      };
+
+      if (role === 'participant') {
+        if (joined) {
+          patch.participantInCallAt = now;
+          patch.participantInCallAtZoom = zoomTime;
+          patch.participantLeftAt = null;
+        } else {
+          patch.participantLeftAt = now;
+          patch.participantLeftAtZoom = zoomTime;
+        }
+      } else {
+        // specialist (or not-yet-identifiable host) → map keyed by profile id, with
+        // a Zoom-uid fallback so nothing is lost until customerKey is set for hosts.
+        const key = profileId || ('uid_' + (p.user_id || p.participant_uuid || p.id || 'unknown'));
+        const spec = { name: p.user_name || null, role: role };
+        if (joined) { spec.joinedAt = now; spec.joinedAtZoom = zoomTime; spec.leftAt = null; }
+        else { spec.leftAt = now; spec.leftAtZoom = zoomTime; }
+        patch.specialists = { [key]: spec };
+      }
+
+      // Fast "call ended" signal. When the host ends the meeting for everyone, the
+      // disconnect arrives here as a participant_left whose `leave_reason` reads like
+      // "Host ended the meeting" — and it fires well before the separate
+      // meeting.ended webhook (which Zoom is slow to emit for a host-only/empty
+      // meeting, ~10s). Stamp meetingEndedAt from this fast event so the studio flips
+      // to "ended" immediately even when no participant ever joined. A plain leave
+      // (specialist stepping out) has a different reason, so this never mis-fires.
+      if (!joined && /ended the meeting/i.test(p.leave_reason || '')) {
+        patch.meetingEndedAt = now;
+        patch.endedMeetingId = meetingId != null ? Number(meetingId) : null;
+      }
+
+      await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
       response.status(200).json(null);
       return;
     }
@@ -2563,7 +2763,54 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
     response.status(500).json({ error: 'Internal Server Error' });
   }
 });
-  
+
+// ── Presence helpers for `live assignment log` (webhook-derived truth) ────────
+// Resolve the live assignment that owns a Zoom meeting id. The webhook sends the
+// meeting id as a STRING, but we store it as a NUMBER (zoomdata.id + zoomMeetingIds
+// come from the Zoom REST response). So try BOTH forms. Prefer the full meeting-id
+// history (survives regenerate churn); fall back to current zoomdata.id.
+async function getLiveAssignmentByMeeting(meetingId) {
+  try {
+    const num = Number(meetingId);
+    const candidates = [];
+    if (!Number.isNaN(num)) candidates.push(num);          // numeric form (how we store it)
+    candidates.push(String(meetingId));                    // string form (belt-and-braces)
+    const col = admin.firestore().collection('live assignment');
+    for (const v of candidates) {
+      let snap = await col.where('zoomMeetingIds', 'array-contains', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+      snap = await col.where('zoomdata.id', '==', v).get();
+      if (!snap.empty) {
+        return { id: snap.docs[0].id, ref: snap.docs[0].ref, data: snap.docs[0].data() };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('[presence] getLiveAssignmentByMeeting ERROR', e && e.message, e);
+    return null;
+  }
+}
+
+// Classify a Zoom attendee by `customer_key` (= our profile id):
+//   participant → customer_key === the live assignment's participantid
+//   specialist  → customer_key ∈ the live assignment's pairing[]
+//   unknown     → no/unrecognised customer_key (e.g. a host before the screen
+//                 change starts setting customerKey for specialists)
+function classifyZoomAttendee(customerKey, la) {
+  if (!customerKey) return { role: 'unknown', profileId: null };
+  const participantId = (la && (la.participantid || (la.token && la.token.profile_id))) || null;
+  if (participantId && customerKey === participantId) {
+    return { role: 'participant', profileId: customerKey };
+  }
+  const pairing = la && Array.isArray(la.pairing) ? la.pairing : [];
+  if (pairing.includes(customerKey)) {
+    return { role: 'specialist', profileId: customerKey };
+  }
+  return { role: 'unknown', profileId: customerKey };
+}
+
 // Main function to fetch, process, and upload video clips
 async function fetchCloudRecording(meetingId, token, liveassignmentData) {
   console.log('Token:', token);
@@ -3199,10 +3446,19 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
   })
 
   //tranfer participant to selected queue & creating Queue Token
-  let tokenno = null 
-  await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
-    tokenno = queueTokenSnap.docs[0].data()["tokennumber"]
-  })
+  const queueTokenCounterRef = admin.firestore().collection("queue_token_counter").doc("tokennumber")
+  const counterSnap = await queueTokenCounterRef.get()
+  if(!counterSnap.exists){
+    let lastValue = 0
+    await admin.firestore().collection("queue_token").orderBy("tokennumber","desc").limit(1).get().then(queueTokenSnap => {
+      lastValue = queueTokenSnap.docs.length != 0 ? queueTokenSnap.docs[0].data()["tokennumber"] : 0
+    })
+    await queueTokenCounterRef.set({
+      tokennumber: lastValue,
+      // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      // lastDelivery: null
+    },{merge:true})
+  }
 
   // every profile to deliverables && participantdeliverysequence && queuetoken && particpantproductstatus update&& close existing deliverables && add new product to that profile
   let batch = admin.firestore().batch()
@@ -3276,9 +3532,37 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
         if(delivery[0].type === "queue" && deliverablesRef != null){
           //create queue token
           const queuedocid = admin.firestore().collection("queue_token").doc().id
+          let currentTokenNo = null
+          let attempts = 0
+          const maxAttempts = 15
+          while(currentTokenNo === null && attempts < maxAttempts){
+            attempts++
+            try{
+              await admin.firestore().runTransaction(async (transaction) => {
+                const counterTxnSnap = await transaction.get(queueTokenCounterRef)
+                const currentValue = counterTxnSnap.exists ? (counterTxnSnap.data().tokennumber || 0) : 0
+                const next = currentValue + 1
+                transaction.set(queueTokenCounterRef,{
+                  tokennumber: next,
+                  // lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+                  // lastDelivery: deliverablesRef
+                },{merge:true})
+                currentTokenNo = next
+              })
+            }catch(error){
+              console.log(`Counter attempt ${attempts} failed for profile ${tokenelement['profile_id']}:`,error.message)
+              if(attempts >= maxAttempts){
+                console.error(`Failed to acquire token number after ${maxAttempts} attempts for profile: ${tokenelement['profile_id']}`)
+                break;
+              }
+              const delay = Math.min(50 * Math.pow(2,attempts) + Math.random() * 200, 5000)
+              await new Promise(resolve => setTimeout(resolve,delay))
+            }
+          }
+
           let queueData = {
             docid: queuedocid,
-            tokennumber: tokenno + 1 + i,
+            tokennumber: currentTokenNo,
             profile_name: tokenelement['profile_name'],
             profile_id: tokenelement['profile_id'],
             currentstage: queuefirststage,

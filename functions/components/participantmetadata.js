@@ -316,6 +316,11 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const cancelledJourneyList = journeyProductProfile.filter((e) => ["cancelled"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
     const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
+    const refOf = (journey) =>
+      db.doc(
+        `/participantjourneyproduct/${journey["docid"] ?? journey["_docId"]}`,
+      );
+
     const newData = {
       activejourney: null,
       subscriptionstart: null,
@@ -326,6 +331,8 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       lastsubscriptionstart: null,
       lastsubscriptionend: null,
       purchasedate: null,
+      purchaseref: null,
+      lastsubscribedpurchaseref: null,
     };
 
     let ongoingJourney = [];
@@ -362,6 +369,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
             newData.purchasedate = liveJourney["purchasedate"]?.toDate() ?? null;
             newData.subscriptionstart = liveJourney["subscriptionstart"]?.toDate() ?? null;
             newData.subscriptionend = liveJourney["subscriptionend"]?.toDate() ?? null;
+            newData.purchaseref = refOf(liveJourney);
           } else {
             newData.customerstatus = "none";
             newData["participantmode"] = null;
@@ -376,6 +384,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
         newData["lastcompletedjourney"] = completedjourney[0]["journeyref"]?.id ?? null;
         newData["lastsubscriptionstart"] = completedjourney[0]["subscriptionstart"]?.toDate() ?? null;
         newData["lastsubscriptionend"] = completedjourney[0]["subscriptionend"]?.toDate() ?? null;
+        newData.lastsubscribedpurchaseref = refOf(completedjourney[0]);
       } else {
         newData.customerstatus = "none";
         newData["participantmode"] = null;
@@ -386,6 +395,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       newData["lastsubscribedjourney"] = cancelledJourney[0]["journeyref"]?.id ?? null;
       newData["lastsubscriptionstart"] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
       newData["lastsubscriptionend"] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
+      newData.lastsubscribedpurchaseref = refOf(completedjourney[0]);
     } else {
       newData.customerstatus = "none";
       newData["participantmode"] = null;
@@ -692,7 +702,7 @@ function arraysEqual(arr1, arr2) {
 exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation request/{docid}",async (change) => {
   let olddoc = change.data.before.data()
   let newdoc = change.data.after.data()
-  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid']
+  let profileid = ![null,undefined].includes(newdoc) ? newdoc['profileid'] : olddoc['profileid'];
   if([null,undefined].includes(olddoc)){console.log("onCreate");}
   else if(olddoc != null && newdoc != null){console.log('onUpdate');}
   else if([null,undefined].includes(newdoc)){console.log("onDelete");}
@@ -772,6 +782,7 @@ exports.eventparticipationdata_to_pmd = onDocumentWritten("event participation r
     }
   }
 })
+
 
 exports.atcdata_to_pmd = onDocumentWritten({document: "atc_apha/{docid}", database: "firestore-atc"},async (change) => {
 
