@@ -142,6 +142,38 @@ function pickPreviousStage(stages, currentStage) {
   return stages[idx - 1];
 }
 
+// Has the token moved PAST `stage` in its active stage list?
+//
+// A currentstage that is not on the list at all counts as CROSSED, not "before":
+// token variations legitimately drop trailing stages (Transfered / Completed), so
+// an indexOf-only test reports terminal participants as not-yet-crossed. Mirrors the
+// V2 ops screen's isCrossed so the "did they cross" question has ONE definition.
+function hasCrossedStage(stages, currentStage, stage) {
+  const target = stages.indexOf(stage);
+  if (target < 0) return false;              // stage isn't on this flow → nothing to cross
+  const at = stages.indexOf(currentStage);
+  if (at < 0) return true;                   // off-list currentstage → terminal → crossed
+  return at > target;
+}
+
+// The reconciliation set: every generateatc stage the token has already crossed.
+//
+// The old trigger created a gen doc for exactly ONE transition — the move from a
+// generateatc stage to the stage immediately after it (pickPreviousStage). A stage
+// skip, a variation reorder, a form submitted after the move, or a crossing that
+// predates the pipeline all slipped through permanently, with no retry. This returns
+// EVERY crossed generateatc stage instead, so the caller can ensure a doc exists for
+// each (processStage is idempotent — it no-ops when the doc is already there). Every
+// later token write becomes a self-healing retry.
+function crossedGenerateStages(queueData, currentStage, activeStages) {
+  const stages = Array.isArray(activeStages) && activeStages.length
+    ? activeStages : (queueData && queueData.stages) || [];
+  return ((queueData && queueData.atcrequiredstages) || [])
+    .filter((s) => s && s.generateatc === true && s.stage &&
+                   hasCrossedStage(stages, currentStage, s.stage))
+    .map((s) => s.stage);
+}
+
 // Pure batching decision extracted from atcPodScheduler.
 function shouldStartPod({ pendingCount, oldestAgeMin, minJobs, flushWaitMinutes }) {
   if (pendingCount === 0) return false;
@@ -151,4 +183,5 @@ function shouldStartPod({ pendingCount, oldestAgeMin, minJobs, flushWaitMinutes 
 module.exports = {
   extractAssistantFinalJson, buildUpLifeAspirationReport, pickPreviousStage, shouldStartPod,
   extractAtcJson, validateAtcStructure, ATC_REQUIRED_KEYS,
+  hasCrossedStage, crossedGenerateStages,
 };

@@ -86,94 +86,137 @@ exports.dashboardPaymentplanWatsonRequest = onRequest(async (req, res) => {
 })
 
 exports.watsonEventParticipation = onRequest({ cors: true }, async (req, res) => {
-  try {
-    const db = admin.firestore();
-    const eventid = req.query.eventid;
-    const toIso = (t) => (t && typeof t.toDate === 'function') ? t.toDate().toISOString() : null;
+    try {
+        const db = admin.firestore();
+        const eventid = req.query.eventid;
+        const toIso = (t) => (t && typeof t.toDate === 'function') ? t.toDate().toISOString() : null;
 
-    // --- No eventid: return the event list for the dropdown ---
-    if (!eventid) {
-      const snap = await db.collection('event collection').orderBy('end_date', 'desc').get();
-      const events = snap.docs.map((d) => {
-        const x = d.data() || {};
-        return { id: d.id, name: x.name || '', start_date: toIso(x.start_date), end_date: toIso(x.end_date) };
-      });
-      return res.status(200).json({ events });
-    }
+        // --- No eventid: return the event list for the dropdown ---
+        if (!eventid) {
+            const snap = await db.collection('event collection').orderBy('end_date', 'desc').get();
+            const events = snap.docs.map((d) => {
+                const x = d.data() || {};
+                return { id: d.id, name: x.name || '', start_date: toIso(x.start_date), end_date: toIso(x.end_date) };
+            });
+            return res.status(200).json({ events });
+        }
 
-    // --- eventid present: return confirmed participation requests for that event ---
-    const eventRef = db.collection('event collection').doc(eventid);
-    const reqSnap = await db.collection('event participation request')
-      .where('eventref', '==', eventRef)
-      .where('status', 'in', ['approved', 'attended'])
-      .get();
+        // --- eventid present: return confirmed participation requests for that event ---
+        const eventRef = db.collection('event collection').doc(eventid);
+        const reqSnap = await db.collection('event participation request')
+            .where('eventref', '==', eventRef)
+            .where('status', 'in', ['approved'])
+            .get();
 
-    const rows = [];
-    const productRefs = [];
-    const seenProducts = new Set();
-    reqSnap.docs.forEach((d) => {
-      const x = d.data() || {};
-      const productid = x.productref ? x.productref.id : null;
-      rows.push({ docid: x.docid || d.id, profileid: x.profileid || null, productid, status: x.status || null });
-      if (x.productref && productid && !seenProducts.has(productid)) {
-        seenProducts.add(productid);
-        productRefs.push(x.productref);
-      }
-    });
+        const rows = [];
+        const arenaRefs = [];
+        const seenArena = new Set();
+        reqSnap.docs.forEach((d) => {
+            const x = d.data() || {};
+            const productid = x.productref ? x.productref.id : null;
+            // arenaeventid on the participation request -> doc in `arena events`.
+            const arenaeventid = x.arenaeventid
+                ? (typeof x.arenaeventid === 'string' ? x.arenaeventid : (x.arenaeventid.id || null))
+                : null;
+            rows.push({
+                docid: x.docid || d.id, profileid: x.profileid || null,
+                productid, productref: x.productref || null, arenaeventid, status: x.status || null,
+            });
+            // Deduped: the requests for one event share (essentially) one arena event,
+            // so this is a single arena-events read regardless of participant count.
+            if (arenaeventid && !seenArena.has(arenaeventid)) {
+                seenArena.add(arenaeventid);
+                arenaRefs.push(db.collection('arena events').doc(arenaeventid));
+            }
+        });
 
-    // Join product names in one batched read.
-    const productMap = {};
-    if (productRefs.length) {
-      const productDocs = await db.getAll(...productRefs);
-      productDocs.forEach((pd) => {
-        if (pd.exists) { const px = pd.data() || {}; productMap[pd.id] = px.product || px.name || ''; }
-      });
-    }
+        // Read the referenced arena event(s); keep only participants whose arena
+        // event has heroevent === true.
+        const heroMap = {};
+        if (arenaRefs.length) {
+            const arenaDocs = await db.getAll(...arenaRefs);
+            arenaDocs.forEach((ad) => {
+                if (ad.exists) { heroMap[ad.id] = (ad.data() || {}).heroevent === true; }
+            });
+        }
+        const heroRows = rows.filter((r) => r.arenaeventid && heroMap[r.arenaeventid] === true);
+        // Not a hero event -> nothing to return; skip the product read entirely.
+        if (!heroRows.length) {
+            return res.status(200).json({ eventid, count: 0, participants: [] });
+        }
 
-    const participants = rows.map((r) => ({ ...r, product: productMap[r.productid] || r.productid || '' }));
-    return res.status(200).json({ eventid, count: participants.length, participants });
-  } catch (err) {
-    console.error('watsonEventParticipation error', err);
-    return res.status(500).json({ error: err.message });
-  }
+        // Join product names in one batched read — only for the hero participants.
+        const productRefs = [];
+        const seenProducts = new Set();
+        heroRows.forEach((r) => {
+            if (r.productref && r.productid && !seenProducts.has(r.productid)) {
+                seenProducts.add(r.productid);
+                productRefs.push(r.productref);
+            }
+        });
+        const productMap = {};
+        if (productRefs.length) {
+            const productDocs = await db.getAll(...productRefs);
+            productDocs.forEach((pd) => {
+                if (pd.exists) { const px = pd.data() || {}; productMap[pd.id] = px.product || px.name || ''; }
+            });
+        }
+
+        const participants = heroRows.map((r) => ({
+            docid: r.docid, profileid: r.profileid, productid: r.productid,
+            arenaeventid: r.arenaeventid, status: r.status,
+            product: productMap[r.productid] || r.productid || '',
+        }));
+        return res.status(200).json({ eventid, count: participants.length, participants });
+    } catch (err) {
+        console.error('watsonEventParticipation error', err);
+        return res.status(500).json({ error: err.message });
+    }
 });
 
 exports.syncETicketEligibility = onRequest(async (req, res) => {
-  try {
-    const d = req.body || {};
-    const id = d.id;
-    if (!id) return res.status(400).json({ error: 'missing id' });
+    try {
+        const d = req.body || {};
+        const id = d.id;
+        if (!id) return res.status(400).json({ error: 'missing id' });
 
-    // Store the FULL doc Watson sends — no field restriction. Recursively convert
-    // ISO datetime strings back to Firestore Timestamps.
-    const convert = (v) => {
-      if (v === null || v === undefined) return v;
-      if (typeof v === 'string') {
-        return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? admin.firestore.Timestamp.fromDate(new Date(v)) : v;
-      }
-      if (Array.isArray(v)) return v.map(convert);
-      if (typeof v === 'object') {
-        const o = {};
-        for (const k of Object.keys(v)) o[k] = convert(v[k]);
-        return o;
-      }
-      return v;
-    };
+        // Deleted in Watson -> remove the mirror doc here too.
+        if (d._deleted === true) {
+            await admin.firestore().collection('e-ticket eligibility').doc(id).delete();
+            console.log('syncETicketEligibility: deleted', id);
+            return res.status(200).json({ success: true, id, deleted: true });
+        }
 
-    const { id: _drop, ...rest } = d;
-    const data = {
-      ...convert(rest),
-      docid: id,
-      syncedfromwatsonat: admin.firestore.FieldValue.serverTimestamp(),
-    };
+        // Store the FULL doc Watson sends — no field restriction. Recursively convert
+        // ISO datetime strings back to Firestore Timestamps.
+        const convert = (v) => {
+            if (v === null || v === undefined) return v;
+            if (typeof v === 'string') {
+                return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? admin.firestore.Timestamp.fromDate(new Date(v)) : v;
+            }
+            if (Array.isArray(v)) return v.map(convert);
+            if (typeof v === 'object') {
+                const o = {};
+                for (const k of Object.keys(v)) o[k] = convert(v[k]);
+                return o;
+            }
+            return v;
+        };
 
-    // Full replace (no merge) so the mirror exactly matches Watson — including
-    // FIELD DELETIONS. Watson always sends the complete doc, so nothing is lost.
-    await admin.firestore().collection('e-ticket eligibility').doc(id).set(data);
-    console.log('syncETicketEligibility: stored', id);
-    return res.status(200).json({ success: true, id });
-  } catch (e) {
-    console.error('syncETicketEligibility error', e);
-    return res.status(500).json({ error: e.message });
-  }
+        const { id: _drop, ...rest } = d;
+        const data = {
+            ...convert(rest),
+            docid: id,
+            syncedfromwatsonat: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        // Full replace (no merge) so the mirror exactly matches Watson — including
+        // FIELD DELETIONS. Watson always sends the complete doc, so nothing is lost.
+        await admin.firestore().collection('e-ticket eligibility').doc(id).set(data);
+        console.log('syncETicketEligibility: stored', id);
+        return res.status(200).json({ success: true, id });
+    } catch (e) {
+        console.error('syncETicketEligibility error', e);
+        return res.status(500).json({ error: e.message });
+    }
 });
