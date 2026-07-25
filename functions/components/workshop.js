@@ -1497,7 +1497,8 @@ async function settleWorkshopPayment(
   if (outcome.newlyCredited) {
     try {
       const url = commonService.production
-        ? await commonService.getWebhookUrl("slackeiflixrefferals")
+        // ? await commonService.getWebhookUrl("slackeiflixrefferals")
+        ? await commonService.getWebhookUrl("slackWorkshopQandA")
         : await commonService.getWebhookUrl("slackDevTest");
       if (url) {
         const webhook = new commonService.IncomingWebhook(url);
