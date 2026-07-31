@@ -54,11 +54,13 @@
     "jsonwebtoken": "^9.0.3",
     "jsrsasign": "^11.1.0",
     "livekit-server-sdk": "^2.6.1",
+    "onnxruntime-node": "^1.27.0",
     "postmark": "^4.0.5",
     "publitio_js_sdk": "^1.1.5",
     "puppeteer-core": "^25.3.0",
     "razorpay": "^2.9.4",
     "readable-stream": "^4.7.0",
+    "sharp": "^0.33.5",
     "twilio": "^5.8.2",
     "xlsx": "^0.18.5"
   },

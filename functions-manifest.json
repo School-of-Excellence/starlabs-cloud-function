@@ -956,6 +956,14 @@
       "codebase": "default"
     },
     {
+      "name": "updateFaceVectors",
+      "type": "onDocumentWritten",
+      "file": "components/participantmetadata.js",
+      "triggerPath": "profile_data/{profileId}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "updateJourneyDataToSalesCRM",
       "type": "onRequest",
       "file": "components/salescrm-updates.js",
