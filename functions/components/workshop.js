@@ -1032,7 +1032,7 @@ async function loadWorkshopPaymentConfig(db, workshopId) {
  * @returns {Promise<{email: (string|null), phonenumber: (string|null), countrycode: (string|null)}>}
  */
 async function resolveWorkshopUserContact(db, profileId) {
-  const empty = { email: null, phonenumber: null, countrycode: null };
+  const empty = { email: null, phonenumber: null, countrycode: null, name: null };
   if (!profileId) {
     return empty;
   }
@@ -1045,6 +1045,7 @@ async function resolveWorkshopUserContact(db, profileId) {
         email: str(d.email),
         phonenumber: str(d.phonenumber),
         countrycode: str(d.countrycode),
+        name: str(d.name),
       };
     }
     const nu = await db.collection("new_user_data").doc(profileId).get();
@@ -1054,6 +1055,7 @@ async function resolveWorkshopUserContact(db, profileId) {
         email: str(d.email),
         phonenumber: str(d.phonenumber),
         countrycode: str(d.countryCode), // capital C in new_user_data
+        name: str(d.name),
       };
     }
   } catch (error) {
@@ -1498,17 +1500,20 @@ async function settleWorkshopPayment(
     try {
       const url = commonService.production
         // ? await commonService.getWebhookUrl("slackeiflixrefferals")
-        ? await commonService.getWebhookUrl("slackWorkshopQandA")
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
         : await commonService.getWebhookUrl("slackDevTest");
       if (url) {
         const webhook = new commonService.IncomingWebhook(url);
         const workshopTitle = detail.title || "Workshop";
         const buyer = contact.email || contact.phonenumber || profileId;
+        const buyername = contact.name;
+        const buyermail = contact.email;
+        const buyerphone = contact.phonenumber;
         const amountText = payment && payment.amount != null
           ? `₹${payment.amount / 100}`
           : "payment";
         const message =
-          `💰 *Payment credited* — *${buyer}* paid *${amountText}* for ` +
+          `💰 *Payment credited* — *${buyername}* - *${buyermail}* - *${buyerphone}* paid *${amountText}* for ` +
           `*${workshopTitle}* 🎉`;
         await webhook.send(message);
         console.log(`settleWorkshopPayment: slack notified for ${paymentId}`);
@@ -1517,6 +1522,34 @@ async function settleWorkshopPayment(
       }
     } catch (error) {
       console.error("settleWorkshopPayment: slack notify failed", error);
+    }
+  }
+
+  // Forward the buyer to Customer.io, only on a fresh credit. The destination
+  // URL lives in `classify/eiflixwebapp.customerio`; when that field is missing
+  // or blank we skip silently. Failures are caught and never break settlement.
+  if (outcome.newlyCredited) {
+    try {
+      const classifySnap = await db
+        .collection("classify")
+        .doc("eiflixwebapp")
+        .get();
+      const customerioUrl = classifySnap.exists
+        ? classifySnap.data().customerio
+        : null;
+      if (typeof customerioUrl === "string" && customerioUrl.trim() !== "") {
+        await axios.post(customerioUrl.trim(), {
+          email: contact.email,
+          phonenumber: contact.phonenumber,
+          workshopid: workshopRef.id,
+          name: contact.name,
+        });
+        console.log(`settleWorkshopPayment: customer.io notified for ${paymentId}`);
+      } else {
+        console.log("settleWorkshopPayment: customer.io URL not configured, skipping.");
+      }
+    } catch (error) {
+      console.error("settleWorkshopPayment: customer.io notify failed", error);
     }
   }
 
