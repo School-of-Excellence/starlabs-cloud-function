@@ -2698,6 +2698,18 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
         patch.specialists = { [key]: spec };
       }
 
+      // Fast "call ended" signal. When the host ends the meeting for everyone, the
+      // disconnect arrives here as a participant_left whose `leave_reason` reads like
+      // "Host ended the meeting" — and it fires well before the separate
+      // meeting.ended webhook (which Zoom is slow to emit for a host-only/empty
+      // meeting, ~10s). Stamp meetingEndedAt from this fast event so the studio flips
+      // to "ended" immediately even when no participant ever joined. A plain leave
+      // (specialist stepping out) has a different reason, so this never mis-fires.
+      if (!joined && /ended the meeting/i.test(p.leave_reason || '')) {
+        patch.meetingEndedAt = now;
+        patch.endedMeetingId = meetingId != null ? Number(meetingId) : null;
+      }
+
       await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
       response.status(200).json(null);
       return;

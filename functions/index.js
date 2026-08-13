@@ -141,6 +141,7 @@ exports.participantAELData_to_pmd = participantMetaDataSystem.participantAELData
 exports.participantsely_to_pmd = participantMetaDataSystem.participantsely_to_pmd // w - "/participants ely/{docid}"
 exports.bigAggregateLevelUpdate_to_pmd = participantMetaDataSystem.bigAggregateLevelUpdate_to_pmd // w - "/big aggregate level/{docid}"
 exports.subscriptionend_JourneystatusUpdate = participantMetaDataSystem.subscriptionend_JourneystatusUpdate // Check subscription ended
+exports.updateFaceVectors = participantMetaDataSystem.updateFaceVectors // w - "profile_data/{profileId}" -> face_detection vectors
 
 //participant mode 
 exports.calculateParticipantMode = participantModeSystem.calculateParticipantMode // w - '/participantsproduct/{id}'
