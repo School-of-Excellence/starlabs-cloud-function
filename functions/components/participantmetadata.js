@@ -317,7 +317,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
     const closedLastJourneyList = journeyProductProfile.filter((e) => ["closed lost"].includes(e["journeystatus"]) && ![null, undefined, ""].includes(e["journeyref"]));
 
     const refOf = (journey) =>
-      db.doc(
+      admin.firestore().doc(
         `/participantjourneyproduct/${journey["docid"] ?? journey["_docId"]}`,
       );
 
@@ -1080,3 +1080,278 @@ exports.subscriptionend_JourneystatusUpdate = onSchedule({schedule : "05 00 * * 
     }
   })
 })
+
+/* =====================================================================
+ * Face vectors — recompute ArcFace embeddings when a profile image changes.
+ *   exports.updateFaceVectors — Firestore trigger on profile_data/{profileId}
+ * Pipeline: SCRFD detect -> 5-point align (112x112) -> ArcFace embedding with
+ * MobileFaceNet + ResNet50 -> L2-normalized 512-d. onnxruntime-node & sharp are
+ * lazy-required inside the helpers so the other exports don't pay their
+ * native-load cost on cold start. Helpers are `fv_`-prefixed to avoid name
+ * collisions with the rest of this module.
+ * ===================================================================== */
+const FV_MODEL_URLS = {
+  det: process.env.DET_URL || 'https://huggingface.co/immich-app/buffalo_s/resolve/main/detection/model.onnx',
+  mbf: process.env.MBF_URL || 'https://huggingface.co/immich-app/buffalo_s/resolve/main/recognition/model.onnx',
+  r50: process.env.R50_URL || 'https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx',
+};
+const FV_DET_SIZE = 640;
+const FV_INPUT = 112;
+const FV_REF = [
+  [38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
+  [41.5493, 92.3655], [70.7299, 92.2041],
+];
+let fv_sessions = null;
+
+async function fv_fetchBuffer(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`fetch ${url} -> ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+async function fv_getSessions() {
+  if (fv_sessions) return fv_sessions;
+  const ort = require('onnxruntime-node');
+  const [det, mbf, r50] = await Promise.all([
+    fv_fetchBuffer(FV_MODEL_URLS.det), fv_fetchBuffer(FV_MODEL_URLS.mbf), fv_fetchBuffer(FV_MODEL_URLS.r50),
+  ]);
+  fv_sessions = {
+    det: await ort.InferenceSession.create(det),
+    mbf: await ort.InferenceSession.create(mbf),
+    r50: await ort.InferenceSession.create(r50),
+  };
+  return fv_sessions;
+}
+
+const fv_area = (b) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+function fv_iou(a, b) {
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[2], b[2]), y2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const u = fv_area(a) + fv_area(b) - inter;
+  return u <= 0 ? 0 : inter / u;
+}
+function fv_nms(dets, iouThr) {
+  const order = [...dets].sort((a, b) => b.score - a.score);
+  const keep = [];
+  while (order.length) {
+    const best = order.shift();
+    keep.push(best);
+    for (let i = order.length - 1; i >= 0; i--) {
+      if (fv_iou(best.box, order[i].box) > iouThr) order.splice(i, 1);
+    }
+  }
+  return keep;
+}
+
+async function fv_detectFace(session, imgBuffer, origW, origH) {
+  const ort = require('onnxruntime-node');
+  const sharp = require('sharp');
+  const scale = Math.min(FV_DET_SIZE / origW, FV_DET_SIZE / origH);
+  const newW = Math.round(origW * scale);
+  const newH = Math.round(origH * scale);
+  const resized = await sharp(imgBuffer)
+    .resize(newW, newH, { fit: 'fill' })
+    .extend({ top: 0, left: 0, bottom: FV_DET_SIZE - newH, right: FV_DET_SIZE - newW, background: { r: 0, g: 0, b: 0 } })
+    .removeAlpha().toColourspace('srgb').raw().toBuffer();
+  const areaPx = FV_DET_SIZE * FV_DET_SIZE;
+  const data = new Float32Array(3 * areaPx);
+  for (let i = 0; i < areaPx; i++) {
+    data[i] = (resized[i * 3] - 127.5) / 128.0;
+    data[areaPx + i] = (resized[i * 3 + 1] - 127.5) / 128.0;
+    data[2 * areaPx + i] = (resized[i * 3 + 2] - 127.5) / 128.0;
+  }
+  const feeds = {};
+  feeds[session.inputNames[0]] = new ort.Tensor('float32', data, [1, 3, FV_DET_SIZE, FV_DET_SIZE]);
+  const out = await session.run(feeds);
+  const scores = [], bboxes = [], kpss = [];
+  for (const name of session.outputNames) {
+    const t = out[name];
+    const last = t.dims[t.dims.length - 1];
+    if (last === 1) scores.push(t);
+    else if (last === 4) bboxes.push(t);
+    else if (last === 10) kpss.push(t);
+  }
+  const byLen = (a, b) => b.data.length - a.data.length;
+  scores.sort(byLen); bboxes.sort(byLen); kpss.sort(byLen);
+  const strides = [8, 16, 32];
+  const numAnchors = 2, thresh = 0.5;
+  const dets = [];
+  for (let s = 0; s < strides.length; s++) {
+    const stride = strides[s];
+    const feat = FV_DET_SIZE / stride;
+    const score = scores[s].data, bbox = bboxes[s].data, kps = kpss[s].data;
+    let idx = 0;
+    for (let y = 0; y < feat; y++) {
+      for (let x = 0; x < feat; x++) {
+        for (let a = 0; a < numAnchors; a++, idx++) {
+          if (score[idx] < thresh) continue;
+          const cx = x * stride, cy = y * stride;
+          const l = bbox[idx * 4] * stride, t = bbox[idx * 4 + 1] * stride;
+          const r = bbox[idx * 4 + 2] * stride, b = bbox[idx * 4 + 3] * stride;
+          const pts = [];
+          for (let k = 0; k < 5; k++) {
+            pts.push([
+              (cx + kps[idx * 10 + k * 2] * stride) / scale,
+              (cy + kps[idx * 10 + k * 2 + 1] * stride) / scale,
+            ]);
+          }
+          dets.push({ score: score[idx], box: [(cx - l) / scale, (cy - t) / scale, (cx + r) / scale, (cy + b) / scale], kps: pts });
+        }
+      }
+    }
+  }
+  if (dets.length === 0) return null;
+  const keep = fv_nms(dets, 0.4);
+  keep.sort((p, q) => fv_area(q.box) - fv_area(p.box));
+  return keep[0];
+}
+
+function fv_bilinear(rgb, w, h, x, y) {
+  const x0 = Math.floor(x), y0 = Math.floor(y), x1 = x0 + 1, y1 = y0 + 1;
+  const fx = x - x0, fy = y - y0;
+  const at = (xx, yy, c) => {
+    const cx = Math.min(Math.max(xx, 0), w - 1);
+    const cy = Math.min(Math.max(yy, 0), h - 1);
+    return rgb[(cy * w + cx) * 3 + c];
+  };
+  const out = [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    const top = at(x0, y0, c) * (1 - fx) + at(x1, y0, c) * fx;
+    const bot = at(x0, y1, c) * (1 - fx) + at(x1, y1, c) * fx;
+    out[c] = Math.round(top * (1 - fy) + bot * fy);
+  }
+  return out;
+}
+function fv_solve4(a, b) {
+  const m = a.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < 4; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 4; r++) if (Math.abs(m[r][col]) > Math.abs(m[piv][col])) piv = r;
+    [m[col], m[piv]] = [m[piv], m[col]];
+    const d = m[col][col];
+    if (Math.abs(d) < 1e-12) continue;
+    for (let j = col; j <= 4; j++) m[col][j] /= d;
+    for (let r = 0; r < 4; r++) {
+      if (r === col) continue;
+      const f = m[r][col];
+      for (let j = col; j <= 4; j++) m[r][j] -= f * m[col][j];
+    }
+  }
+  return [m[0][4], m[1][4], m[2][4], m[3][4]];
+}
+function fv_similarity(src, dst) {
+  const ata = Array.from({ length: 4 }, () => [0, 0, 0, 0]);
+  const atb = [0, 0, 0, 0];
+  const addRow = (row, d) => {
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) ata[i][j] += row[i] * row[j];
+      atb[i] += row[i] * d;
+    }
+  };
+  for (let k = 0; k < src.length; k++) {
+    const [sx, sy] = src[k]; const [dx, dy] = dst[k];
+    addRow([sx, -sy, 1, 0], dx);
+    addRow([sy, sx, 0, 1], dy);
+  }
+  return fv_solve4(ata, atb);
+}
+function fv_align(rgb, w, h, srcPts) {
+  const [a, b, tx, ty] = fv_similarity(srcPts, FV_REF);
+  const det = a * a + b * b;
+  const ia = a / det, ib = b / det;
+  const out = new Uint8Array(FV_INPUT * FV_INPUT * 3);
+  for (let y = 0; y < FV_INPUT; y++) {
+    for (let x = 0; x < FV_INPUT; x++) {
+      const dx = x - tx, dy = y - ty;
+      const [r, g, bl] = fv_bilinear(rgb, w, h, ia * dx + ib * dy, -ib * dx + ia * dy);
+      const o = (y * FV_INPUT + x) * 3;
+      out[o] = r; out[o + 1] = g; out[o + 2] = bl;
+    }
+  }
+  return out;
+}
+
+async function fv_embed(session, rgb112) {
+  const ort = require('onnxruntime-node');
+  const areaPx = FV_INPUT * FV_INPUT;
+  const data = new Float32Array(3 * areaPx);
+  for (let i = 0; i < areaPx; i++) {
+    data[i] = (rgb112[i * 3] - 127.5) / 127.5;
+    data[areaPx + i] = (rgb112[i * 3 + 1] - 127.5) / 127.5;
+    data[2 * areaPx + i] = (rgb112[i * 3 + 2] - 127.5) / 127.5;
+  }
+  const feeds = {};
+  feeds[session.inputNames[0]] = new ort.Tensor('float32', data, [1, 3, FV_INPUT, FV_INPUT]);
+  const out = await session.run(feeds);
+  const raw = out[session.outputNames[0]].data;
+  let sum = 0;
+  for (let i = 0; i < raw.length; i++) sum += raw[i] * raw[i];
+  const norm = Math.sqrt(sum) || 1;
+  return Array.from(raw, (v) => v / norm);
+}
+
+// image Buffer -> { mbf:[512], r50:[512] } or null (no face).
+async function fv_computeVectors(imgBuffer) {
+  const sharp = require('sharp');
+  const sessions = await fv_getSessions();
+  const meta = await sharp(imgBuffer).metadata();
+  const face = await fv_detectFace(sessions.det, imgBuffer, meta.width, meta.height);
+  if (!face) return null;
+  const { data, info } = await sharp(imgBuffer)
+    .removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
+  const aligned = fv_align(data, info.width, info.height, face.kps);
+  return { mbf: await fv_embed(sessions.mbf, aligned), r50: await fv_embed(sessions.r50, aligned) };
+}
+
+const FV_IMAGE_FIELDS = ['profileimg', 'profile'];
+
+// Declared directly on exports, exactly like the other triggers in this file.
+exports.updateFaceVectors = onDocumentWritten(
+  { document: 'profile_data/{profileId}', region: 'asia-south1', memory: '4GiB', timeoutSeconds: 300, concurrency: 1 },
+  async (event) => {
+    const after = event.data && event.data.after && event.data.after.data();
+    if (!after) return;
+    const before = (event.data && event.data.before && event.data.before.data()) || {};
+    const profileId = event.params.profileId;
+
+    const changed = {};
+    for (const f of FV_IMAGE_FIELDS) {
+      const url = after[f];
+      if (typeof url === 'string' && url.trim() && url !== before[f]) changed[f] = url.trim();
+    }
+    if (Object.keys(changed).length === 0) return;
+    console.log(`updateFaceVectors ${profileId}: ${Object.keys(changed).join(', ')}`);
+
+    const doc = {
+      profileid: profileId,
+      name: after.name || null,
+      models: ['mbf', 'r50'],
+      dims: 512,
+      source: 'cloud_function',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    let stored = 0;
+    for (const [field, url] of Object.entries(changed)) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const vecs = await fv_computeVectors(buf);
+        if (!vecs) { doc[`${field}_error`] = 'no face detected'; continue; }
+        doc[`${field}_url`] = url;
+        doc[`${field}_face_detected`] = true;
+        doc[`${field}_mbf`] = vecs.mbf;
+        doc[`${field}_r50`] = vecs.r50;
+        stored++;
+      } catch (e) {
+        doc[`${field}_error`] = String(e && e.message ? e.message : e);
+        console.error(`${profileId}/${field} failed`, e);
+      }
+    }
+    if (stored > 0) {
+      await admin.firestore().collection('face_detection').doc(profileId).set(doc, { merge: true });
+      console.log(`${profileId}: stored ${stored} field(s)`);
+    }
+  }
+);
