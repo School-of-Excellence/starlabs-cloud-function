@@ -677,24 +677,6 @@ async function sendSalesCaptureToSalesChannel(value) {
 		arraybonus.push(mapProduct[leaddata['bonus'][i]])
 	}
 
-	// Resolve journey name for the Slack message. For addon purchases the payload's
-	// 'journey' is null (no new journey is sold), so fall back to the customer's most
-	// recent journey purchase looked up from salesleads by profileid.
-	let journeyname = null;
-	if (![null, undefined].includes(leaddata['journey'])) {
-		journeyname = mapJourney[leaddata['journey']];
-	} else if (![null, undefined].includes(leaddata['profileid'])) {
-		const salesleadsSnap = await admin.firestore().collection('salesleads')
-			.where('profileid', '==', leaddata['profileid'])
-			.get();
-		const journeyDocs = salesleadsSnap.docs.map(d => d.data())
-			.filter(d => ![null, undefined].includes(d['journey']))
-			.sort((a, b) => (b['purchasedate']?.toMillis?.() ?? 0) - (a['purchasedate']?.toMillis?.() ?? 0));
-		if (journeyDocs.length > 0) {
-			journeyname = mapJourney[journeyDocs[0]['journey']];
-		}
-	}
-
 	console.log(leaddata);
 	console.log(addonarray);
 	console.log(arraybonus);
@@ -742,7 +724,7 @@ async function sendSalesCaptureToSalesChannel(value) {
 				"type": "section",
 				"text": {
 					"type": "mrkdwn",
-					"text": `*Journey* : ${journeyname}`
+					"text": `*Journey* : ${![null, undefined].includes(leaddata['journey']) ? mapJourney[leaddata['journey']] : null}`
 				}
 			},
 			{
