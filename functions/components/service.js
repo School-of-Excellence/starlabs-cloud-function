@@ -669,7 +669,7 @@ async function sendSalesCaptureToSalesChannel(value) {
 
 	let addonarray = [];
 	for (let i = 0; i < leaddata['addons'].length; i++) {
-		addonarray.push(mapProduct[leaddata['addons'][i]['addons']])
+		addonarray.push(mapProduct[leaddata['addons'][i]])
 	}
 
 	let arraybonus = [];
