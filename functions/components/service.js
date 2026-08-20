@@ -787,6 +787,13 @@ async function sendSalesCaptureToSalesChannel(value) {
 				"type": "section",
 				"text": {
 					"type": "mrkdwn",
+					"text": `*Installment Start Date* : ${leaddata['installmentstartdate'].toDate ? leaddata['installmentstartdate'].toDate().toLocaleDateString('en-CA') : new Date(leaddata['installmentstartdate']).toLocaleDateString('en-CA')}`,
+				}
+			},
+			{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
 					"text": `*Notes* : ${leaddata['notes']}`,
 				}
 			},
