@@ -298,13 +298,6 @@
       "codebase": "default"
     },
     {
-      "name": "flushOpenviduCallQuality",
-      "type": "onRequest",
-      "file": "components/openVidu.js",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
       "name": "generalContentUpdate",
       "type": "onRequest",
       "file": "components/content.js",

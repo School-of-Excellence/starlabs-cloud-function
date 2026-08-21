@@ -19,6 +19,7 @@ const ociCommon = require("oci-common");
 const ociCore = require("oci-core");
 const livekitServer = require("livekit-server-sdk");
 const axios = require("axios");
+const commonService = require("./service");
 
 const LIVEKIT_URL_OCI = defineSecret("LIVEKIT_URL_OCI");
 const LIVEKIT_API_KEY_OCI = defineSecret("LIVEKIT_API_KEY_OCI");
@@ -45,10 +46,15 @@ exports.SECRETS = [LIVEKIT_URL_OCI, LIVEKIT_API_KEY_OCI, LIVEKIT_API_SECRET_OCI]
 exports.RECORDING_SECRETS = [OCI_S3_ACCESS_KEY, OCI_S3_SECRET];
 exports.API_SECRETS = [OCI_TENANCY_OCID, OCI_USER_OCID, OCI_KEY_FINGERPRINT, OCI_API_PRIVATE_KEY, OCI_MASTER_INSTANCE_ID, OCI_MEDIA_POOL_ID];
 
-// Dev stack constants (hardcoded like the recording endpoint/bucket above; prod gets its
-// own values in Phase 6). MAX_MEDIA_NODES caps pool growth — OCI pools have no native max.
+// Shared by BOTH stacks: the dev and prod clusters live in the same tenancy, the same
+// compartment and the same region, so these are environment-independent. The master and
+// pool OCIDs, which DO differ per stack, arrive as secrets (see API_SECRETS above), and
+// the recording bucket is resolved per environment below.
 const COMPARTMENT_ID = "ocid1.compartment.oc1..aaaaaaaahjgkgr2isamqfnk57wpqhcspchezpvo6jgwwbv2tfgn74o45nxca";
 const OCI_REGION = "ap-mumbai-1";
+// Caps pool growth — OCI pools have no native max. NOTE: the tenancy limit is 13 E5 OCPUs
+// (≈3 media nodes at 3 OCPU each, fewer while the other environment is running), so this
+// value currently over-promises. Lower it, or raise the service limit, before relying on it.
 const MAX_MEDIA_NODES = 5;
 
 // One-room-one-node, same as AWS (CONFIG.maxRoomsPerInstance = 1 there).
@@ -61,14 +67,34 @@ exports.creds = () => ({
   secret: LIVEKIT_API_SECRET_OCI.value(),
 });
 
-// S3Upload config for LiveKit EgressClient recording output (dev cluster's appdata
-// bucket). OCI's S3-compat API requires path-style addressing (bucket in the path,
-// namespace in the host). Prod storage is planned as Cloudflare R2 (Phase 6), so this
-// stays dev-only until then.
+// The Object Storage namespace is per-TENANCY, so the S3-compat endpoint is the same for
+// dev and prod. Only the appdata bucket differs (each stack auto-creates its own,
+// `<stackName>-appdata-<random>`), so that is the one value resolved per environment.
+//
+// Resolution order: OCI_RECORDING_BUCKET env var (set it in functions/.env.<projectId>;
+// `verify-oci-stack.sh <env>` prints the exact name after an apply) → the dev bucket.
+// On the production project a missing value THROWS rather than falling back: silently
+// writing prod recordings into the dev bucket is far worse than a loud failure.
+const DEV_RECORDING_BUCKET = "openvidu-elastic-dev-appdata-d16985";
+function recordingBucket() {
+  const configured = (process.env.OCI_RECORDING_BUCKET || "").trim();
+  if (configured) return configured;
+  if (commonService.production) {
+    throw new Error(
+      "OCI_RECORDING_BUCKET is not set for the production project. Add it to " +
+      "functions/.env.fir-sample-aae4a (verify-oci-stack.sh prod prints the value). " +
+      "Refusing to fall back to the dev bucket."
+    );
+  }
+  return DEV_RECORDING_BUCKET;
+}
+
+// S3Upload config for LiveKit EgressClient recording output. OCI's S3-compat API requires
+// path-style addressing (bucket in the path, namespace in the host).
 exports.recordingStorage = () => ({
   endpoint: "https://bmx7corpjbkz.compat.objectstorage.ap-mumbai-1.oraclecloud.com",
-  bucket: "openvidu-elastic-dev-appdata-d16985",
-  region: "ap-mumbai-1",
+  bucket: recordingBucket(),
+  region: OCI_REGION,
   accessKey: OCI_S3_ACCESS_KEY.value(),
   secret: OCI_S3_SECRET.value(),
   forcePathStyle: true,
@@ -537,14 +563,16 @@ async function createOciRoomForMeeting(meeting, clients) {
 }
 
 // Which cloud is allowed to act right now. Written by the monitor screen's selector
-// (developer role). Fail-safe default 'aws' (matches the pre-multiprovider behavior).
+// (developer role). STRICTLY the DB value (openvidu server/mediaprovider) — no hardcoded
+// fallback (operator decision 2026-08-14): if the doc/field is missing or unreadable,
+// return null so this controller takes NO lifecycle actions this tick.
 async function getActiveProvider() {
   try {
     const snap = await admin.firestore().doc('openvidu server/mediaprovider').get();
-    return (snap.exists && snap.data().activeprovider) || 'aws';
+    return (snap.exists && snap.data().activeprovider) || null;
   } catch (e) {
-    console.error('getActiveProvider failed, defaulting to aws:', e && e.message);
-    return 'aws';
+    console.error('getActiveProvider failed — OCI controller will idle:', e && e.message);
+    return null;
   }
 }
 

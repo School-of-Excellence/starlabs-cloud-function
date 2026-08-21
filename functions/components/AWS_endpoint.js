@@ -237,14 +237,16 @@ exports.getSignedUrlAWS = onRequest({ secrets: [AWS_ACCESS_KEY, AWS_SECRET] }, a
 
 // ---- AWS infrastructure (moved verbatim from openVidu.js) ----
 // Which cloud is allowed to act right now (written by the monitor screen's selector).
-// Fail-safe default 'aws' preserves pre-multiprovider behavior.
+// STRICTLY the DB value (openvidu server/mediaprovider) — no hardcoded fallback (operator
+// decision 2026-08-14): if the doc/field is missing or unreadable, return null so this
+// controller takes NO lifecycle actions this tick.
 async function getActiveProvider() {
 	try {
 		const snap = await admin.firestore().doc('openvidu server/mediaprovider').get();
-		return (snap.exists && snap.data().activeprovider) || 'aws';
+		return (snap.exists && snap.data().activeprovider) || null;
 	} catch (e) {
-		console.error('getActiveProvider failed, defaulting to aws:', e && e.message);
-		return 'aws';
+		console.error('getActiveProvider failed — AWS controller will idle:', e && e.message);
+		return null;
 	}
 }
 

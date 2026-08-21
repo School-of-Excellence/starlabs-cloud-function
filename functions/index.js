@@ -253,7 +253,7 @@ exports.onEventOci = openViduSystem.onEventOci // OCI cluster webhook (OCI-signe
 exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
-exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
+// flushOpenviduCallQuality removed 2026-08-14 (no callers) — archived in components/depreciated.js
 
 // LiveKit Cloud + Krisp variant (managed — no autoscaling). Same Firestore workflow.
 exports.createLivekitCloudToken = livekitCloudSystem.createLivekitCloudToken
