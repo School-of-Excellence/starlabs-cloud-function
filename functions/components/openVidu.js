@@ -56,7 +56,7 @@ exports.createOpenViduToken = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_
     }
 
     const { roomName, participantName, participantId } = req.body;
-    const provider = (req.body.provider || "aws").toString().toLowerCase();
+    const provider = (req.body.provider || "oci").toString().toLowerCase();
 
     if (!roomName || !participantName) {
       return res.status(400).json({
@@ -176,7 +176,7 @@ exports.openViduStartRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_
 		}
 
 		const { roomId } = req.body;
-		const provider = (req.body.provider || "aws").toString().toLowerCase();
+		const provider = (req.body.provider || "oci").toString().toLowerCase();
 		if (!roomId) {
 			return res.status(400).json({
 				error: "roomId is required",
@@ -250,7 +250,7 @@ exports.openViduStopRecording = onRequest({ secrets: [LIVEKIT_API_KEY, LIVEKIT_A
 		}
 
 		const { egressId, roomId } = req.body;
-		const provider = (req.body.provider || "aws").toString().toLowerCase();
+		const provider = (req.body.provider || "oci").toString().toLowerCase();
 		if (!egressId || !roomId) {
 			return res.status(400).json({
 				error: "egressId & roomId is required",
@@ -606,29 +606,5 @@ exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 	});
 });
 
-
-exports.flushOpenviduCallQuality = functions.https.onRequest({cors: true}, async (req, res) => {
-  try {
-    const { documentId, snapshots, exitReason } = req.body;
-
-    if (!documentId || !Array.isArray(snapshots)) {
-      res.status(400).send('Missing documentId or snapshots');
-      return;
-    }
-
-    const ref = admin.firestore().doc(`openviduCallQuality/${documentId}`);
-
-    await ref.update({
-      snapshots: admin.firestore.FieldValue.arrayUnion(...snapshots),
-      exitReason: exitReason ?? 'tab_closed',
-      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    console.log(`✅ Beacon flush: ${snapshots.length} snapshots → ${documentId}`);
-    res.status(200).send('ok');
-
-  } catch (err) {
-    console.error('❌ flushCallQuality error:', err);
-    res.status(500).send('Internal error');
-  }
-});
+// flushOpenviduCallQuality removed 2026-08-14 — no web/mobile callers; archived in
+// components/depreciated.js; deployed instance deleted via firebase functions:delete.
