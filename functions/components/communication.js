@@ -76,7 +76,7 @@ exports.notifyMobileApp = onDocumentCreated({
   const notificationType = notificationData["notificationtype"] || "ahupdate";
   const notificationImage = notificationData["notificationimage"] || null;
   const metaData = notificationData["metadata"] || {};
-  const profileID = notificationData["profileid"] || [];
+  let profileID = notificationData["profileid"] || [];
 
   // receivingapp routing. Absent → current (breakthroughs) behaviour for
   // backward compatibility. "eiflixapp" → only EiFlix (EIFLIX_FCM_token, no
@@ -102,6 +102,8 @@ exports.notifyMobileApp = onDocumentCreated({
   const failedlist = {};
   const profilesWithUserRef = [];
   const profilesWithFCMToken = [];
+  // Delivery hold — profile_data.deliveryonhold === true is never notified.
+  const heldProfileIds = new Set();
 
   try {
     // ============ STEP 1: FETCH PROFILES TO GET USER_REF FOR LOGS ============
@@ -134,6 +136,14 @@ exports.notifyMobileApp = onDocumentCreated({
         const profileId = profileDoc.id;
         foundProfileIds.push(profileId);
 
+        // Held profiles get no FCM push and no in-app log. Collected in a Set and
+        // filtered once below — new_user_data docs come through this same loop and
+        // carry no deliveryonhold field, so they must not un-hold a profile.
+        if (profileData["deliveryonhold"] === true) {
+          heldProfileIds.add(profileId);
+          continue;
+        }
+
         let userId = null;
         if (profileData["user_ref"]) {
           userId = profileData["user_ref"].id;
@@ -160,6 +170,28 @@ exports.notifyMobileApp = onDocumentCreated({
         failedlist[pid] = "Profile not found in database";
       }
     });
+
+    // Drop held profiles before STEP 2 (writes in-app notification logs) and
+    // STEP 3 (fetches FCM tokens). Not added to failedlist — they are skipped,
+    // not failed, and nothing about the hold is persisted on the record.
+    if (heldProfileIds.size > 0) {
+      profileID = profileID.filter(pid => !heldProfileIds.has(pid));
+      heldProfileIds.forEach(pid => delete failedlist[pid]);
+      console.log(`Delivery on hold — skipping ${heldProfileIds.size} profile(s):`, [...heldProfileIds]);
+      if (profileID.length === 0) {
+        console.log("Every recipient is on delivery hold — nothing to send");
+        await snapshot.data.ref.update({
+          profilesuccess: [],
+          profilefailed: [],
+          // arrayUnion, never assignment — the composer may already have recorded
+          // holds on this doc, and overwriting would wipe them.
+          communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds),
+          failedlist: failedlist,
+          success: true
+        }).catch(e => console.error("Failed to record delivery holds:", e));
+        return;
+      }
+    }
 
     console.log("Users Found", allUsersForLogs);
     console.log(`Found ${allUsersForLogs.length} users with user_ref for logs`);
@@ -545,7 +577,7 @@ exports.notifyMobileApp = onDocumentCreated({
     // ============ STEP 6: UPDATE FINAL RESULT ============
     const failedProfile = profileID.filter(e => !successfullProfileid.includes(e));
 
-    await snapshot.data.ref.update({
+    const finalUpdate = {
       profilesuccess: successfullProfileid,
       profilefailed: failedProfile,
       appFCMSuccess: appFCMSuccess,
@@ -556,7 +588,13 @@ exports.notifyMobileApp = onDocumentCreated({
       webFCMFailed: webFCMFailed,
       failedlist: failedlist,
       success: true
-    });
+    };
+    // Only when non-empty: arrayUnion() with no arguments is rejected, and an
+    // assignment here would wipe holds the composer already recorded.
+    if (heldProfileIds.size > 0) {
+      finalUpdate.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+    }
+    await snapshot.data.ref.update(finalUpdate);
 
     console.log(`Completed: ${successfullProfileid.length} FCM success, ${failedProfile.length} FCM failed, ${invalidTokenPaths.length} tokens deactivated`);
 
@@ -569,11 +607,16 @@ exports.notifyMobileApp = onDocumentCreated({
       }
     });
 
-    await snapshot.data.ref.update({
+    const errorUpdate = {
       success: false,
       error: err.message || "Unknown error",
       failedlist: failedlist
-    }).catch(e => console.error("Failed to update error status:", e));
+    };
+    if (heldProfileIds.size > 0) {
+      errorUpdate.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+    }
+    await snapshot.data.ref.update(errorUpdate)
+      .catch(e => console.error("Failed to update error status:", e));
   }
 });
 
@@ -1887,24 +1930,52 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   const mapProfile      = {};
   const mapProfileEmail = {};
 
-  const profileIds = archiveData['profileid'] || [];
+  // ── Delivery hold ────────────────────────────────────────────────────────
+  // This function loads `participant metadata` / `new_user_data`, neither of which
+  // carries deliveryonhold, so query the held profiles directly. Fail CLOSED: if the
+  // read throws we abort rather than send unfiltered — this is a retryable trigger.
+  const heldProfileIds = new Set();
+  try {
+    const heldSnap = await admin.firestore()
+      .collection("profile_data").where("deliveryonhold", "==", true).get();
+    heldSnap.docs.forEach(d => heldProfileIds.add(d.id));
+  } catch (err) {
+    console.error("deliveryonhold check failed — aborting send so it can retry", err);
+    throw err;
+  }
 
-  const query = profileIds.length < 30
-    ? admin.firestore().collection("participant metadata").where('profileid', 'in', profileIds)
-    : admin.firestore().collection("participant metadata");
+  const allProfileIds     = archiveData['profileid'] || [];
+  const heldProfileIdList = allProfileIds.filter(id => heldProfileIds.has(id));
+  // Held recipients are skipped in the send loop below, so keep them out of the
+  // metadata lookups too — no point loading a profile we will not email. Only this
+  // local list is filtered: the send loop reads archiveData['profileid'][i], which
+  // must stay index-paired with archiveData['emailid'][i].
+  const profileIds = allProfileIds.filter(id => !heldProfileIds.has(id));
 
-  await query.get().then((snap) => {
-    snap.docs.forEach((d) => {
-      const p = d.data();
-      if (profileIds.includes(p['profileid'])) {
-        mapProfile[p['profileid']] = p;
-        mapProfileEmail[p['email']] = p;
-      }
-    });
-  });
+  if (heldProfileIdList.length > 0) {
+    console.log(`Delivery on hold — ${heldProfileIdList.length} of ${allProfileIds.length} recipient(s) excluded`);
+  }
+
+  const query = profileIds.length === 0
+    ? null
+    : profileIds.length < 30
+      ? admin.firestore().collection("participant metadata").where('profileid', 'in', profileIds)
+      : admin.firestore().collection("participant metadata");
+
+  if (query) {
+    await query.get().then((snap) => {
+      snap.docs.forEach((d) => {
+        const p = d.data();
+        if (profileIds.includes(p['profileid'])) {
+          mapProfile[p['profileid']] = p;
+          mapProfileEmail[p['email']] = p;
+        }
+      });
+    });
+  }
 
   // ── 3b. Fallback: look up missing profiles in new_user_data ──────────────
-  let missingIds = profileIds.filter(id => !mapProfile[id]);
+  let missingIds = profileIds.filter(id => !mapProfile[id]);
 
   if (missingIds.length > 0) {
     console.log(`${missingIds.length} profile(s) not in participant metadata, checking new_user_data...`);
@@ -1973,6 +2044,13 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   for (let i = 0; i < archiveData['emailid'].length; i++) {
     const profileId   = archiveData['profileid'][i];
     const emailId     = archiveData['emailid'][i];
+
+    // emailid[i] and profileid[i] are index-paired — skipping here drops the whole
+    // pair, which is safe. Pre-filtering the two arrays separately would not be.
+    if (heldProfileIds.has(profileId)) {
+      console.log(`Delivery on hold — skipping ${emailId} (profileId: ${profileId})`);
+      continue;
+    }
     const profileData = mapProfile[profileId] || {};
 
     // ── Build the templateModel for this recipient ──────────────────────
@@ -2023,12 +2101,25 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
 
     // Batch in groups of 400 (Postmark limit)
     if (i !== 0 && i % 400 === 0) {
-      batchEmailList.push(emailList);
+      if (emailList.length > 0) batchEmailList.push(emailList);
       emailList = [];
     }
     emailList.push(mailOptions);
   }
-  batchEmailList.push(emailList);
+  if (emailList.length > 0) batchEmailList.push(emailList);
+
+  // Delivery hold — recorded before sending so it survives a Postmark failure.
+  if (heldProfileIdList.length > 0) {
+    await newDocRef.update({ communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIdList) })
+      .catch(err => console.error("Error recording delivery holds:", err));
+  }
+
+  if (batchEmailList.length === 0) {
+    console.log("No sendable recipients — every recipient on this archive is on delivery hold");
+    await newDocRef.update({ status: "completed" })
+      .catch(err => console.error("Error marking completed:", err));
+    return 'No sendable recipients — all on delivery hold';
+  }
 
   // ── 7. Send batches via Postmark ─────────────────────────────────────────
   for (let i = 0; i < batchEmailList.length; i++) {
@@ -2893,12 +2984,23 @@ async function sendWatiBroadCast(watiarchiveid) {
 
   let batchList = [];
   let numbersWithMissingCountryCode = [];
+  // Delivery hold — profile ids skipped by the guard below, stored alongside sent/failed.
+  let heldProfileIds = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    // Delivery hold — profile_data.deliveryonhold === true is never messaged.
+    // Not pushed to numbersWithMissingCountryCode: that array seeds failedNumbers,
+    // and a held profile is skipped, not failed. It lands in neither sent nor failed.
+    if (profile['deliveryonhold'] === true) {
+      console.log(`Delivery on hold — skipping ${number} (profileId: ${profileId})`);
+      if (profileId) heldProfileIds.push(profileId);
+      continue;
+    }
 
     let rawCountryCode = profile['countrycode'];
     if (!rawCountryCode) {
@@ -2997,6 +3099,11 @@ async function sendWatiBroadCast(watiarchiveid) {
     totalSent: sentNumbers.length,
     totalFailed: failedNumbers.length,
   };
+
+  // Append, never assign — the composer records holds on this doc at compose time.
+  if (heldProfileIds.length > 0) {
+    updatePayload.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+  }
 
   if (sentNumbers.length > 0) {
     updatePayload.sent = sentNumbers;
@@ -3345,12 +3452,22 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
 
   // ── 6. Build receivers array ───────────────────────────────────────
   const receivers = [];
+  // Delivery hold — profile ids excluded from the scheduled payload.
+  const heldProfileIds = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    // Delivery hold — last chance to exclude: once the payload below is POSTed to
+    // WATI's scheduleBroadcast, WATI owns delivery and no code of ours runs again.
+    if (profile['deliveryonhold'] === true) {
+      console.log(`Delivery on hold — excluding ${number} (profileId: ${profileId}) from scheduled broadcast`);
+      if (profileId) heldProfileIds.push(profileId);
+      continue;
+    }
 
     const customParams = buildCustomParams(
       broadCastData['parameterConfig'] || [],
@@ -3410,8 +3527,11 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
       scheduleSentViaApi: true,
       scheduleUrl: SCHEDULE_URL,
       scheduledBroadcastName: schedulePayload.broadcastName,
-      totalSent: broadCastData['numbers'].length,
+      totalSent: receivers.length,
       totalFailed: 0,
+      ...(heldProfileIds.length > 0
+        ? { communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds) }
+        : {}),
     });
 
     console.log("=== SCHEDULE SUCCESS ===");
@@ -3443,6 +3563,9 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
         url: SCHEDULE_URL,
       },
       scheduleFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(heldProfileIds.length > 0
+        ? { communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds) }
+        : {}),
     });
 
     throw new Error(`WATI Schedule API failed (${errStatus}): ${errMsg}`);
