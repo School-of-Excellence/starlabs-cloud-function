@@ -221,7 +221,7 @@ exports.ticketMsgNotification = onDocumentCreated('/clientissue/{docid}/messages
         ])
       ).filter(Boolean);
       await commonService.saveNotificationRecord({
-        title: "Ticket No :" + ticketData['issueno'],
+        title: ticketData['issueno'] + "-" + ticketData['name'],
         message: ticketMsgData['message'],
         subtitle: null,
         date: admin.firestore.FieldValue.serverTimestamp(),
