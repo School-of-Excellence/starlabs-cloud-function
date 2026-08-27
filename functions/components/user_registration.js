@@ -453,6 +453,7 @@ exports.resendEmailOTPNewUsers = onCall(
     }
   }
 );
+
 exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}", async (document) => {
   const snapshot = document.data;
   var data = snapshot.data();
@@ -534,9 +535,12 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
       🚀 *${name}* just joined EiFlix as a *SUBSCRIBER*! 🌱
       `;
     } else {
-    message = `
-    🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
-    `;
+      message = `
+      🚀 *${name}* just joined EiFlix! 🌱
+      `;
+    // message = `
+    // 🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
+    // `;
     }
     console.log(message);
 
