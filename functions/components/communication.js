@@ -1950,7 +1950,8 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   // metadata lookups too — no point loading a profile we will not email. Only this
   // local list is filtered: the send loop reads archiveData['profileid'][i], which
   // must stay index-paired with archiveData['emailid'][i].
-  const profileIds = allProfileIds.filter(id => !heldProfileIds.has(id));
+  // const profileIds = allProfileIds.filter(id => !heldProfileIds.has(id));
+  const profileIds = allProfileIds.filter(id => id && !heldProfileIds.has(id))
 
   if (heldProfileIdList.length > 0) {
     console.log(`Delivery on hold — ${heldProfileIdList.length} of ${allProfileIds.length} recipient(s) excluded`);
