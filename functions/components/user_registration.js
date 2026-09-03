@@ -144,26 +144,26 @@ exports.sendEmailOTPNewUsers = onCall(
         email: email,
         validity: '5 minutes',
       };
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
-      });
-
-      // await commonService.createEmailArchiveDocument({
-      //   emailData: templateData,
-      //   datamodel: templateData,
-      //   attachments: [],
-      //   emailTo: [email],
-      //   emailMap: { [email]: null },
-      //   fileURL: '',
-      //   from: 'starlabs@excellenceinstallation.com',
-      //   notes: '',
-      //   profileId: [null],
-      //   postmarkTemplateId: '42066392',
-      //   templateAlias: 'register-otp-newuser'
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
       // });
+
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: { [email]: null },
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '46317127',
+        templateAlias: 'register-otp-newuser'
+      });
 
       console.log(`OTP sent to ${email}: ${otpDoc.id}`);
       return {
@@ -189,7 +189,8 @@ exports.verifyEmailOTPNewUsers = onCall(
   },
   async (request) => {
     try {
-      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
+      // const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
+      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags } = request.data;
       if (!otpId || !otp || !password) {
         throw new HttpsError('invalid-argument', 'OTP ID, OTP, and password are required');
       }
@@ -248,6 +249,7 @@ exports.verifyEmailOTPNewUsers = onCall(
           subscriber: subscriber || false,
           enable:true,
           workshoponly:true,
+          tags: Array.isArray(tags) ? tags.filter(t => typeof t === 'string' && t.trim() !== '') : [],
         };
         await admin.firestore().collection('new_user_data').doc(profileid).set(userData);
         await otpDocRef.update({
@@ -413,26 +415,26 @@ exports.resendEmailOTPNewUsers = onCall(
         validity: '5 minutes',
       };
       
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
-      });
-      
-      // await commonService.createEmailArchiveDocument({
-      //   emailData: templateData,
-      //   datamodel: templateData,
-      //   attachments: [],
-      //   emailTo: [email],
-      //   emailMap: { [email]: null },
-      //   fileURL: '',
-      //   from: 'starlabs@excellenceinstallation.com',
-      //   notes: '',
-      //   profileId: [null],
-      //   postmarkTemplateId: '42066392',
-      //   templateAlias: 'register-otp-newuser'
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
       // });
+      
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: { [email]: null },
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '46317127',
+        templateAlias: 'register-otp-newuser'
+      });
 
       console.log(`OTP resent to ${email}: ${otpDoc.id}`);
       return {
@@ -451,6 +453,7 @@ exports.resendEmailOTPNewUsers = onCall(
     }
   }
 );
+
 exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}", async (document) => {
   const snapshot = document.data;
   var data = snapshot.data();
@@ -532,9 +535,12 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
       🚀 *${name}* just joined EiFlix as a *SUBSCRIBER*! 🌱
       `;
     } else {
-    message = `
-    🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
-    `;
+      message = `
+      🚀 *${name}* just joined EiFlix! 🌱
+      `;
+    // message = `
+    // 🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
+    // `;
     }
     console.log(message);
 

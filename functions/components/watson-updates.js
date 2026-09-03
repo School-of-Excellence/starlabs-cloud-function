@@ -105,7 +105,7 @@ exports.watsonEventParticipation = onRequest({ cors: true }, async (req, res) =>
         const eventRef = db.collection('event collection').doc(eventid);
         const reqSnap = await db.collection('event participation request')
             .where('eventref', '==', eventRef)
-            .where('status', 'in', ['approved'])
+            .where('status', 'in', ['approved', 'attended'])
             .get();
 
         const rows = [];
