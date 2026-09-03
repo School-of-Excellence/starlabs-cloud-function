@@ -233,6 +233,8 @@ exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
+exports.eiflixadscommunicationschedule = workshop.eiflixadscommunicationschedule
+exports.discoverpagelog = workshop.discoverpagelog
 
 //tvlogin
 exports.authorizeTvDevice = workshop.authorizeTvDevice
