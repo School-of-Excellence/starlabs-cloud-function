@@ -1,5 +1,5 @@
 const commonService = require('./service');
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require('firebase-admin');
 const { Buffer } = require('buffer');
@@ -7,7 +7,7 @@ const axios = require('axios');
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getAuth } = require("firebase-admin/auth");
 const { defineSecret } = require("firebase-functions/params");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, Filter } = require("firebase-admin/firestore");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
@@ -750,6 +750,288 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
   }
 })
 
+//schedule eiflix ads auto communication
+exports.eiflixadscommunicationschedule = onSchedule({schedule : "00 19 * * *", region: "asia-south1", timeZone: "Asia/Kolkata", timeoutSeconds: 540},async (context)=>{
+  try {
+    console.log('started');
+    const snapshot = await admin.firestore().collection("eiflixhomewidgets").where('widgettype','==','ads').get();
+    let eiflisads = [];
+    for (let i = 0; i < snapshot.docs.length; i++) {
+      const doc = snapshot.docs[i];
+      const data = doc.data()
+      if (data['show'] == true && data['autonotification'] == true) {
+        eiflisads.push ({
+          id:doc.id,
+          ref:doc.ref,
+          ...data
+        });
+      }
+    }
+    if (eiflisads.length === 0) return null;
+    console.log(eiflisads,'eiflisads console');
+    // Ads run on IST calendar days: the startdate's own day is day 1.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const istDayIndex = (date) => Math.floor((date.getTime() + IST_OFFSET_MS) / (24 * 60 * 60 * 1000));
+    const now = new Date();
+    for (let i = 0; i < eiflisads.length; i++) {
+      const ads = eiflisads[i];
+      const notifyto = ads['notifyto'] ?? [];
+      const selectedjourneys = ads['selectedjourneys'] ?? [];
+      const selectedfunnels = ads['selectedfunnels'] ?? [];
+      const adsName = ads.title ?? '';
+      const adsId = ads.id ?? '';
+      const startDate = ads.startdate?.toDate?.();
+      const endDate = ads.enddate?.toDate?.();
+      if (!startDate || !endDate) {
+        console.log('missing startdate/enddate', adsId, adsName);
+        continue;
+      }
+      if (now < startDate) {
+        console.log('not started', adsId, adsName, startDate);
+        continue;
+      }
+      if (now > endDate) {
+        console.log('ended', adsId, adsName, endDate);
+        continue;
+      }
+      const dayNumber = istDayIndex(now) - istDayIndex(startDate) + 1;
+      console.log('running day', dayNumber, adsId, adsName);
+      // Each channel is opt-in and reads the day's entry from its own array.
+      const enableAppNotification = ads['enableappnotification'] === true;
+      const enableWati = ads['enablewati'] === true;
+      const appNotificationMap = Array.isArray(ads.appnotificationmap) ? ads.appnotificationmap : [];
+      const watiMap = Array.isArray(ads.watimap) ? ads.watimap : [];
+      const dayNotification = enableAppNotification ? appNotificationMap[dayNumber - 1] : null;
+      const dayWati = enableWati ? watiMap[dayNumber - 1] : null;
+      if (!dayNotification && !dayWati) {
+        console.log('nothing to send for day', dayNumber, adsId, adsName, 'appnotification:', enableAppNotification, 'wati:', enableWati);
+        continue;
+      }
+      console.log(dayNotification,'dayNotification console');
+      console.log(dayWati,'dayWati console');
+      const audience = await getEiflixAdsAudience(notifyto, selectedjourneys, selectedfunnels);
+      console.log('audience', adsId, adsName, 'participants:', audience.participants.length, 'newusers:', audience.newUsers.length, 'funnelenrolled:', audience.funnelEnrolled.length);
+      const profileIds = Array.from(new Set([
+        ...[...audience.participants, ...audience.newUsers].map((profile) => profile.profileid ?? profile.id),
+        ...audience.funnelEnrolled.map((enrolled) => enrolled.profileid)
+      ].filter(Boolean)));
+      if (profileIds.length === 0) {
+        console.log('no audience for', adsId, adsName, notifyto);
+        continue;
+      }
+      console.log('profileIds count', profileIds.length, adsId, adsName);
+      if (dayNotification) {
+        await commonService.saveNotificationRecord({
+          title: adsName || "EiFlix Ads",
+          message: dayNotification.message || '',
+          subtitle: dayNotification.subtitle || null,
+          date: admin.firestore.FieldValue.serverTimestamp(),
+          landingpage: dayNotification.landingPage ?? null,
+          logged: dayNotification.logged === true,
+          profileid: profileIds,
+          sticky: dayNotification.sticky === true,
+          notificationtype: "ahupdate",
+          notificationimage: null,
+          metadata: {
+            adsId: adsId,
+            day: dayNumber
+          }
+        });
+      }
+      if (dayWati) {
+        const contacts = await resolveEiflixAdsContacts(audience, profileIds);
+        const result = await sendEiflixAdsWatiMessages({ dayWati, profileIds, contacts });
+        console.log('wati result', adsId, adsName, 'template', dayWati.templateName, 'sent:', result.sent, 'failed:', result.failed);
+      }
+    }
+  } catch (error) {
+    console.error(error,'Error')
+  }
+})
+
+async function resolveEiflixAdsContacts(audience, profileIds) {
+  const CHUNK = 30;
+  const contacts = new Map();
+  const remember = (profileId, data) => {
+    if (!profileId || !data || contacts.has(profileId)) return;
+    const phone = data['phonenumber'];
+    if (!phone) return;
+    const rawCode = data['countrycode'] || data['countryCode'] || '+91';
+    const countrycode = String(rawCode).replace(/\+/g, '').trim();
+    contacts.set(profileId, {
+      whatsappNumber: `${countrycode}${String(phone).trim()}`,
+      data: data
+    });
+  };
+  const known = [...audience.participants, ...audience.newUsers];
+  for (let i = 0; i < known.length; i++) remember(known[i].profileid ?? known[i].id, known[i]);
+
+  const missing = profileIds.filter((profileId) => !contacts.has(profileId));
+  for (let s = 0; s < missing.length; s += CHUNK) {
+    const chunk = missing.slice(s, s + CHUNK);
+    const [metadataSnap, newUserSnap] = await Promise.all([
+      admin.firestore().collection('participant metadata')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk).get(),
+      admin.firestore().collection('new_user_data')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk).get()
+    ]);
+    metadataSnap.docs.forEach((doc) => remember(doc.id, doc.data()));
+    newUserSnap.docs.forEach((doc) => remember(doc.id, doc.data()));
+  }
+  return contacts;
+}
+
+async function sendEiflixAdsWatiMessages({ dayWati, profileIds, contacts }) {
+  var apikey = null;
+  var serverid = null;
+
+  await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    if (wati.exists) {
+      const watiData = wati.data();
+      apikey = watiData['apikey'];
+      serverid = watiData['serverid'];
+    }
+  });
+
+  const templateName = dayWati.templateName;
+  if (!apikey || !serverid || !templateName) {
+    console.log('wati not configured', 'apikey:', !!apikey, 'serverid:', !!serverid, 'template:', templateName);
+    return { sent: 0, failed: profileIds.length };
+  }
+
+  const headers = {
+    'Authorization': `Bearer ${apikey}`,
+    'Content-Type': 'application/json',
+  };
+  const variables = Array.isArray(dayWati.variables) ? dayWati.variables : [];
+  const alreadySent = new Set();
+  let sent = 0;
+  let failed = 0;
+
+  for (let p = 0; p < profileIds.length; p++) {
+    const profileId = profileIds[p];
+    const contact = contacts.get(profileId);
+    if (!contact || alreadySent.has(contact.whatsappNumber)) {
+      if (!contact) {
+        console.log('no phone number for profile', profileId);
+        failed++;
+      }
+      continue;
+    }
+    alreadySent.add(contact.whatsappNumber);
+
+    const parameters = variables.map((variable) => ({
+      name: variable.name,
+      value: String((variable.type === 'metadata'
+        ? contact.data[variable.value]
+        : variable.value) ?? '')
+    }));
+
+    const endpoint = `https://live-mt-server.wati.io/${serverid}/api/v1/sendTemplateMessage?whatsappNumber=${contact.whatsappNumber}`;
+    const data = {
+      template_name: templateName,
+      broadcast_name: 'EiflixAds',
+      parameters: parameters
+    };
+
+    try {
+      const response = await axios.post(endpoint, data, { headers });
+      if (response.data?.result === false) {
+        console.log('wati rejected', contact.whatsappNumber, JSON.stringify(response.data));
+        failed++;
+      } else {
+        sent++;
+      }
+    } catch (error) {
+      console.error('wati send failed', contact.whatsappNumber, error.response?.data || error.message);
+      failed++;
+    }
+  }
+
+  return { sent, failed };
+}
+
+async function getEiflixAdsAudience(notifyto, selectedjourneys, selectedfunnels) {
+  const DISJUNCTION_LIMIT = 30;
+  const options = Array.isArray(notifyto) ? notifyto : [];
+  const result = { participants: [], newUsers: [], funnelEnrolled: [] };
+  if (options.length === 0) return result;
+
+  const statusFilters = [];
+  if (options.includes('active participants')) statusFilters.push(Filter.where('customerstatus', '==', 'active'));
+  if (options.includes('non active participants')) statusFilters.push(Filter.where('customerstatus', '==', 'non active'));
+
+  // `activejourney` is stored as the journey doc id (string) — accept ids or refs.
+  const journeyIds = options.includes('journey')
+    ? (Array.isArray(selectedjourneys) ? selectedjourneys : [])
+        .map((journey) => (typeof journey === 'string' ? journey : journey?.id))
+        .filter(Boolean)
+    : [];
+
+  const journeyFilters = [];
+  const chunkSize = Math.max(1, DISJUNCTION_LIMIT - statusFilters.length);
+  for (let s = 0; s < journeyIds.length; s += chunkSize) {
+    journeyFilters.push(Filter.where('activejourney', 'in', journeyIds.slice(s, s + chunkSize)));
+  }
+
+  // First group carries the statuses + first journey chunk (the usual single-query case).
+  const filterGroups = [];
+  if (journeyFilters.length > 0) {
+    filterGroups.push([...statusFilters, journeyFilters[0]]);
+    for (let g = 1; g < journeyFilters.length; g++) filterGroups.push([journeyFilters[g]]);
+  } else if (statusFilters.length > 0) {
+    filterGroups.push(statusFilters);
+  }
+
+  const participantsById = new Map();
+  for (let g = 0; g < filterGroups.length; g++) {
+    const group = filterGroups[g];
+    const filter = group.length === 1 ? group[0] : Filter.or(...group);
+    const snap = await admin.firestore().collection('participant metadata').where(filter).get();
+    for (let d = 0; d < snap.docs.length; d++) {
+      const participantDoc = snap.docs[d];
+      participantsById.set(participantDoc.id, {
+        id: participantDoc.id,
+        ref: participantDoc.ref,
+        ...participantDoc.data()
+      });
+    }
+  }
+  result.participants = Array.from(participantsById.values());
+
+  if (options.includes('new users')) {
+    const newUserSnap = await admin.firestore().collection('new_user_data').get();
+    result.newUsers = newUserSnap.docs.map((newUserDoc) => ({
+      id: newUserDoc.id,
+      ref: newUserDoc.ref,
+      ...newUserDoc.data()
+    }));
+  }
+
+  if (options.includes('funnel only')) {
+    const funnelRefs = (Array.isArray(selectedfunnels) ? selectedfunnels : [])
+      .map((funnel) => (typeof funnel === 'string'
+        ? admin.firestore().collection(WS_WORKSHOP_COLLECTION).doc(funnel)
+        : funnel))
+      .filter(Boolean);
+    for (let s = 0; s < funnelRefs.length; s += DISJUNCTION_LIMIT) {
+      const enrolledSnap = await admin.firestore().collection(WS_ENROLLED_COLLECTION)
+        .where('workshopref', 'in', funnelRefs.slice(s, s + DISJUNCTION_LIMIT)).get();
+      for (let d = 0; d < enrolledSnap.docs.length; d++) {
+        const enrolledDoc = enrolledSnap.docs[d];
+        result.funnelEnrolled.push({
+          id: enrolledDoc.id,
+          ref: enrolledDoc.ref,
+          ...enrolledDoc.data()
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+
 function requireAuth(request) {
   if (!request.auth || !request.auth.uid) {
     throw new HttpsError("unauthenticated", "Sign-in is required.");
@@ -995,6 +1277,7 @@ async function loadWorkshopPaymentConfig(db, workshopId) {
   let keySecret = "";
   const secretSnap =
     await db.collection(WS_SECRET_COLLECTION).doc(workshopId).get();
+    // await db.collection(WS_SECRET_COLLECTION).doc('XSPpA2JWhCDik508cdQC').get();
   if (secretSnap.exists) {
     keySecret = String(secretSnap.get("keySecret") || "").trim();
   }
@@ -2133,6 +2416,80 @@ exports.authorizeTvDevice = onCall(
   }
 );
 
-function sendwatitonewusers(){
-  
-}
+// Discover-page activity → Slack. The web app writes one doc per Discover
+// visit (create = "entered", debounced merges append to `events`). Every new
+// index in `events` becomes its own Slack message; merges that only bump
+// lastactiveat / leftat send nothing.
+const DISCOVER_SECTION_NAMES = {
+  orientation: "Orientation",
+  scienceinaction: "The Science In Action",
+  ahexperience: "The A&H Experience",
+  eit: "Understand EIT",
+  livearena: "Live From The Arena",
+  prodigies: "Antano & Prodigies",
+};
+
+exports.discoverpagelog = onDocumentWritten("discoverpagelogs/{docid}",async (snapshot)=>{
+  let oldData = snapshot.data.before.data();
+  let newData = snapshot.data.after.data();
+
+  try {
+    if (!newData) return null; // doc deleted — nothing to report
+
+    const name = newData.name || "Unknown";
+    const email = newData.email || "-";
+    const phonenumber = newData.phonenumber || "-";
+    const who = `*${name}* (${email}, ${phonenumber})`;
+
+    const messages = [];
+
+    // Doc created → the user just entered /discover.
+    if (!oldData) {
+      messages.push(`${who} entered the Discover page`);
+    }
+
+    // Every index newly appended to `events` gets its own message. The app
+    // always rewrites the full array, so new entries are exactly the tail.
+    const oldEvents = Array.isArray(oldData?.events) ? oldData.events : [];
+    const newEvents = Array.isArray(newData.events) ? newData.events : [];
+    for (let i = oldEvents.length; i < newEvents.length; i++) {
+      const event = newEvents[i] || {};
+      if (event.type === "buttonclick") {
+        messages.push(`${who} clicked *${event.button || ""}*`);
+      } else if (event.type === "videoplay") {
+        // Embedded link: videoname as the label when present, else the
+        // literal label "videourl" — never the raw URL as text.
+        const label = event.videoname || "videourl";
+        const link = event.videourl ? `<${event.videourl}|${label}>` : label;
+        const section = DISCOVER_SECTION_NAMES[event.section] || event.section || "";
+        messages.push(
+          section
+            ? `${who} played ${link} in *${section}* section`
+            : `${who} played ${link}`
+        );
+      }
+    }
+
+    if (messages.length === 0) return null; // lastactiveat / leftat merge only
+
+    const url = commonService.production
+      ? await commonService.getWebhookUrl("eiflixuseractivity")
+      : await commonService.getWebhookUrl("slackDevTest");
+
+    const webhook = new commonService.IncomingWebhook(url);
+
+    for (const message of messages) {
+      await webhook.send(message, (err, header, statusCode, body) => {
+        if (err) {
+          console.error("Error", err);
+        } else {
+          console.log("Message sent", statusCode);
+        }
+      });
+    }
+    return null;
+  } catch (error){
+    console.error('Error discoverpagelog', error.response?.data || error.message);
+    throw error;
+  }
+})

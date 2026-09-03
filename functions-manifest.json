@@ -74,6 +74,7 @@
       "name": "authorizeTvDevice",
       "type": "onCall",
       "file": "components/workshop.js",
+      "triggerPath": "discoverpagelogs/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -270,6 +271,21 @@
       "type": "onRequest",
       "file": "components/appointment.js",
       "triggerPath": "/deliverytime/{id}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "discoverpagelog",
+      "type": "onDocumentWritten",
+      "file": "components/workshop.js",
+      "triggerPath": "discoverpagelogs/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "eiflixadscommunicationschedule",
+      "type": "onSchedule",
+      "file": "components/workshop.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
