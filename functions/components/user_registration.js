@@ -189,7 +189,8 @@ exports.verifyEmailOTPNewUsers = onCall(
   },
   async (request) => {
     try {
-      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
+      // const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
+      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags } = request.data;
       if (!otpId || !otp || !password) {
         throw new HttpsError('invalid-argument', 'OTP ID, OTP, and password are required');
       }
@@ -248,6 +249,7 @@ exports.verifyEmailOTPNewUsers = onCall(
           subscriber: subscriber || false,
           enable:true,
           workshoponly:true,
+          tags: Array.isArray(tags) ? tags.filter(t => typeof t === 'string' && t.trim() !== '') : [],
         };
         await admin.firestore().collection('new_user_data').doc(profileid).set(userData);
         await otpDocRef.update({

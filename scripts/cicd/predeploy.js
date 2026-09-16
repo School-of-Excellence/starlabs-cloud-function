@@ -167,7 +167,11 @@ function ensureHubCache() {
     // CF-guard-only: stage the emulator config WITHOUT wiring the Angular app (the guard runs no app —
     // a bare hub clone has no app symlink, so the full overlay would fail on APP_PATH). See the hub's
     // ci/setup-emulator-config.sh CF_GUARD_ONLY branch.
-    execSync('CF_GUARD_ONLY=1 bash ci/setup-emulator-config.sh', { cwd: CACHE, stdio: 'inherit' });
+    execSync('bash ci/setup-emulator-config.sh', {
+      cwd: CACHE,
+      stdio: 'inherit',
+      env: { ...process.env, CF_GUARD_ONLY: '1' }, // cross-platform (inline VAR=val is bash-only, breaks on Windows cmd)
+    });
     fs.writeFileSync(versionFile, latest);
   } catch (e) {
     console.error('✋ predeploy blocked: failed to prepare the guard cache (.cicd-hub).');

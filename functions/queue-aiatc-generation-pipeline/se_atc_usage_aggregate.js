@@ -72,6 +72,21 @@ function aggregateUsage(rows) {
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // Asia/Kolkata, no DST
 
 /**
+ * IST calendar day (`YYYY-MM-DD`) that a timestamp falls on, or null.
+ * Same day-boundary convention as istDayWindow / the dashboard's todayIST.
+ */
+function istDayString(v) {
+  const ms = toMillis(v);
+  if (ms == null) return null;
+  const ist = new Date(ms + IST_OFFSET_MS);
+  return (
+    `${ist.getUTCFullYear()}-` +
+    `${String(ist.getUTCMonth() + 1).padStart(2, "0")}-` +
+    `${String(ist.getUTCDate()).padStart(2, "0")}`
+  );
+}
+
+/**
  * Previous IST calendar day window relative to `now`.
  * @returns {{start:Date, end:Date, dateStr:string}}  [start,end), dateStr = YYYY-MM-DD (IST)
  */
@@ -88,4 +103,4 @@ function istDayWindow(now = new Date(), dayOffset = -1) {
   return { start, end, dateStr };
 }
 
-module.exports = { toMillis, aggregateUsage, istDayWindow, emptyBucket, emptyAgg };
+module.exports = { toMillis, aggregateUsage, istDayWindow, istDayString, emptyBucket, emptyAgg };
