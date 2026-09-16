@@ -96,7 +96,7 @@
     {
       "name": "awsEventWebhook",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -165,7 +165,14 @@
     {
       "name": "CheckMasternodeStatus",
       "type": "onSchedule",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "CheckOciNodeStatus",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -204,6 +211,13 @@
       "type": "onDocumentCreated",
       "file": "components/big-assignment.js",
       "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "createLivekitCloudToken",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
       "codebase": "default"
     },
     {
@@ -307,13 +321,6 @@
       "codebase": "default"
     },
     {
-      "name": "flushOpenviduCallQuality",
-      "type": "onRequest",
-      "file": "components/openVidu.js",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
       "name": "generalContentUpdate",
       "type": "onRequest",
       "file": "components/content.js",
@@ -324,6 +331,13 @@
       "name": "getSignedUrlAWS",
       "type": "onRequest",
       "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "getSignedUrlOci",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -367,6 +381,41 @@
       "codebase": "default"
     },
     {
+      "name": "livekitCloudCloseRoom",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudKickParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudMuteParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStartRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStopRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "muteParticipant",
       "type": "onRequest",
       "file": "components/openVidu.js",
@@ -398,6 +447,13 @@
       "codebase": "default"
     },
     {
+      "name": "ociEventWebhook",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "onBreakthroughsPosted",
       "type": "onDocumentCreated",
       "file": "components/achievements.js",
@@ -418,6 +474,20 @@
       "type": "onRequest",
       "file": "components/queuesystem.js",
       "triggerPath": "event collection/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventLivekitCloud",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventOci",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -717,7 +787,14 @@
     {
       "name": "scaleMediaNodes",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "scaleOciMediaNodes",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -838,7 +915,14 @@
     {
       "name": "startMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "startOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -853,7 +937,14 @@
     {
       "name": "stopMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "stopOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
