@@ -317,9 +317,17 @@ async function getUnusedZoomAccount() {
   }
 }
 
+// SDK join-token lifetime. `linkExpiresAt` (written on the live assignment) is
+// derived from the SAME TTL so the studio can show an accurate "expired" state
+// and offer regenerate at the right time.
+const ZOOM_SIGNATURE_TTL_SECONDS = 60 * 60 * 12
+function signatureExpiryDate() {
+  return new Date(Date.now() + ZOOM_SIGNATURE_TTL_SECONDS * 1000)
+}
+
 async function generateSignature(key, secret, meetingNumber, role) {
   const iat = Math.round(new Date().getTime() / 1000) - 30
-  const exp = iat + 60 * 60 * 2
+  const exp = iat + ZOOM_SIGNATURE_TTL_SECONDS
   const oHeader = { alg: 'HS256', typ: 'JWT' }
   const oPayload = {
     sdkKey: key,
@@ -661,7 +669,7 @@ async function sendSalesCaptureToSalesChannel(value) {
 
 	let addonarray = [];
 	for (let i = 0; i < leaddata['addons'].length; i++) {
-		addonarray.push(mapProduct[leaddata['addons'][i]['addons']])
+		addonarray.push(mapProduct[leaddata['addons'][i]])
 	}
 
 	let arraybonus = [];
@@ -773,6 +781,13 @@ async function sendSalesCaptureToSalesChannel(value) {
 				"text": {
 					"type": "mrkdwn",
 					"text": `*Purchase Date* : ${leaddata['purchasedate'].toDate ? leaddata['purchasedate'].toDate().toLocaleDateString('en-CA') : new Date(leaddata['purchasedate']).toLocaleDateString('en-CA')}`,
+				}
+			},
+			{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": `*Installment Start Date* : ${leaddata['installmentstartdate'].toDate ? leaddata['installmentstartdate'].toDate().toLocaleDateString('en-CA') : new Date(leaddata['installmentstartdate']).toLocaleDateString('en-CA')}`,
 				}
 			},
 			{
@@ -982,6 +997,7 @@ module.exports = {
 	throwParticipantMetaDataException,
 	getUnusedZoomAccount,
 	generateSignature,
+	signatureExpiryDate,
 	updateSalesLead,
 	sendSalesCaptureToSalesChannel,
 	sendSlotConfirmationToSlackChannel,
