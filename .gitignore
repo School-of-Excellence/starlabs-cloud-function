@@ -70,3 +70,4 @@ node_modules/
 .env.cicd
 
 *.csv
+.DS_Store
