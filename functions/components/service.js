@@ -31,7 +31,19 @@ const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sep
 
 // Post Mark
 const postmark = require("postmark");
-const postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+// StarLabs V1 server token, read from the POSTMARK_STARLABS_V1 environment variable (functions/.env,
+// written by the deploy workflow from the GitHub repository secret). Same server for every project.
+// Built lazily: the postmark client throws on an empty token, and that must not break module load
+// (deploy-time function discovery, emulator runs without a .env).
+let _postmarkClient = null;
+function getPostmarkClient() {
+	if (!_postmarkClient) {
+		const token = process.env.POSTMARK_STARLABS_V1;
+		if (!token) throw new Error("POSTMARK_STARLABS_V1 is not set — add it to functions/.env (see .env.example)");
+		_postmarkClient = new postmark.ServerClient(token);
+	}
+	return _postmarkClient;
+}
 
 // Event wati Server ID
 const eventWatiServerId = '101723';
@@ -986,7 +998,7 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 module.exports = {
 	// slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
-	postmarkClient,
+	get postmarkClient() { return getPostmarkClient(); },
 	monthName,
 	chunkArray,
 	saveNotificationRecord,
