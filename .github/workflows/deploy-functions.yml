@@ -1,0 +1,114 @@
+# deploy-functions — deploy Cloud Functions with the Postmark server tokens injected from GitHub
+# repository secrets (moved off Cloud Secret Manager 2026-09-16).
+#
+# The functions read the tokens as plain environment variables. Nothing at runtime can read GitHub
+# secrets, so this workflow writes them into functions/.env right before `firebase deploy`, and the
+# Firebase CLI attaches them to every deployed function. The same five values apply to every project.
+#
+#   push to development            → starlabs-test
+#   "Run workflow" button          → any project (dropdown), optionally a subset of functions
+#
+# Required repository secrets:
+#   POSTMARK_STARLABS_V1 / _V2 / _V3 / _V4 / _TEST   — Postmark server tokens
+#   FIREBASE_SERVICE_ACCOUNT                         — JSON key of a service account allowed to deploy
+#                                                      functions on every target project
+#   CONSOLE_INGEST_TOKEN                             — (already present) lets postdeploy.js record the deploy
+name: deploy-functions
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - 'functions/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/deploy-functions.yml'
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Firebase project to deploy to'
+        type: choice
+        default: starlabs-test
+        options:
+          - starlabs-test
+          - launch-your-legacy-development
+          - fir-sample-aae4a
+      only:
+        description: 'Optional comma-separated function names (empty = all functions)'
+        type: string
+        default: ''
+
+concurrency:
+  group: deploy-functions-${{ github.event.inputs.project || 'starlabs-test' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PROJECT: ${{ github.event.inputs.project || 'starlabs-test' }}
+      ONLY: ${{ github.event.inputs.only || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      # The predeploy loop-guard (scripts/cicd/predeploy.js) boots the functions emulator, which needs Java.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm ci
+
+      - name: Write functions/.env from repository secrets
+        run: |
+          {
+            printf 'POSTMARK_STARLABS_V1=%s\n'   "$POSTMARK_STARLABS_V1"
+            printf 'POSTMARK_STARLABS_V2=%s\n'   "$POSTMARK_STARLABS_V2"
+            printf 'POSTMARK_STARLABS_V3=%s\n'   "$POSTMARK_STARLABS_V3"
+            printf 'POSTMARK_STARLABS_V4=%s\n'   "$POSTMARK_STARLABS_V4"
+            printf 'POSTMARK_STARLABS_TEST=%s\n' "$POSTMARK_STARLABS_TEST"
+          } > functions/.env
+          for n in POSTMARK_STARLABS_V1 POSTMARK_STARLABS_V2 POSTMARK_STARLABS_V3 POSTMARK_STARLABS_V4 POSTMARK_STARLABS_TEST; do
+            if ! grep -qE "^$n=.+" functions/.env; then echo "::error::repository secret $n is empty or missing"; exit 1; fi
+          done
+          echo "functions/.env written with $(wc -l < functions/.env) keys"
+        env:
+          POSTMARK_STARLABS_V1: ${{ secrets.POSTMARK_STARLABS_V1 }}
+          POSTMARK_STARLABS_V2: ${{ secrets.POSTMARK_STARLABS_V2 }}
+          POSTMARK_STARLABS_V3: ${{ secrets.POSTMARK_STARLABS_V3 }}
+          POSTMARK_STARLABS_V4: ${{ secrets.POSTMARK_STARLABS_V4 }}
+          POSTMARK_STARLABS_TEST: ${{ secrets.POSTMARK_STARLABS_TEST }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy
+        env:
+          GH_TOKEN: ${{ github.token }}                              # predeploy.js requires `gh auth status`
+          CONSOLE_INGEST_TOKEN: ${{ secrets.CONSOLE_INGEST_TOKEN }}  # postdeploy.js deploy recording
+        run: |
+          if [ -n "$ONLY" ]; then
+            TARGET="functions:$(echo "$ONLY" | sed 's/ //g; s/,/,functions:/g')"
+          else
+            TARGET="functions"
+          fi
+          echo "Deploying --only $TARGET to $PROJECT"
+          firebase deploy --only "$TARGET" --project "$PROJECT" --non-interactive
+
+      - name: Remove functions/.env
+        if: always()
+        run: rm -f functions/.env

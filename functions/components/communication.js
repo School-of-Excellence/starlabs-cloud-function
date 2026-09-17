@@ -44,11 +44,24 @@ const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
 const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 const postmark = require("postmark");
-const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
-const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
-const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
-const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
-const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
+// Postmark server tokens are plain environment variables (functions/.env), NOT Cloud Secret Manager
+// secrets any more (2026-09-16). Source of truth: GitHub repository secrets, written into .env by
+// .github/workflows/deploy-functions.yml at deploy time. Same values for every Firebase project.
+// A doc's `servername` field must equal one of these keys.
+const POSTMARK_SERVER_NAMES = [
+  "POSTMARK_STARLABS_V1",
+  "POSTMARK_STARLABS_V2",
+  "POSTMARK_STARLABS_V3",
+  "POSTMARK_STARLABS_V4",
+  "POSTMARK_STARLABS_TEST",
+];
+function postmarkServersMap() {
+  const map = {};
+  for (const name of POSTMARK_SERVER_NAMES) {
+    if (process.env[name]) map[name] = process.env[name];
+  }
+  return map;
+}
 
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
@@ -1752,14 +1765,7 @@ exports.SupportDeskToSlack = onDocumentCreated('/supportdesk/{docid}/messages/{m
 exports.sendBatchEmailTest = onDocumentCreated({
   document: "email archive/{docid}",
   timeoutSeconds: 540,
-  memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  memory: "512MiB"
 },
   async (snap) => {
     const change = snap.data;
@@ -1768,14 +1774,7 @@ exports.sendBatchEmailTest = onDocumentCreated({
  
     if (change.data()['status'] != 'queued') {
  
-      // FIX: Use .value() to get the actual secret string, not the Secret object
-      const serversMap = {
-        POSTMARK_STARLABS_V1,
-        POSTMARK_STARLABS_V2,
-        POSTMARK_STARLABS_V3,
-        POSTMARK_STARLABS_V4,
-        POSTMARK_STARLABS_TEST,
-      };
+      const serversMap = postmarkServersMap();
  
       const result = await sendBatchEmailArchive(newDocId, serversMap);
       console.log('Finished sending to participants', result);
@@ -1787,26 +1786,13 @@ exports.sendBatchEmail = onRequest({
   region: "us-central1",
   cors:true,
   timeoutSeconds: 540,
-  memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  memory: "512MiB"
 },async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
   const archiveid = req.body.archiveid;
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
   const result = await sendBatchEmailArchive(archiveid,serversMap);
   console.log('Finished sending to participants', result);
@@ -1916,7 +1902,7 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   // ── 2. Resolve Postmark server token ─────────────────────────────────────
-  const selectedSecret = serversMap[archiveData['servername']]?.value();
+  const selectedSecret = serversMap[archiveData['servername']];
 
   if (!selectedSecret) {
     console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
@@ -2822,26 +2808,13 @@ async function downloadAndUpload(recordingUrl,docRef) {
 exports.createPostMarkEmailTemplate = onDocumentUpdated({
   document:'email templates/{docid}',
   region: 'us-central1',
-  cors: true,
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  cors: true
 },async (change) => {
 
   let previousData = change.data?.before.data();
   let currentData = change.data?.after.data();
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
     const selectedSecret = serversMap[currentData['servername']];
 
@@ -2849,7 +2822,7 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
       throw new Error(`Invalid server name: ${currentData['servername']}`);
     }
 
-    const postmarkClient = new postmark.ServerClient(selectedSecret.value());
+    const postmarkClient = new postmark.ServerClient(selectedSecret);
 
   if(currentData['type'] == "email"){
 
