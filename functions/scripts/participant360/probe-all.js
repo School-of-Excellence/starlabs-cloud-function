@@ -19,7 +19,8 @@
  *     --tools a,b,c      run only these tools, in this order (default: all 16, cheapest first)
  *     --limit <n>        items cap per tool (default 20)
  *     --since <ISO>      only items on/after this date (tools with time-ordered items)
- *     --out <file>       write the JSON report here (default: participant360-<profileid>.json in cwd)
+ *     --out <file>       write the JSON report here (default: probe-output/participant360-<profileid>.json,
+ *                        a git-ignored folder under functions/)
  *     --fail-fast        stop at the first failing tool (default: continue and report all)
  *
  *   Examples
@@ -79,7 +80,8 @@ function usage() {
 
     // 4) report + summary
     const report = lib.buildReport({ project: sa.project_id, participant, key: args.key, results });
-    const outFile = path.resolve(args.outFile || `participant360-${participant.profileid}.json`);
+    const outFile = path.resolve(args.outFile || path.join(lib.OUTPUT_DIR, `participant360-${participant.profileid}.json`));
+    fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
     fs.writeSync(process.stdout.fd, lib.summaryTable(results) + "\n");
     console.error(`▶ written ${outFile}`);

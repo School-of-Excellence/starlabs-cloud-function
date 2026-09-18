@@ -19,7 +19,7 @@
  *     --tool <name>      any of the 16 tools (default: purchase)
  *     --limit <n>        items cap (default 20)
  *     --since <ISO>      only items on/after this date
- *     --out <file>       also write the JSON to a file
+ *     --out <file>       also write the JSON to a file (relative paths resolve under functions/probe-output/)
  *     --raw              also print the raw Firestore docs the purchase tool read (field-shape checks)
  *
  *   Examples
@@ -92,7 +92,12 @@ function usage() {
     const report = { ok: result.ok, project: sa.project_id, tool, key: args.key, participant, ms: result.ms, ...(result.ok ? { response: result.response } : { error: result.error }), ...(raw ? { raw } : {}) };
     const json = JSON.stringify(report, null, 2);
     fs.writeSync(process.stdout.fd, json + "\n"); // synchronous: never truncated when piped or redirected
-    if (args.outFile) { fs.writeFileSync(args.outFile, json); console.error(`▶ written ${path.resolve(args.outFile)}`); }
+    if (args.outFile) {
+      const outFile = path.isAbsolute(args.outFile) ? args.outFile : path.join(lib.OUTPUT_DIR, args.outFile);
+      fs.mkdirSync(path.dirname(outFile), { recursive: true });
+      fs.writeFileSync(outFile, json);
+      console.error(`▶ written ${outFile}`);
+    }
 
     if (result.ok) {
       console.error(`✓ ${tool} in ${result.ms} ms — ${result.response.data.summary.headline}`);

@@ -78,7 +78,7 @@ const { toolDefinitions, runTool, toToolResult } = require("./components/partici
 ## Probing the test database (read-only)
 
 ```
-node scripts/participant360/probe-all.js <profileid|email> --sa <starlabs-test key.json>          # all 16 tools -> participant360-<pid>.json
+node scripts/participant360/probe-all.js <profileid|email> --sa <starlabs-test key.json>          # all 16 tools -> probe-output/participant360-<pid>.json
 node scripts/participant360/probe-purchase.js <profileid|email> --sa <key.json> --raw --out o.json  # one tool (default purchase) + raw docs
 npm run p360:probe:all -- <profileid> --sa <key.json>     ·     npm run p360:probe -- <profileid> --sa <key.json>
 ```

@@ -23,3 +23,5 @@ backup/
 
 # graphify knowledge-graph build output — regenerable, not source
 graphify-out/
+# participant360 probe reports (local only)
+probe-output/

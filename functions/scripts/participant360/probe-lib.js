@@ -20,6 +20,8 @@ const DENYLIST = Object.freeze(["fir-sample-aae4a", "watsonproduction-becde", "s
 /** Only these project ids may ever be probed. --project can pick one of them; nothing else. */
 const ALLOWLIST = Object.freeze(["starlabs-test", "starlabs-test-19", "starlabs-cicd"]);
 const TOOLS_DIR = path.join(__dirname, "..", "..", "components", "participant360", "tools");
+/** Default folder for probe reports: functions/probe-output/ (git-ignored). */
+const OUTPUT_DIR = path.join(__dirname, "..", "..", "probe-output");
 /** Env vars that could steer the Admin SDK to another project via Application Default Credentials. */
 const ADC_ENV = Object.freeze(["GOOGLE_APPLICATION_CREDENTIALS", "FIREBASE_CONFIG", "GCLOUD_PROJECT", "GOOGLE_CLOUD_PROJECT"]);
 
@@ -168,4 +170,4 @@ function exitCodeFor(results) {
   return results.length && results.every((r) => r.ok) ? 0 : 1;
 }
 
-module.exports = { ProbeError, DEFAULT_PROJECT, DENYLIST, ALLOWLIST, ALL_ORDER, ADC_ENV, TOOLS_DIR, parseArgs, expandHome, loadServiceAccount, checkProject, hardenEnv, listTools, selectTools, toPlain, runOne, runMany, summaryTable, buildReport, exitCodeFor };
+module.exports = { ProbeError, DEFAULT_PROJECT, DENYLIST, ALLOWLIST, ALL_ORDER, ADC_ENV, TOOLS_DIR, OUTPUT_DIR, parseArgs, expandHome, loadServiceAccount, checkProject, hardenEnv, listTools, selectTools, toPlain, runOne, runMany, summaryTable, buildReport, exitCodeFor };
