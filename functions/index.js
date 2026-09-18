@@ -20,6 +20,7 @@ const salescrmUpdates = require("./components/salescrm-updates")
 const userRegistration = require("./components/user_registration")
 const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
+const participant360 = require("./components/participant360/index")   // read-only participant lookup tools (16) — HTTP + agent registry
 const openViduSystem = require("./components/openVidu")
 const AWS_endpont = require("./components/AWS_endpoint")
 const workshop = require("./components/workshop")
@@ -299,3 +300,8 @@ exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" A
 exports.seLiveTranscribeSubmit   = seLiveTranscribe.seLiveTranscribeSubmit    // w - "live assignment/{id}"
 exports.seLiveTranscribeCallback = seLiveTranscribe.seLiveTranscribeCallback  // onRequest — RunPod webhook
 
+
+// participant-360 — read-only participant lookup tools (purchase, finance, activeProduct, forms, appointment, queue, events,
+// communication, recommendation, content, mode, roles, videoAsk, evolutionMapping, systemBilling, profileAuthentication).
+// GET /participant360/{tool}/{participantid} · Bearer ID token · admin|ah|developer · never touches firestore-atc.
+exports.participant360 = participant360.participant360 // onRequest — see components/participant360/index.js

@@ -29,7 +29,9 @@
     "atc:validate-structure": "node scripts/atc-validate-structure.js",
     "atc:rollup-reconcile": "node scripts/atc-rollup-reconcile.js",
     "graph:refresh": "$(cat graphify-out/.graphify_python) scripts/graphify-refresh.py",
-    "graph:query": "graphify query"
+    "graph:query": "graphify query",
+    "p360:probe": "node scripts/participant360/probe-purchase.js",
+    "p360:probe:all": "node scripts/participant360/probe-all.js"
   },
   "engines": {
     "node": "22"
