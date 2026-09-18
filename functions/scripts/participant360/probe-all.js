@@ -39,6 +39,7 @@
  *
  * Exit codes: 0 all tools ok · 1 some tool failed or participant not found · 2 usage · 3 safety refusal
  */
+
 const fs = require("fs");
 const path = require("path");
 const lib = require("./probe-lib");
