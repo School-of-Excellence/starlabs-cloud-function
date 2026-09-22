@@ -3,7 +3,7 @@ const commonService = require('./service');
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 
 
-exports.evolutionFamilyWishlistOnWrite = onDocumentWritten("/evolutionwishlistlog/{docid}",async (changedata) => {
+exports.evolutionFamilyWishlistOnWrite = onDocumentWritten({ document: "/evolutionwishlistlog/{docid}", secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1] }, async (changedata) => {
   let change = changedata.data
   let newDoc = change.after.data()
   console.log("doc id test", changedata.params.docid);

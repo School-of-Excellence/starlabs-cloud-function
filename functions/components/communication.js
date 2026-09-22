@@ -44,21 +44,15 @@ const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
 const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 const postmark = require("postmark");
-// Postmark server tokens are plain environment variables (functions/.env), NOT Cloud Secret Manager
-// secrets any more (2026-09-16). Source of truth: GitHub repository secrets, written into .env by
-// .github/workflows/deploy-functions.yml at deploy time. Same values for every Firebase project.
-// A doc's `servername` field must equal one of these keys.
-const POSTMARK_SERVER_NAMES = [
-  "POSTMARK_STARLABS_V1",
-  "POSTMARK_STARLABS_V2",
-  "POSTMARK_STARLABS_V3",
-  "POSTMARK_STARLABS_V4",
-  "POSTMARK_STARLABS_TEST",
-];
+// Postmark server tokens come from Cloud Secret Manager, declared once in service.js. Functions that
+// pick a server by a doc's `servername` field bind all five (`secrets: POSTMARK_SECRETS`); the field
+// must equal one of the secret names.
+const POSTMARK_SECRETS = Object.values(commonService.postmarkSecrets);
 function postmarkServersMap() {
   const map = {};
-  for (const name of POSTMARK_SERVER_NAMES) {
-    if (process.env[name]) map[name] = process.env[name];
+  for (const [name, secret] of Object.entries(commonService.postmarkSecrets)) {
+    const token = secret.value();
+    if (token) map[name] = token;
   }
   return map;
 }
@@ -1765,7 +1759,8 @@ exports.SupportDeskToSlack = onDocumentCreated('/supportdesk/{docid}/messages/{m
 exports.sendBatchEmailTest = onDocumentCreated({
   document: "email archive/{docid}",
   timeoutSeconds: 540,
-  memory: "512MiB"
+  memory: "512MiB",
+  secrets: POSTMARK_SECRETS
 },
   async (snap) => {
     const change = snap.data;
@@ -1786,7 +1781,8 @@ exports.sendBatchEmail = onRequest({
   region: "us-central1",
   cors:true,
   timeoutSeconds: 540,
-  memory: "512MiB"
+  memory: "512MiB",
+  secrets: POSTMARK_SECRETS
 },async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
@@ -2808,7 +2804,8 @@ async function downloadAndUpload(recordingUrl,docRef) {
 exports.createPostMarkEmailTemplate = onDocumentUpdated({
   document:'email templates/{docid}',
   region: 'us-central1',
-  cors: true
+  cors: true,
+  secrets: POSTMARK_SECRETS
 },async (change) => {
 
   let previousData = change.data?.before.data();
@@ -4872,7 +4869,8 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
 exports.workshopprogressmessagev2 = onRequest({ 
   cors: true,
   timeoutSeconds: 300,
-  memory: '512MiB'
+  memory: '512MiB',
+  secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1]
 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
@@ -5285,7 +5283,7 @@ exports.workshopprogressmessagev2 = onRequest({
   }
 });
 
-exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => {
+exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1] }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
     return;
