@@ -216,6 +216,11 @@ exports.sendEmailOTPNewUsers = userRegistration.sendEmailOTPNewUsers
 exports.verifyEmailOTPNewUsers = userRegistration.verifyEmailOTPNewUsers
 exports.resendEmailOTPNewUsers = userRegistration.resendEmailOTPNewUsers
 exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackintegration
+exports.createTvLoginRequest = workshop.createTvLoginRequest
+exports.approveTvLogin       = workshop.approveTvLogin
+exports.redeemTvLogin        = workshop.redeemTvLogin
+exports.createTvCastGrant        = workshop.createTvCastGrant
+
 
 //workshop Q&A
 exports.workshopQandA = communication.workshopQandA
