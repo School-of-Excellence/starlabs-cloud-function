@@ -1017,7 +1017,8 @@ module.exports = {
 	generateZoomMeeting,
 	createEmailArchiveDocument,
 	createWatiArchiveDocument,
-	getWebhookUrl
+	getWebhookUrl,
+	eventWatiServerId,
 }
 
 async function createEmailArchiveDocument({
