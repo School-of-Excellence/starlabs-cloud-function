@@ -40,6 +40,13 @@
       "codebase": "default"
     },
     {
+      "name": "approveTvLogin",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "atcdata_to_pmd",
       "type": "onDocumentWritten",
       "file": "components/participantmetadata.js",
@@ -252,6 +259,20 @@
       "codebase": "default"
     },
     {
+      "name": "createTvCastGrant",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "createTvLoginRequest",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "createWorkshopPaymentOrder",
       "type": "onCall",
       "file": "components/workshop.js",
@@ -290,7 +311,7 @@
     },
     {
       "name": "discoverpagelog",
-      "type": "onDocumentWritten",
+      "type": "onCall",
       "file": "components/workshop.js",
       "triggerPath": "discoverpagelogs/{docid}",
       "emulatorLoaded": false,
@@ -719,6 +740,13 @@
     },
     {
       "name": "reconcileWorkshopPayment",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "redeemTvLogin",
       "type": "onCall",
       "file": "components/workshop.js",
       "emulatorLoaded": false,
