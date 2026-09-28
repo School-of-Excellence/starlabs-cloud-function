@@ -2493,3 +2493,1077 @@ exports.discoverpagelog = onDocumentWritten("discoverpagelogs/{docid}",async (sn
     throw error;
   }
 })
+
+// ── TV login (phone approval, RFC 8628 device-flow shape) ─────────────────
+//
+// "Sign in with your phone" for the Android TV app (com.eiflix.tv). The TV
+// asks for a code (`createTvLoginRequest`, no Firebase user) and shows it; the
+// viewer's already-signed-in phone approves it (`approveTvLogin`, Firebase
+// Auth required); the TV learns of the approval in real time from a snapshot
+// listener on its OWN request document tvLoginRequests/{requestId}
+// (2026-09-21 pass 5 — there is no status mirror any more) and then calls
+// `redeemTvLogin` ONCE (no Firebase user) with its device secret and receives
+// a custom token minted for the APPROVER's uid — `approvedUid` is always
+// `request.auth.uid`, never client input. The TV has NO polling path and NO
+// silent fallback (owner rule, 2026-09-21): when the listener cannot attach
+// (rule not deployed, any Firestore error) the TV shows the failure on screen
+// and the phone path stops for that screen — email/password sign-in stays.
+// `intervalSeconds` is still returned because it is the unchanged RFC 8628
+// wire shape; the TV does not use it. Nothing here reuses `pendingAuth` /
+// `authorizeTvDevice`. A fourth callable, `createTvCastGrant`, lets the
+// signed-in phone hand its identity to the TV over Google Cast instead of a
+// code (the kind "castgrant" document below) — the redemption is the same
+// `redeemTvLogin`.
+//
+// SELF-CONTAINED handlers: the gen-2 bundling quirk described in
+// authorizeTvDevice dropped a module-level *function* from a deployed
+// handler, so every helper (sha256hex, base64url, code normalise/format,
+// sanitising) is a closure inside each handler and deliberately duplicated.
+// Module-level CONSTANTS are fine (WS_ORDER_COLLECTION works the same way).
+//
+// TWO COLLECTIONS, that's it (owner decision, 2026-09-21 pass 5): everything
+// about login lives in tvLoginRequests, the app-open log in tvuserlogs. The
+// former tvLoginStatus (status mirror) and tvLoginApprovers (per-uid lockout
+// docs) collections are REMOVED — nothing here reads, writes or deletes them,
+// and the TV no longer knows their names.
+//
+// tvLoginRequests/{autoId} (Firestore auto ids) holds documents of two kinds,
+// told apart by `kind`:
+//
+// kind "request" — one per code issued (its auto id is returned to the TV as
+// `requestId`; the TV listens to this very document while SIGNED OUT):
+//   kind          "request"
+//   secretHash    string     sha256hex(secret) — redeemTvLogin's lookup key; the secret
+//                            itself is stored nowhere
+//   userCodeHash  string     sha256hex(TV_LOGIN_CODE_PEPPER + userCode) — raw code never stored
+//   status        "pending" | "approved" | "redeemed"   ← what the TV's listener reads
+//   tvlabel       string     server-derived "<manufacturer> <model>", else "Android TV".
+//                            Always a single line (control / format characters are
+//                            stripped in sanitiseDevice — see the logging note below).
+//                            The phone receives it as `tvName` (2026-09-18: it used to be
+//                            the Settings device name, which is a person's name as often
+//                            as not — that value now lives in device.settingsdevicename)
+//   device        map        the TV's metadata, sanitised flat to TV_LOGIN_DEVICE_KEYS —
+//                            every key present, null when the TV did not send it
+//   createdAt     Timestamp  (server)
+//   expiresAt     Timestamp  createdAt + 10 min (Timestamp.fromMillis(Date.now() + TTL))
+//   approvedUid   string | null      approvedAt  Timestamp | null
+//   profileId     string | null      the approver's profile doc id, resolved server-side
+//                                    by email at approval (best-effort: null when nothing
+//                                    matched or the lookup failed — never blocks approval)
+//   profileCollection  "profile_data" | "new_user_data" | null
+//   redeemedAt    Timestamp | null
+//   updatedAt     Timestamp  (server) — stamped by the approve and redeem flips
+//                            (absent while pending)
+//
+// kind "failure" — one per WRONG code (`wrong_code` only: a malformed code is
+// invalid-argument before any lookup, an already-used and an expired code are
+// not counted), the per-approver lockout (auto id, no client access):
+//   kind          "failure"
+//   approverUid   string     request.auth.uid of the phone that guessed
+//   at            Timestamp  (server)
+//   expiresAt     Timestamp  now + TV_LOGIN_LOCKOUT_WINDOW_MS (15 min) — the record
+//                            counts while expiresAt > now, then it is dead weight
+//                            until the cleanup sweeps it
+// approveTvLogin counts the caller's live failure records INSIDE its
+// transaction, before the code lookup, with the equality-only query
+// kind == "failure" && approverUid == uid, limit 30 (no composite index):
+// TV_LOGIN_LOCKOUT_MAX or more live → resource-exhausted; a miss tx.create()s
+// the new record in the same commit. PHANTOM INSERTS: a Firestore transaction
+// locks the documents it READ, not a query's result set, so two concurrent
+// guesses from the same uid can each count N and both create their record —
+// a couple of extra guesses can slip through around the threshold. Against a
+// 23^8 (≈ 7.8 × 10^10) code space that is acceptable. The limit(30) can only
+// under-count once one uid has piled up more than 30 records inside the
+// ~1 h 15 min before the cleanup sweeps them — same verdict. A failure record
+// carries neither secretHash nor userCodeHash, so the code lookup
+// (userCodeHash ==) and the redeem lookup (secretHash ==) never see one.
+//
+// kind "castgrant" — one per Cast from the phone app (2026-09-22, Cast pass
+// 2): the sign-in hand-over for Google Cast Connect. The SIGNED-IN phone
+// calls `createTvCastGrant` (Firebase Auth required, no input) right before
+// it launches the TV app over Cast, and puts the returned `credentials`
+// string — `eiflix-cast/1:<uid>:<secret>` — into the Cast launch's
+// CredentialsData. The TV app reads it at launch: already signed in as that
+// uid → nothing to do; otherwise it calls the UNCHANGED `redeemTvLogin`
+// with the secret, runs its account gate on the token, signs the previous
+// viewer out and itself in as the caster, and only then plays. Born
+// `approved` — there is no code and nobody to approve it, the caller IS the
+// approver — so `redeemTvLogin` finds it by secretHash and treats it exactly
+// like an approved request (its +30 s grace applies to the 5-minute expiry):
+//   kind          "castgrant"
+//   secretHash    string     sha256hex(secret) — the secret itself is stored nowhere
+//   userCodeHash  null       so approveTvLogin's code lookup (userCodeHash ==) can never match it
+//   status        "approved" | "redeemed"
+//   tvlabel       null       no TV asked; the phone does not know which TV yet
+//   device        null
+//   createdAt     Timestamp  (server)       approvedAt  Timestamp (server) — same instant
+//   expiresAt     Timestamp  createdAt + TV_CAST_GRANT_TTL_MS (5 min — long enough for the
+//                            Cast dialog and the TV app's cold start, short enough that a
+//                            grant left in a phone's memory is soon worthless)
+//   approvedUid   string     request.auth.uid of the phone — never client input
+//   profileId / profileCollection   resolved from the caller's email exactly as approveTvLogin
+//                            does (best-effort, null when nothing matched)
+//   redeemedAt    Timestamp | null      updatedAt  Timestamp (server)
+// The uid rides in the credentials string only so the TV can skip a redeem
+// when it is already that viewer; the secret is the proof. Every field the
+// three lookups key on is present, so a grant and a request never collide.
+// createTvLoginRequest's cleanup sweeps grants too (same expiresAt query);
+// createTvCastGrant runs the same best-effort sweep, so phones that cast
+// every day keep the collection tidy without a TV ever asking for a code.
+//
+// Production rule (owner deploys by hand in the Console, inside the existing
+// documents match) — REQUIRED for the phone path:
+//   match /tvLoginRequests/{id} {
+//     allow get: if true;            // the signed-out TV listens to its own request by id
+//     allow list, write: if false;
+//   }
+// (Firestore evaluates a single-document listener as `get`.) What a `get`
+// exposes to whoever holds an id: the two hashes (never the secret or the
+// code), the TV's own device object, tvlabel, and approvedUid / profileId /
+// profileCollection after approval. The id is a 20-character random string
+// returned only to the requesting TV; `list` is denied, so ids cannot be
+// discovered (a failure record's id is never handed out at all). Until the
+// rule is live the TV's listener fails PERMISSION_DENIED, every TV shows
+// "Sign in with your phone" as unavailable and stops that path
+// (email/password stays). There is no polling fallback — deploying the
+// functions without this rule disables phone sign-in on every TV in the
+// field. createTvLoginRequest's best-effort cleanup is ONE query,
+// expiresAt < now − 1 h, limit 20, and sweeps requests and failure records
+// alike (there is no scheduled job).
+//
+// App-open log tvuserlogs/{autoId}: NOT written by this file. Since 2026-09-18
+// pass 3 the TV client adds one document per Activity ON_START straight into
+// Firestore with the client SDK (auto id via add(); `uid` = the signed-in
+// Firebase uid; flat fields email, profileid, profilecollection, datetime
+// (server), clientdatetime, opentype, signinmethod, sessionid, platform_name
+// and every TV_LOGIN_DEVICE_KEYS key). The former `logTvAppOpen` callable is
+// gone, so the production ruleset must carry this rule (owner deploys it by
+// hand in the Console, inside the existing documents match):
+//   match /tvuserlogs/{logid} {
+//     allow create: if request.auth != null
+//                   && request.resource.data.uid == request.auth.uid;
+//     allow read, update, delete: if false;
+//   }
+// Create-only, own-uid-only: a TV may add its own open, never read or rewrite
+// any. Until that rule is live the TV's write is PERMISSION_DENIED.
+//
+// The device secret and the custom token are NEVER logged, nor is the device
+// object, nor the secret's hash — log lines carry states, the formatted user
+// code, uids, the tvlabel and a request's auto doc id (`req <id>`). The
+// tvlabel is the only TV-controlled text that reaches a log line (and the
+// phone's dialog, as `tvName`); it is single-line by construction —
+// `sanitiseDevice` strips every control / format character (Unicode Cc and
+// Cf: newlines, tabs, NUL, C1 controls, zero-width and bidi overrides) before
+// capping, so an unauthenticated createTvLoginRequest caller cannot forge a
+// second log line (CWE-117) or a multi-line / reversed label on the phone.
+
+const { Timestamp } = require("firebase-admin/firestore");
+
+const TV_LOGIN_COLLECTION = "tvLoginRequests"; // kind "request" AND kind "failure" documents (2026-09-21 pass 5 — the only login collection)
+const TV_LOGIN_ALPHABET = "CDFHJKMNPQRTVWX23456789"; // 23 symbols, no vowels, no look-alikes
+const TV_LOGIN_CODE_LENGTH = 8;
+const TV_LOGIN_TTL_MS = 10 * 60 * 1000;
+const TV_LOGIN_POLL_INTERVAL_S = 5; // `intervalSeconds` in the create / redeem responses — the unchanged RFC 8628 wire shape only; the TV does not poll (2026-09-21)
+const TV_LOGIN_LOCKOUT_MAX = 10;
+const TV_LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // a kind "failure" record's expiresAt = now + this
+const TV_LOGIN_LOCKOUT_QUERY_LIMIT = 30; // failure records read per approve attempt (equality-only query, no composite index)
+const TV_LOGIN_REDEEM_GRACE_MS = 30 * 1000; // an approval made just before expiresAt must still be collectable by the TV's redeem after the listener reports approved (its countdown lags the server by the create latency)
+const TV_CAST_GRANT_TTL_MS = 5 * 60 * 1000; // a kind "castgrant" document's expiresAt = now + this (2026-09-22): the Cast dialog plus the TV app's cold start, with room to spare
+const TV_LOGIN_VERIFICATION_URL = "https://eiflix.com/tv";
+const TV_LOGIN_CODE_PEPPER = "eiflix-tv-login:";
+const TV_LOGIN_ENFORCE_APP_CHECK = false; // flip once com.eiflix.tv is registered with Play Integrity AND the TV ships App Check
+
+// 2026-09-18: device metadata and profileId. Constants only — the
+// sanitising / lookup helpers that use them are closures per handler.
+const TV_LOGIN_PROFILE_COLLECTIONS = ["profile_data", "new_user_data"]; // queried in this order, first hit wins (the TV's gate does the same)
+// The device metadata schema (spec §2), in Console order. `sanitiseDevice`
+// keeps exactly these keys — unknown ones are dropped, missing ones stored as
+// null — so every stored object shows the whole schema. Keys not listed in
+// the NUMBER / BOOLEAN sets are strings: control / format characters
+// (Unicode Cc, Cf) stripped, trimmed, then capped at
+// TV_LOGIN_DEVICE_STRING_MAX code points (the two LONG ones at 160) — code
+// points, not UTF-16 units, so a cap never splits a surrogate pair.
+const TV_LOGIN_DEVICE_KEYS = [
+  "ostype",
+  "osversion",
+  "sdkint",
+  "securitypatch",
+  "manufacturer",
+  "brand",
+  "model",
+  "device",
+  "product",
+  "hardware",
+  "board",
+  "buildid",
+  "fingerprint",
+  "settingsdevicename",
+  "istv",
+  "isemulator",
+  "hasgms",
+  "gmsversion",
+  "screenwidthpx",
+  "screenheightpx",
+  "densitydpi",
+  "screenwidthdp",
+  "screenheightdp",
+  "refreshratehz",
+  "totalmemorymb",
+  "lowram",
+  "supportedabis",
+  "androidid",
+  "installid",
+  "locale",
+  "timezone",
+  "appversion",
+  "appversioncode",
+  "apppackage",
+  "appbuildtype",
+  "networktype",
+  "networkmetered",
+];
+const TV_LOGIN_DEVICE_NUMBER_KEYS = [
+  "sdkint",
+  "screenwidthpx",
+  "screenheightpx",
+  "densitydpi",
+  "screenwidthdp",
+  "screenheightdp",
+  "refreshratehz",
+  "totalmemorymb",
+  "appversioncode",
+];
+const TV_LOGIN_DEVICE_BOOLEAN_KEYS = ["istv", "isemulator", "hasgms", "lowram", "networkmetered"];
+const TV_LOGIN_DEVICE_LONG_STRING_KEYS = ["fingerprint", "supportedabis"];
+const TV_LOGIN_DEVICE_STRING_MAX = 64;
+const TV_LOGIN_DEVICE_LONG_STRING_MAX = 160;
+
+/**
+ * TV → issues a { userCode, secret } pair. No Firebase user required (the TV
+ * is signed out); App Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips.
+ * Input:  { device?: { …TV_LOGIN_DEVICE_KEYS… } } — the TV's metadata (section
+ *         note), stored flat and sanitised; the source of the `tvlabel` the
+ *         phone later sees as `tvName`. Nothing of it is echoed back.
+ * Output: { userCode "KX7M-4PQD", secret (base64url, 43 chars), expiresInSeconds,
+ *           intervalSeconds (RFC 8628 wire shape only — the TV does not poll),
+ *           verificationUrl, verificationUrlComplete,
+ *           requestId (the auto id of tvLoginRequests/{id} — the TV listens to
+ *           that document itself; 2026-09-21 pass 5, no status mirror) }
+ * Writes one kind "request" document; a failed write throws `internal` so the
+ * TV retries with backoff.
+ */
+exports.createTvLoginRequest = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const base64url = (buf) =>
+      buf
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    const formatCode = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    // The TV's metadata, flattened to the spec §2 schema: exactly the
+    // TV_LOGIN_DEVICE_KEYS, every one present. A string has its control /
+    // format characters stripped, is trimmed and capped (64 code points;
+    // fingerprint / supportedabis 160), a number must be finite, a boolean
+    // must be a boolean; anything else — missing, wrong type, empty — is
+    // stored as null. Unknown keys are dropped. Nothing is coerced across
+    // types, so a Console row always reads the way the TV meant it.
+    const sanitiseDevice = (raw) => {
+      const source =
+        raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+      const clean = {};
+      for (const key of TV_LOGIN_DEVICE_KEYS) {
+        const value = source[key];
+        if (TV_LOGIN_DEVICE_NUMBER_KEYS.includes(key)) {
+          clean[key] =
+            typeof value === "number" && Number.isFinite(value) ? value : null;
+        } else if (TV_LOGIN_DEVICE_BOOLEAN_KEYS.includes(key)) {
+          clean[key] = typeof value === "boolean" ? value : null;
+        } else {
+          const max = TV_LOGIN_DEVICE_LONG_STRING_KEYS.includes(key)
+            ? TV_LOGIN_DEVICE_LONG_STRING_MAX
+            : TV_LOGIN_DEVICE_STRING_MAX;
+          // Control / format characters (Unicode Cc: NUL, \t, \n, \r, DEL,
+          // the C1 range; Cf: zero-width joiners / spaces, bidi marks and
+          // overrides, BOM) are stripped FIRST — the caller is unauthenticated
+          // and `manufacturer` + `model` become the tvlabel that is quoted in
+          // the "issued" log line and shown on the phone as `tvName`, so a
+          // newline would let a TV forge a second log line and a bidi
+          // override would let it reverse the label on screen. Nothing the
+          // TV legitimately reports (Build.*, the Settings device name)
+          // contains them. Strip, then trim — trim() does not know the
+          // zero-width characters, so a leading one would otherwise shield
+          // a leading space.
+          // Capped by code point, not UTF-16 unit: a cut between the two
+          // halves of an emoji / astral character would store a lone
+          // surrogate, which Firestore rejects (a proto3 string must be
+          // valid UTF-8) — and this TV could then never be issued a code.
+          // toWellFormed() turns a lone surrogate the client itself sent
+          // into U+FFFD for the same reason (a lone surrogate is Cs, not
+          // Cc / Cf, so the strip leaves it for toWellFormed()).
+          const text =
+            typeof value === "string"
+              ? Array.from(value.replace(/[\p{Cc}\p{Cf}]/gu, "").trim())
+                  .slice(0, max)
+                  .join("")
+                  .toWellFormed()
+              : "";
+          clean[key] = text || null;
+        }
+      }
+      return clean;
+    };
+    // The label the phone shows: manufacturer + model from the sanitised
+    // metadata, "Android TV" when the TV reported neither. Single-line by
+    // construction — both parts went through sanitiseDevice's strip.
+    const tvLabelOf = (device) =>
+      [device.manufacturer, device.model]
+        .filter((part) => typeof part === "string" && part.length > 0)
+        .join(" ") || "Android TV";
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips: a replayed limited-use
+    // App Check token is refused (the design's replay control).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const device = sanitiseDevice(data.device);
+    const tvlabel = tvLabelOf(device);
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+
+    // Device secret: 32 CSPRNG bytes → base64url (43 chars, no padding). Its
+    // SHA-256 is stored as `secretHash` — redeemTvLogin's lookup key; the
+    // secret itself goes to the TV and is stored nowhere. The document id is
+    // a Firestore auto id (it used to be the hash).
+    const secret = base64url(crypto.randomBytes(32));
+    const secretHash = sha256hex(secret);
+    const docRef = col.doc();
+
+    // User code: 8 symbols from the alphabet, unique among LIVE requests
+    // (pending and unexpired). Five tries, then give up.
+    let userCode = null;
+    let userCodeHash = null;
+    for (let attempt = 0; attempt < 5 && !userCode; attempt++) {
+      let candidate = "";
+      for (let i = 0; i < TV_LOGIN_CODE_LENGTH; i++) {
+        candidate += TV_LOGIN_ALPHABET[crypto.randomInt(TV_LOGIN_ALPHABET.length)];
+      }
+      const candidateHash = sha256hex(TV_LOGIN_CODE_PEPPER + candidate);
+      const clash = await col.where("userCodeHash", "==", candidateHash).get();
+      const live = clash.docs.some(
+        (d) =>
+          d.get("status") === "pending" &&
+          timestampMillis(d.get("expiresAt")) > now
+      );
+      if (!live) {
+        userCode = candidate;
+        userCodeHash = candidateHash;
+      }
+    }
+    if (!userCode) {
+      console.error(
+        "createTvLoginRequest: no unique user code in 5 tries"
+      );
+      throw new HttpsError("internal", "Could not issue a code. Please try again.");
+    }
+
+    // create() fails if the auto id already exists (never). This is the
+    // document the signed-out TV listens to (readable by id under the rule in
+    // the section note), so `kind` tells it apart from the failure records
+    // that share the collection (2026-09-21 pass 5).
+    const expiresAt = Timestamp.fromMillis(now + TV_LOGIN_TTL_MS);
+    try {
+      await docRef.create({
+        kind: "request",
+        secretHash,
+        userCodeHash,
+        status: "pending",
+        tvlabel,
+        device,
+        createdAt: FieldValue.serverTimestamp(),
+        expiresAt,
+        approvedUid: null,
+        approvedAt: null,
+        profileId: null,
+        profileCollection: null,
+        redeemedAt: null,
+      });
+    } catch (error) {
+      console.error(`createTvLoginRequest: create failed: ${error.message}`);
+      throw new HttpsError("internal", "Could not issue a code. Please try again.");
+    }
+
+    // Best-effort cleanup of documents more than an hour past their expiresAt
+    // (there is no scheduled job): ONE query over the collection, so it
+    // sweeps stale requests and dead failure records alike (2026-09-21 pass
+    // 5 — both kinds carry expiresAt; nothing needs skipping and there is no
+    // second collection to mirror the deletes into). 20 docs → 20 ops, well
+    // under the batch limit. Errors are swallowed.
+    try {
+      const stale = await col
+        .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
+        .limit(20)
+        .get();
+      if (!stale.empty) {
+        const batch = db.batch();
+        stale.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        console.log(
+          `createTvLoginRequest: cleaned up ${stale.size} stale document(s)`
+        );
+      }
+    } catch (error) {
+      console.warn(`createTvLoginRequest: cleanup skipped: ${error.message}`);
+    }
+
+    const formatted = formatCode(userCode);
+    console.log(`createTvLoginRequest: issued ${formatted} for "${tvlabel}"`);
+    return {
+      userCode: formatted,
+      secret,
+      expiresInSeconds: Math.round(TV_LOGIN_TTL_MS / 1000),
+      intervalSeconds: TV_LOGIN_POLL_INTERVAL_S,
+      verificationUrl: TV_LOGIN_VERIFICATION_URL,
+      verificationUrlComplete: `${TV_LOGIN_VERIFICATION_URL}?code=${userCode}`,
+      requestId: docRef.id, // the TV listens to tvLoginRequests/{requestId} — this very document (2026-09-21 pass 5)
+    };
+  }
+);
+
+/**
+ * Phone → looks up / approves a code shown on a TV. Firebase Auth required.
+ * `approvedUid` is ALWAYS request.auth.uid — the client sends a code and a
+ * yes, never an account.
+ * Input:  { userCode, action?: "lookup" | "approve" (default "approve") }
+ * Output: lookup  → { status: "pending", userCode, tvName, expiresAtMillis }
+ *         approve → { ok: true, userCode, tvName }
+ * `tvName` is the stored `tvlabel` (manufacturer + model reported by the TV,
+ * else "Android TV") — the wire name is unchanged, its meaning is not.
+ * An approval also records the approver's profile (`profileId`,
+ * `profileCollection`), resolved server-side from the account email the way
+ * the TV's gate does; a failed lookup stores nulls and never blocks.
+ * Business rejections are failed-precondition + details.reason
+ * ("wrong_code" | "already_used" | "expired") so the phone can tell them from
+ * a not-found that means "function not deployed"; lockout is
+ * resource-exhausted; a malformed code is invalid-argument (not counted).
+ */
+exports.approveTvLogin = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const formatCode = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+    const normaliseCode = (raw) =>
+      String(raw == null ? "" : raw).toUpperCase().replace(/[-\s]/g, "");
+    const isValidCode = (c) =>
+      c.length === TV_LOGIN_CODE_LENGTH &&
+      [...c].every((ch) => TV_LOGIN_ALPHABET.includes(ch));
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    const REJECT = {
+      wrong_code: "That code doesn't match. Check the TV and try again.",
+      already_used:
+        "This code has already been used. If you didn't approve this, check your TV.",
+      expired: "That code has expired. Your TV shows a new one.",
+    };
+    const rejection = (reason) =>
+      new HttpsError("failed-precondition", REJECT[reason], { reason });
+    // The caller's account email: the ID-token claim, else the Auth user
+    // record (a custom-token session may carry no claim). Trimmed and
+    // lowercased — the profile collections hold emails in that form and the
+    // TV's gate matches on it. "" when the account has none. Throws on an
+    // Auth error; the caller decides whether that matters.
+    const resolveEmail = async (uid, token) => {
+      let email = token && typeof token.email === "string" ? token.email : "";
+      if (!email.trim()) {
+        const user = await getAuth().getUser(uid);
+        email = user && typeof user.email === "string" ? user.email : "";
+      }
+      return email.trim().toLowerCase();
+    };
+    // The TV gate's lookup, server-side: `email ==` in profile_data, then
+    // new_user_data, first hit wins. { profileId: null, profileCollection:
+    // null } when nothing matches; throws on a Firestore error.
+    const findProfile = async (db, email) => {
+      for (const collection of TV_LOGIN_PROFILE_COLLECTIONS) {
+        const hit = await db
+          .collection(collection)
+          .where("email", "==", email)
+          .limit(1)
+          .get();
+        if (!hit.empty) {
+          return { profileId: hit.docs[0].id, profileCollection: collection };
+        }
+      }
+      return { profileId: null, profileCollection: null };
+    };
+
+    // 1. A signed-in phone.
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError("unauthenticated", "Sign in to the EiFlix app first.");
+    }
+    const uid = request.auth.uid;
+
+    // 2. Normalise + validate. A malformed code never reaches the lockout.
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const userCode = normaliseCode(data.userCode);
+    if (!isValidCode(userCode)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Enter the 8-character code shown on your TV."
+      );
+    }
+    const action =
+      data.action == null || data.action === "" ? "approve" : String(data.action);
+    if (action !== "lookup" && action !== "approve") {
+      throw new HttpsError(
+        "invalid-argument",
+        'Unknown "action" — expected "lookup" or "approve".'
+      );
+    }
+    const formatted = formatCode(userCode);
+    const userCodeHash = sha256hex(TV_LOGIN_CODE_PEPPER + userCode);
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+
+    // 3+4. Lockout check and lookup in ONE transaction. The lockout is the
+    //    caller's kind "failure" records in this same collection (2026-09-21
+    //    pass 5 — the separate lockout collection is gone): the equality-only query
+    //    kind == "failure" && approverUid == uid (no composite index) is
+    //    read INSIDE the transaction before the code lookup, and only the
+    //    records whose expiresAt is still ahead of now count; a miss
+    //    tx.create()s its own record in the same commit, so about
+    //    TV_LOGIN_LOCKOUT_MAX not-found codes are evaluated per window. A
+    //    transaction locks the documents it read, not the query's result
+    //    set, so two concurrent guesses can each count N and both insert
+    //    (phantom insert) — a couple of extra guesses around the threshold,
+    //    acceptable against a 23^8 code space (section note). Verdicts are
+    //    RETURNED, not thrown, so the recorded failure is committed before
+    //    the HttpsError goes out. A live code, an already-used one and an
+    //    expired one write nothing.
+    const failureQuery = col
+      .where("kind", "==", "failure")
+      .where("approverUid", "==", uid)
+      .limit(TV_LOGIN_LOCKOUT_QUERY_LIMIT);
+    const codeQuery = col.where("userCodeHash", "==", userCodeHash);
+    const verdict = await db.runTransaction(async (tx) => {
+      const failureSnap = await tx.get(failureQuery);
+      const liveFailures = failureSnap.docs.filter(
+        (d) => timestampMillis(d.get("expiresAt")) > now
+      ).length;
+      if (liveFailures >= TV_LOGIN_LOCKOUT_MAX) {
+        return { kind: "locked_out", count: liveFailures };
+      }
+      // Lookup by the peppered hash; a live (pending, unexpired) doc wins.
+      const matches = await tx.get(codeQuery);
+      const target =
+        matches.docs.find(
+          (d) =>
+            d.get("status") === "pending" &&
+            timestampMillis(d.get("expiresAt")) > now
+        ) || null;
+      if (target) {
+        return { kind: "live", target };
+      }
+      if (matches.empty) {
+        // Not a code we issued: this one counts, in this very commit — a new
+        // kind "failure" record with an auto id (create, never set: an auto
+        // id clash is impossible and a silent overwrite would be a bug).
+        tx.create(col.doc(), {
+          kind: "failure",
+          approverUid: uid,
+          at: FieldValue.serverTimestamp(),
+          expiresAt: Timestamp.fromMillis(now + TV_LOGIN_LOCKOUT_WINDOW_MS),
+        });
+        return { kind: "wrong_code", count: liveFailures + 1 };
+      }
+      // Best match: the most recently created request for this code.
+      const best = [...matches.docs].sort(
+        (a, b) =>
+          timestampMillis(b.get("createdAt")) - timestampMillis(a.get("createdAt"))
+      )[0];
+      const status = best.get("status");
+      if (status === "approved" || status === "redeemed") {
+        return { kind: "already_used", status };
+      }
+      return { kind: "expired" };
+    });
+
+    if (verdict.kind === "locked_out") {
+      console.warn(
+        `approveTvLogin: uid ${uid} locked out (${verdict.count} failures in window)`
+      );
+      throw new HttpsError(
+        "resource-exhausted",
+        "Too many wrong codes. Try again in 15 minutes, or sign in on the TV with your email and password."
+      );
+    }
+    if (verdict.kind === "wrong_code") {
+      console.log(
+        `approveTvLogin: ${formatted} not found (uid ${uid}, ` +
+          `${verdict.count} failure(s) in window)`
+      );
+      throw rejection("wrong_code");
+    }
+    if (verdict.kind === "already_used") {
+      console.log(`approveTvLogin: ${formatted} already ${verdict.status} (uid ${uid})`);
+      throw rejection("already_used");
+    }
+    if (verdict.kind === "expired") {
+      console.log(`approveTvLogin: ${formatted} expired (uid ${uid})`);
+      throw rejection("expired");
+    }
+    const target = verdict.target;
+
+    // What the phone shows: the server-derived label (model), never the
+    // Settings device name.
+    const tvName = String(target.get("tvlabel") || "Android TV");
+
+    // 5. Lookup only — nothing changes.
+    if (action === "lookup") {
+      console.log(`approveTvLogin: ${formatted} looked up by uid ${uid}`);
+      return {
+        status: "pending",
+        userCode: formatted,
+        tvName,
+        expiresAtMillis: timestampMillis(target.get("expiresAt")),
+      };
+    }
+
+    // 6. Approve — first the approver's profile, by email, BEFORE the
+    //    transaction (an Auth call cannot run inside one, and the queries
+    //    need not). Best-effort: a failure of either step logs a warning and
+    //    stores nulls; the approval itself never waits on it.
+    let profileId = null;
+    let profileCollection = null;
+    try {
+      const email = await resolveEmail(uid, request.auth.token);
+      if (email) {
+        const hit = await findProfile(db, email);
+        profileId = hit.profileId;
+        profileCollection = hit.profileCollection;
+      }
+      if (!profileId) {
+        console.warn(`approveTvLogin: ${formatted}: no profile matched for uid ${uid}`);
+      }
+    } catch (error) {
+      // SDK error text only.
+      console.warn(
+        `approveTvLogin: ${formatted}: profile lookup failed for uid ${uid}: ${error.message}`
+      );
+    }
+
+    // 7. Then the write: re-read inside a transaction with a status ==
+    //    "pending" precondition; approvedUid is the caller's uid, full stop,
+    //    and the profile lands in the same commit. This request document IS
+    //    what the TV is listening to (2026-09-21 pass 5 — no status mirror),
+    //    so the flip to `approved` plus updatedAt is its real-time signal.
+    const targetRef = target.ref;
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(targetRef);
+      if (!fresh.exists) {
+        throw rejection("wrong_code");
+      }
+      const status = fresh.get("status");
+      if (status === "approved" || status === "redeemed") {
+        throw rejection("already_used");
+      }
+      if (
+        status !== "pending" ||
+        timestampMillis(fresh.get("expiresAt")) <= Date.now()
+      ) {
+        throw rejection("expired");
+      }
+      tx.update(targetRef, {
+        status: "approved",
+        approvedUid: uid,
+        approvedAt: FieldValue.serverTimestamp(),
+        profileId,
+        profileCollection,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    console.log(`approveTvLogin: ${formatted} approved by uid ${uid}`);
+    return { ok: true, userCode: formatted, tvName };
+  }
+);
+
+/**
+ * TV → redeems with its device secret: called ONCE per approval, when its
+ * listener on tvLoginRequests/{requestId} reports `approved` (2026-09-21
+ * pass 5 — the request document itself, no status mirror), and retried
+ * with backoff (2/4/8 s, visibly) on an `internal` or network failure. There
+ * is no polling path: if the listener cannot attach the TV shows the failure
+ * and stops the phone path (owner rule, 2026-09-21). No Firebase user; App
+ * Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips. The approver's email
+ * lookup and the custom token mint both run INSIDE the redeem transaction,
+ * before the writes: a failure of either aborts the transaction, the request
+ * stays `approved`, and the TV's backoff retry redeems it. The flip to
+ * `redeemed` stamps updatedAt on the same request document. An approval is
+ * collectable only until expiresAt (+ TV_LOGIN_REDEEM_GRACE_MS); after that
+ * the secret answers "expired" for good (the request is left as is — the TV
+ * handles expiry by its own countdown). The token is returned exactly once
+ * and never logged.
+ * Input:  { secret }
+ * Output: { status: "pending" | "expired" | "invalid", intervalSeconds }
+ *         (intervalSeconds is the unchanged RFC 8628 wire shape; the TV ignores it)
+ *      or { status: "approved", customToken, uid, email, profileId, profileCollection }
+ *         (profileId / profileCollection are what approveTvLogin recorded — may
+ *         be null; the TV's gate resolves the profile itself and stays authoritative)
+ */
+exports.redeemTvLogin = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    const poll = (status) => ({ status, intervalSeconds: TV_LOGIN_POLL_INTERVAL_S }); // RFC 8628 wire shape; the TV does not poll
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips (see createTvLoginRequest).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    // 1. Shape only — never echoed, never logged.
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const secret = typeof data.secret === "string" ? data.secret : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) {
+      throw new HttpsError("invalid-argument", "A device secret is required.");
+    }
+
+    // 2. The request is found by `secretHash` (the SHA-256 of the secret) —
+    //    the document id is a Firestore auto id, so this is a query, both
+    //    here and again inside the transaction below. No match → "invalid".
+    const db = getFirestore();
+    const bySecret = db
+      .collection(TV_LOGIN_COLLECTION)
+      .where("secretHash", "==", sha256hex(secret))
+      .limit(1);
+
+    const found = await bySecret.get();
+    if (found.empty) {
+      return poll("invalid");
+    }
+    const snap = found.docs[0];
+    const docRef = snap.ref;
+    const idTag = `req ${docRef.id}`; // the auto id — never the secret or its hash
+
+    // 3. Not yet approved, or spent. An approved request is collectable only
+    //    for the code's lifetime plus a short grace (the TV's countdown starts
+    //    when the create response ARRIVES, so its redeem after the listener
+    //    reports approved can land a few seconds after the server's
+    //    expiresAt): the design's "approved, not expired, not redeemed". Past
+    //    that the secret answers "expired" for good — nothing legitimate
+    //    redeems that late, the TV has already rotated — and
+    //    createTvLoginRequest's cleanup removes the doc later.
+    const status = snap.get("status");
+    const expiresAtMillis = timestampMillis(snap.get("expiresAt"));
+    if (status === "pending") {
+      if (expiresAtMillis <= Date.now()) {
+        return poll("expired");
+      }
+      return poll("pending");
+    }
+    if (status !== "approved") {
+      // "redeemed" (or anything unexpected): this secret is finished.
+      return poll("invalid");
+    }
+    if (expiresAtMillis + TV_LOGIN_REDEEM_GRACE_MS <= Date.now()) {
+      console.log(`redeemTvLogin: ${idTag} approved but expired before redeem`);
+      return poll("expired");
+    }
+
+    // 4. Approved → redeem exactly once. Reads first (the request again, by
+    //    secretHash through tx.get(query), then the approver's email), then
+    //    the mint, then the one write (the request itself). The email
+    //    lookup runs INSIDE the transaction next to the mint so a transient
+    //    Identity Toolkit failure throws HttpsError("internal") — not a
+    //    retryable Firestore code, so runTransaction rolls back and rethrows —
+    //    and the request stays `approved` for the TV's backoff retry. Only a
+    //    MISSING approver (deleted after approving) yields email: null; the
+    //    TV treats a null email as "no account", which is final, so a failed
+    //    lookup must never be reported that way.
+    const outcome = await db.runTransaction(async (tx) => {
+      const again = await tx.get(bySecret);
+      const fresh = again.empty ? null : again.docs[0];
+      if (!fresh || fresh.get("status") !== "approved") {
+        return { verdict: "invalid" };
+      }
+      if (
+        timestampMillis(fresh.get("expiresAt")) + TV_LOGIN_REDEEM_GRACE_MS <=
+        Date.now()
+      ) {
+        return { verdict: "expired" };
+      }
+      const approvedUid = fresh.get("approvedUid");
+      if (typeof approvedUid !== "string" || !approvedUid) {
+        console.error(`redeemTvLogin: ${idTag} is approved without an approvedUid`);
+        return { verdict: "invalid" };
+      }
+      // The profile approveTvLogin recorded next to the uid (null when it
+      // matched nothing or the lookup failed). Passed through, never trusted
+      // for access: the TV's gate resolves the account itself.
+      const storedProfileId = fresh.get("profileId");
+      const storedProfileCollection = fresh.get("profileCollection");
+      const profileId =
+        typeof storedProfileId === "string" && storedProfileId
+          ? storedProfileId
+          : null;
+      const profileCollection =
+        typeof storedProfileCollection === "string" && storedProfileCollection
+          ? storedProfileCollection
+          : null;
+      let email = null;
+      try {
+        const user = await getAuth().getUser(approvedUid);
+        email = user && user.email ? user.email : null;
+      } catch (error) {
+        if (error && error.code === "auth/user-not-found") {
+          console.warn(
+            `redeemTvLogin: ${idTag} approver uid ${approvedUid} no longer exists`
+          );
+        } else {
+          // SDK error text only.
+          console.error(
+            `redeemTvLogin: ${idTag} getUser failed for uid ${approvedUid}: ${error.message}`
+          );
+          throw new HttpsError("internal", "Could not sign the TV in. Trying again.");
+        }
+      }
+      let customToken;
+      try {
+        customToken = await getAuth().createCustomToken(approvedUid);
+      } catch (error) {
+        // SDK error text only — the token does not exist at this point.
+        console.error(
+          `redeemTvLogin: ${idTag} createCustomToken failed for uid ${approvedUid}: ${error.message}`
+        );
+        throw new HttpsError("internal", "Could not sign the TV in. Trying again.");
+      }
+      // The TV's listener sees this `redeemed` on the same document and
+      // ignores it (its own redeem is under way) — 2026-09-21 pass 5.
+      tx.update(fresh.ref, {
+        status: "redeemed",
+        redeemedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return {
+        verdict: "redeemed",
+        customToken,
+        uid: approvedUid,
+        email,
+        profileId,
+        profileCollection,
+      };
+    });
+
+    if (outcome.verdict === "expired") {
+      console.log(`redeemTvLogin: ${idTag} approved but expired before redeem`);
+      return poll("expired");
+    }
+    if (outcome.verdict !== "redeemed") {
+      return poll("invalid");
+    }
+
+    console.log(`redeemTvLogin: ${idTag} redeemed for uid ${outcome.uid}`);
+    return {
+      status: "approved",
+      customToken: outcome.customToken,
+      uid: outcome.uid,
+      email: outcome.email,
+      profileId: outcome.profileId,
+      profileCollection: outcome.profileCollection,
+    };
+  }
+);
+
+/**
+ * Phone → mints a Cast sign-in grant for ITSELF (2026-09-22, Cast pass 2).
+ * Firebase Auth required; no input. The caller is the approver, so the
+ * document is born `approved` with `approvedUid` = request.auth.uid — never
+ * client input — and the phone hands the returned `credentials` string to the
+ * TV inside the Cast launch. The TV redeems the secret through the unchanged
+ * `redeemTvLogin`. App Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips,
+ * like the other three. The approver's profile is resolved from the account
+ * email exactly as approveTvLogin does (best-effort, nulls on a miss).
+ * Input:  {} (ignored)
+ * Output: { secret (base64url, 43 chars), uid, expiresInSeconds (300),
+ *           credentials: "eiflix-cast/1:<uid>:<secret>" }
+ * Writes one kind "castgrant" document; a failed write throws `internal`.
+ * The secret is never logged — the log line names the grant's auto id and
+ * the uid.
+ */
+exports.createTvCastGrant = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const base64url = (buf) =>
+      buf
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    // The caller's account email: the ID-token claim, else the Auth user
+    // record (a custom-token session may carry no claim). Trimmed and
+    // lowercased — the profile collections hold emails in that form and the
+    // TV's gate matches on it. "" when the account has none. Throws on an
+    // Auth error; the caller decides whether that matters.
+    const resolveEmail = async (uid, token) => {
+      let email = token && typeof token.email === "string" ? token.email : "";
+      if (!email.trim()) {
+        const user = await getAuth().getUser(uid);
+        email = user && typeof user.email === "string" ? user.email : "";
+      }
+      return email.trim().toLowerCase();
+    };
+    // The TV gate's lookup, server-side: `email ==` in profile_data, then
+    // new_user_data, first hit wins. { profileId: null, profileCollection:
+    // null } when nothing matches; throws on a Firestore error.
+    const findProfile = async (db, email) => {
+      for (const collection of TV_LOGIN_PROFILE_COLLECTIONS) {
+        const hit = await db
+          .collection(collection)
+          .where("email", "==", email)
+          .limit(1)
+          .get();
+        if (!hit.empty) {
+          return { profileId: hit.docs[0].id, profileCollection: collection };
+        }
+      }
+      return { profileId: null, profileCollection: null };
+    };
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips (see createTvLoginRequest).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    // 1. A signed-in phone. Nothing is read from request.data.
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError("unauthenticated", "Sign in to the EiFlix app first.");
+    }
+    const uid = request.auth.uid;
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+
+    // 2. The approver's profile, by email, as approveTvLogin records it.
+    //    Best-effort: a failure logs a warning and stores nulls; the grant
+    //    itself never waits on it (the TV's gate resolves the account again).
+    let profileId = null;
+    let profileCollection = null;
+    try {
+      const email = await resolveEmail(uid, request.auth.token);
+      if (email) {
+        const hit = await findProfile(db, email);
+        profileId = hit.profileId;
+        profileCollection = hit.profileCollection;
+      }
+      if (!profileId) {
+        console.warn(`createTvCastGrant: no profile matched for uid ${uid}`);
+      }
+    } catch (error) {
+      // SDK error text only.
+      console.warn(
+        `createTvCastGrant: profile lookup failed for uid ${uid}: ${error.message}`
+      );
+    }
+
+    // 3. The grant: 32 CSPRNG bytes → base64url (43 chars), stored as its
+    //    SHA-256 only — redeemTvLogin's lookup key. Born approved for the
+    //    caller, with every field the three lookups key on present (a null
+    //    userCodeHash can never match a code) and the request kind's whole
+    //    field set, so the Console shows one schema.
+    const secret = base64url(crypto.randomBytes(32));
+    const secretHash = sha256hex(secret);
+    const docRef = col.doc();
+    const expiresAt = Timestamp.fromMillis(now + TV_CAST_GRANT_TTL_MS);
+    try {
+      await docRef.create({
+        kind: "castgrant",
+        secretHash,
+        userCodeHash: null,
+        status: "approved",
+        tvlabel: null,
+        device: null,
+        createdAt: FieldValue.serverTimestamp(),
+        expiresAt,
+        approvedUid: uid,
+        approvedAt: FieldValue.serverTimestamp(),
+        profileId,
+        profileCollection,
+        redeemedAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(`createTvCastGrant: create failed for uid ${uid}: ${error.message}`);
+      throw new HttpsError("internal", "Could not prepare the cast. Please try again.");
+    }
+
+    // 4. Best-effort cleanup, the same ONE query createTvLoginRequest runs
+    //    (expiresAt more than an hour past, any kind, limit 20): a phone
+    //    casts far more often than a TV asks for a code, so the sweep has
+    //    to ride on this call too or spent grants would only ever be swept
+    //    by a signed-out TV. Errors are swallowed.
+    try {
+      const stale = await col
+        .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
+        .limit(20)
+        .get();
+      if (!stale.empty) {
+        const batch = db.batch();
+        stale.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        console.log(
+          `createTvCastGrant: cleaned up ${stale.size} stale document(s)`
+        );
+      }
+    } catch (error) {
+      console.warn(`createTvCastGrant: cleanup skipped: ${error.message}`);
+    }
+
+    // The auto id and the uid — never the secret or its hash.
+    console.log(`createTvCastGrant: grant ${docRef.id} issued for uid ${uid}`);
+    return {
+      secret,
+      uid,
+      expiresInSeconds: Math.round(TV_CAST_GRANT_TTL_MS / 1000),
+      credentials: `eiflix-cast/1:${uid}:${secret}`,
+    };
+  }
+);
