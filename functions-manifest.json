@@ -632,6 +632,14 @@
       "codebase": "default"
     },
     {
+      "name": "processBulkProductJobs",
+      "type": "onDocumentWritten",
+      "file": "components/bulkproductjobs.js",
+      "triggerPath": "bulkProductJobs/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
       "name": "productenquiryfromeiflix",
       "type": "onDocumentCreated",
       "file": "components/communication.js",
