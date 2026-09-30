@@ -186,6 +186,7 @@ exports.verifyEmailOTPNewUsers = onCall(
   {
     timeoutSeconds: 60,
     memory: "256MiB",
+    secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
   },
   async (request) => {
     try {

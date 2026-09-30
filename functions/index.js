@@ -15,6 +15,7 @@ const interimReportSystem = require("./components/interimreport");
 const participantMetaDataSystem = require("./components/participantmetadata");
 const participantModeSystem = require("./components/participantmode");
 const participantProductSystem = require("./components/participantproduct");
+const bulkProductJobSystem = require("./components/bulkproductjobs");
 const queueSystem = require("./components/queuesystem");
 const salescrmUpdates = require("./components/salescrm-updates")
 const userRegistration = require("./components/user_registration")
@@ -165,6 +166,9 @@ exports.participantsproductinitiated = participantProductSystem.participantsprod
 exports.startParticipantNextDeliverySequence = participantProductSystem.startParticipantNextDeliverySequence // u - "deliverables/{id}"
 exports.participantJourneyproductSocialcommitupdate = participantProductSystem.participantJourneyproductSocialcommitupdate // on request
 
+//bulk add products queue
+exports.processBulkProductJobs = bulkProductJobSystem.processBulkProductJobs // w - "bulkProductJobs/{docid}"
+
 //queue system
 // exports.queueStage = queueSystem.queueStage // w - "queue_token/{id}"
 exports.onQueueStageChange = queueSystem.onQueueStageChange // w - "queue_token/{id}"
@@ -216,6 +220,11 @@ exports.sendEmailOTPNewUsers = userRegistration.sendEmailOTPNewUsers
 exports.verifyEmailOTPNewUsers = userRegistration.verifyEmailOTPNewUsers
 exports.resendEmailOTPNewUsers = userRegistration.resendEmailOTPNewUsers
 exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackintegration
+exports.createTvLoginRequest = workshop.createTvLoginRequest
+exports.approveTvLogin       = workshop.approveTvLogin
+exports.redeemTvLogin        = workshop.redeemTvLogin
+exports.createTvCastGrant        = workshop.createTvCastGrant
+
 
 //workshop Q&A
 exports.workshopQandA = communication.workshopQandA

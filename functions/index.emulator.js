@@ -24,6 +24,7 @@ const queueSystem = require("./components/queuesystem");
 const bigAssignmentSystem = require("./components/big-assignment");
 const participantModeSystem = require("./components/participantmode");
 const participantMetaDataSystem = require("./components/participantmetadata");
+const bulkProductJobSystem = require("./components/bulkproductjobs"); // ATC-free (admin + v2/firestore only)
 
 // --- queue system (11) ---
 exports.onQueueStageChange = queueSystem.onQueueStageChange;                                   // w - "queue_token/{id}"
@@ -43,6 +44,9 @@ exports.createBigParticipantAssignment = bigAssignmentSystem.createBigParticipan
 
 // --- participant mode (1) ---
 exports.calculateParticipantMode = participantModeSystem.calculateParticipantMode;             // w - "participantsproduct/{id}"
+
+// --- bulk add products queue (1) ---
+exports.processBulkProductJobs = bulkProductJobSystem.processBulkProductJobs; // w - "bulkProductJobs/{docid}"
 
 // --- participant metadata upstream triggers (3) ---
 exports.profiledata_to_participantmetadata = participantMetaDataSystem.profiledata_to_participantmetadata; // w - profile_data
