@@ -44,9 +44,11 @@ const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
 const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
 const postmarkSecrets = { POSTMARK_STARLABS_V1, POSTMARK_STARLABS_V2, POSTMARK_STARLABS_V3, POSTMARK_STARLABS_V4, POSTMARK_STARLABS_TEST };
 // Postmark's edge blocks some shared Google egress IPs, so functions that call Postmark spread this
-// into their options to leave via Cloud NAT's static IP. Only set where .env.<project> defines the connector.
-const postmarkEgress = process.env.POSTMARK_VPC_CONNECTOR
-	? { vpcConnector: process.env.POSTMARK_VPC_CONNECTOR, vpcConnectorEgressSettings: "ALL_TRAFFIC" }
+// into their options to leave via Cloud NAT's static IP (35.226.111.222). The connector exists on production
+// only. Keyed off `production` rather than .env: firebase deploy evaluates function options with only
+// GCLOUD_PROJECT/FIREBASE_CONFIG set, so .env.<project> values are undefined at that point.
+const postmarkEgress = production
+	? { vpcConnector: "functions-egress", vpcConnectorEgressSettings: "ALL_TRAFFIC" }
 	: {};
 let _postmarkClient = null;
 function getPostmarkClient() {
