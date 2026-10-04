@@ -17,6 +17,7 @@ const { defineSecret } = require("firebase-functions/params");
 
 //components imports
 const commonService = require('./service');
+const unreadBadge = require('./unreadbadge');
 const bucket = admin.storage().bucket();
 
 //slack
@@ -130,6 +131,7 @@ exports.notifyMobileApp = onDocumentCreated({
   const failedlist = {};
   const profilesWithUserRef = [];
   const profilesWithFCMToken = [];
+  const profileUidMap = {}; // profileid → uid, for the app-icon badge count
   // Delivery hold — profile_data.deliveryonhold === true is never notified.
   const heldProfileIds = new Set();
 
@@ -180,6 +182,7 @@ exports.notifyMobileApp = onDocumentCreated({
         }
 
         if (userId) {
+          if (!profileUidMap[profileId]) profileUidMap[profileId] = userId;
           if (!profilesWithUserRef.includes(profileId)) {
             profilesWithUserRef.push(profileId);
           }
@@ -341,6 +344,27 @@ exports.notifyMobileApp = onDocumentCreated({
       console.log(`Found ${fcmTokens.length} FCM tokens for push notifications`);
     }
 
+    // ============ STEP 3B: APP-ICON BADGE COUNTS ============
+    // Badge = unread chats + (general notification unread ? 1 : 0) — see unreadbadge.js.
+    // Chat / channel / ticket pushes and logged general pushes only; others leave it as is.
+    // Only Breakthroughs app tokens (FCM_token) get a badge — not AHCRM / EiFlix tokens.
+    const isBreakthroughsToken = (tokenData) => String(tokenData?.["path"] || "").startsWith("FCM_token/");
+    const notificationLogged = notificationData["logged"] === true;
+    let badgeCounts = {};
+    if (sendBreakthroughs && unreadBadge.badgeApplies(notificationType, notificationLogged)) {
+      const badgeProfileIds = new Set();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        if (isBreakthroughsToken(tokenData) && tokenData["profile_ref"]?.id) badgeProfileIds.add(tokenData["profile_ref"].id);
+      });
+      const badgeRecipients = [...badgeProfileIds].map(pid => ({ profileid: pid, uid: profileUidMap[pid] || null }));
+      badgeCounts = await unreadBadge.getBadgeCounts(badgeRecipients, notificationType, metaData, notificationLogged).catch(err => {
+        console.error("Badge count failed:", err);
+        return {};
+      });
+      console.log(`Badge counts computed for ${Object.keys(badgeCounts).length}/${badgeRecipients.length} profiles`);
+    }
+
     // ============ STEP 4: SEND PUSH NOTIFICATIONS ============
     const successfullProfileid = [];
     const failedFCM = [];
@@ -352,10 +376,28 @@ exports.notifyMobileApp = onDocumentCreated({
     const voipResults = { success: [], failed: [], invalidTokens: [] }; 
 
     if (fcmTokens.length > 0) {
-      const splitToken = commonService.chunkArray(fcmTokens, 500);
+      // Tokens grouped by badge value, then chunked — one multicast per distinct badge.
+      // Without badge counts every token lands in the single null group (same as before).
+      const tokenGroups = new Map();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        const tokenProfileid = tokenData?.["profile_ref"]?.id;
+        const badge = isBreakthroughsToken(tokenData) && badgeCounts[tokenProfileid] !== undefined ? badgeCounts[tokenProfileid] : null;
+        if (!tokenGroups.has(badge)) tokenGroups.set(badge, []);
+        tokenGroups.get(badge).push(token);
+      });
+      const splitToken = [];
+      const splitBadge = [];
+      tokenGroups.forEach((tokens, badge) => {
+        commonService.chunkArray(tokens, 500).forEach(chunk => {
+          splitToken.push(chunk);
+          splitBadge.push(badge);
+        });
+      });
 
       for (let i = 0; i < splitToken.length; i++) {
         const tokenSet = splitToken[i];
+        const badge = splitBadge[i];
         if (i > 0) {
           await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
         }
@@ -411,13 +453,13 @@ exports.notifyMobileApp = onDocumentCreated({
                 channel_id: "default_channel",
                 sound: "default",
                 color: '#ffffff',
-                tag: snapshot.data.id,
+                // chat_ / notif_ prefix lets the app clear these when its badge hits 0
+                tag: unreadBadge.notificationTag(notificationType, notificationLogged, snapshot.data.id),
               },
             },
             apns: {
               payload: {
                 aps: {
-                  badge: 1,
                   sound: "default",
                   "mutable-content": 1,
                   'content-available': 1,
@@ -429,6 +471,11 @@ exports.notifyMobileApp = onDocumentCreated({
             },
             tokens: tokenSet,
           };
+          // App-icon badge = exact unread total. No badge key → the badge is left as it is.
+          if (badge !== null && badge !== undefined) {
+            payload.apns.payload.aps.badge = badge;
+            if (badge > 0) payload.android.notification.notificationCount = badge;
+          }
         }
        
         // Old payload method
@@ -4411,6 +4458,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         "click_action": "FLUTTER_NOTIFICATION_CLICK",
         "messageRef": supportChatData.id,
         "groupref": supportChatData.id,
+        "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
       }
     });
   }
