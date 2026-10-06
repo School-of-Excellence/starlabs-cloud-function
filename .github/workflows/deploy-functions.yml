@@ -1,18 +1,18 @@
-# deploy-functions — deploy Cloud Functions with the Postmark server tokens injected from GitHub
-# repository secrets (moved off Cloud Secret Manager 2026-09-16).
+# deploy-functions — deploy Cloud Functions from GitHub Actions.
 #
-# The functions read the tokens as plain environment variables. Nothing at runtime can read GitHub
-# secrets, so this workflow writes them into functions/.env right before `firebase deploy`, and the
-# Firebase CLI attaches them to every deployed function. The same five values apply to every project.
+# Postmark server tokens (POSTMARK_STARLABS_V1..V4, _TEST) live in Cloud Secret Manager on each Firebase
+# project and are bound to functions with `defineSecret` (see functions/components/service.js). Nothing
+# about them is injected here — rotate a token with:
+#   firebase functions:secrets:set POSTMARK_STARLABS_V1 --project <project>
+# and redeploy the functions that bind it.
 #
 #   push to development            → starlabs-test
 #   "Run workflow" button          → any project (dropdown), optionally a subset of functions
 #
 # Required repository secrets:
-#   POSTMARK_STARLABS_V1 / _V2 / _V3 / _V4 / _TEST   — Postmark server tokens
-#   FIREBASE_SERVICE_ACCOUNT                         — JSON key of a service account allowed to deploy
-#                                                      functions on every target project
-#   CONSOLE_INGEST_TOKEN                             — (already present) lets postdeploy.js record the deploy
+#   FIREBASE_SERVICE_ACCOUNT   — JSON key of a service account allowed to deploy functions on every target
+#                                project (also needs Secret Manager Admin to grant the runtime SA access)
+#   CONSOLE_INGEST_TOKEN       — (already present) lets postdeploy.js record the deploy
 name: deploy-functions
 
 on:
@@ -58,7 +58,7 @@ jobs:
           cache: npm
           cache-dependency-path: functions/package-lock.json
 
-      # The predeploy loop-guard (scripts/cicd/predeploy.js) boots the functions emulator, which needs Java.
+      # The predeploy loop-guard (scripts/cicd/predeploy.js) boots the functions emulator, which needs Java 21.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -67,26 +67,6 @@ jobs:
       - name: Install function dependencies
         working-directory: functions
         run: npm ci
-
-      - name: Write functions/.env from repository secrets
-        run: |
-          {
-            printf 'POSTMARK_STARLABS_V1=%s\n'   "$POSTMARK_STARLABS_V1"
-            printf 'POSTMARK_STARLABS_V2=%s\n'   "$POSTMARK_STARLABS_V2"
-            printf 'POSTMARK_STARLABS_V3=%s\n'   "$POSTMARK_STARLABS_V3"
-            printf 'POSTMARK_STARLABS_V4=%s\n'   "$POSTMARK_STARLABS_V4"
-            printf 'POSTMARK_STARLABS_TEST=%s\n' "$POSTMARK_STARLABS_TEST"
-          } > functions/.env
-          for n in POSTMARK_STARLABS_V1 POSTMARK_STARLABS_V2 POSTMARK_STARLABS_V3 POSTMARK_STARLABS_V4 POSTMARK_STARLABS_TEST; do
-            if ! grep -qE "^$n=.+" functions/.env; then echo "::error::repository secret $n is empty or missing"; exit 1; fi
-          done
-          echo "functions/.env written with $(wc -l < functions/.env) keys"
-        env:
-          POSTMARK_STARLABS_V1: ${{ secrets.POSTMARK_STARLABS_V1 }}
-          POSTMARK_STARLABS_V2: ${{ secrets.POSTMARK_STARLABS_V2 }}
-          POSTMARK_STARLABS_V3: ${{ secrets.POSTMARK_STARLABS_V3 }}
-          POSTMARK_STARLABS_V4: ${{ secrets.POSTMARK_STARLABS_V4 }}
-          POSTMARK_STARLABS_TEST: ${{ secrets.POSTMARK_STARLABS_TEST }}
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -108,7 +88,3 @@ jobs:
           fi
           echo "Deploying --only $TARGET to $PROJECT"
           firebase deploy --only "$TARGET" --project "$PROJECT" --non-interactive
-
-      - name: Remove functions/.env
-        if: always()
-        run: rm -f functions/.env
