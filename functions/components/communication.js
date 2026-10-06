@@ -58,6 +58,27 @@ function postmarkServersMap() {
   return map;
 }
 
+// TEMP DEBUG: postmark.js discards the raw error response — log status/headers/body (plus this
+// instance's public egress IP on a 403) so Postmark can trace blocks in their WAF logs.
+function logPostmarkRawErrors(postmarkClient, context) {
+  postmarkClient.httpClient.client.interceptors.response.use(null, async (err) => {
+    const r = err.response;
+    const egressIp = r?.status === 403
+      ? await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(3000) }).then(res => res.text()).catch(() => null)
+      : undefined;
+    console.error("POSTMARK_RAW_ERROR", JSON.stringify({
+      ...context,
+      request: `${err.config?.method?.toUpperCase()} ${err.config?.url}`,
+      egressIp,
+      time: new Date().toISOString(),
+      status: r?.status,
+      headers: r?.headers,
+      data: typeof r?.data === "string" ? r.data.slice(0, 2000) : r?.data,
+    }));
+    return Promise.reject(err);
+  });
+}
+
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
   'messaging/invalid-registration-token',
@@ -1807,7 +1828,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
   document: "email archive/{docid}",
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: POSTMARK_SECRETS
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },
   async (snap) => {
     const change = snap.data;
@@ -1829,7 +1851,8 @@ exports.sendBatchEmail = onRequest({
   cors:true,
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: POSTMARK_SECRETS
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
@@ -1954,6 +1977,7 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   const postmarkClient = new postmark.ServerClient(selectedSecret);
+  logPostmarkRawErrors(postmarkClient, { servername: archiveData['servername'], archiveid: emailArchiveId });
 
   // ── 3. Load participant metadata ─────────────────────────────────────────
   const mapProfile      = {};
@@ -2852,7 +2876,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   document:'email templates/{docid}',
   region: 'us-central1',
   cors: true,
-  secrets: POSTMARK_SECRETS
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (change) => {
 
   let previousData = change.data?.before.data();
@@ -2867,6 +2892,7 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
     }
 
     const postmarkClient = new postmark.ServerClient(selectedSecret);
+    logPostmarkRawErrors(postmarkClient, { servername: currentData['servername'], templatedocid: currentData['docid'], templatename: currentData['templatename'] });
 
   if(currentData['type'] == "email"){
 
@@ -4918,7 +4944,8 @@ exports.workshopprogressmessagev2 = onRequest({
   cors: true,
   timeoutSeconds: 300,
   memory: '512MiB',
-  secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1]
+  secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
+  ...commonService.postmarkEgress,
 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
@@ -5331,7 +5358,7 @@ exports.workshopprogressmessagev2 = onRequest({
   }
 });
 
-exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1] }, async (req, res) => {
+exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1], ...commonService.postmarkEgress }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
     return;
