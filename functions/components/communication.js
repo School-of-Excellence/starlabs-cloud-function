@@ -17,6 +17,7 @@ const { defineSecret } = require("firebase-functions/params");
 
 //components imports
 const commonService = require('./service');
+const unreadBadge = require('./unreadbadge');
 const bucket = admin.storage().bucket();
 
 //slack
@@ -44,11 +45,39 @@ const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
 const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 const postmark = require("postmark");
-const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
-const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
-const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
-const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
-const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
+// Postmark server tokens come from Cloud Secret Manager, declared once in service.js. Functions that
+// pick a server by a doc's `servername` field bind all five (`secrets: POSTMARK_SECRETS`); the field
+// must equal one of the secret names.
+const POSTMARK_SECRETS = Object.values(commonService.postmarkSecrets);
+function postmarkServersMap() {
+  const map = {};
+  for (const [name, secret] of Object.entries(commonService.postmarkSecrets)) {
+    const token = secret.value();
+    if (token) map[name] = token;
+  }
+  return map;
+}
+
+// TEMP DEBUG: postmark.js discards the raw error response — log status/headers/body (plus this
+// instance's public egress IP on a 403) so Postmark can trace blocks in their WAF logs.
+function logPostmarkRawErrors(postmarkClient, context) {
+  postmarkClient.httpClient.client.interceptors.response.use(null, async (err) => {
+    const r = err.response;
+    const egressIp = r?.status === 403
+      ? await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(3000) }).then(res => res.text()).catch(() => null)
+      : undefined;
+    console.error("POSTMARK_RAW_ERROR", JSON.stringify({
+      ...context,
+      request: `${err.config?.method?.toUpperCase()} ${err.config?.url}`,
+      egressIp,
+      time: new Date().toISOString(),
+      status: r?.status,
+      headers: r?.headers,
+      data: typeof r?.data === "string" ? r.data.slice(0, 2000) : r?.data,
+    }));
+    return Promise.reject(err);
+  });
+}
 
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
@@ -102,6 +131,7 @@ exports.notifyMobileApp = onDocumentCreated({
   const failedlist = {};
   const profilesWithUserRef = [];
   const profilesWithFCMToken = [];
+  const profileUidMap = {}; // profileid → uid, for the app-icon badge count
   // Delivery hold — profile_data.deliveryonhold === true is never notified.
   const heldProfileIds = new Set();
 
@@ -152,6 +182,7 @@ exports.notifyMobileApp = onDocumentCreated({
         }
 
         if (userId) {
+          if (!profileUidMap[profileId]) profileUidMap[profileId] = userId;
           if (!profilesWithUserRef.includes(profileId)) {
             profilesWithUserRef.push(profileId);
           }
@@ -313,6 +344,27 @@ exports.notifyMobileApp = onDocumentCreated({
       console.log(`Found ${fcmTokens.length} FCM tokens for push notifications`);
     }
 
+    // ============ STEP 3B: APP-ICON BADGE COUNTS ============
+    // Badge = unread chats + (general notification unread ? 1 : 0) — see unreadbadge.js.
+    // Chat / channel / ticket pushes and logged general pushes only; others leave it as is.
+    // Only Breakthroughs app tokens (FCM_token) get a badge — not AHCRM / EiFlix tokens.
+    const isBreakthroughsToken = (tokenData) => String(tokenData?.["path"] || "").startsWith("FCM_token/");
+    const notificationLogged = notificationData["logged"] === true;
+    let badgeCounts = {};
+    if (sendBreakthroughs && unreadBadge.badgeApplies(notificationType, notificationLogged)) {
+      const badgeProfileIds = new Set();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        if (isBreakthroughsToken(tokenData) && tokenData["profile_ref"]?.id) badgeProfileIds.add(tokenData["profile_ref"].id);
+      });
+      const badgeRecipients = [...badgeProfileIds].map(pid => ({ profileid: pid, uid: profileUidMap[pid] || null }));
+      badgeCounts = await unreadBadge.getBadgeCounts(badgeRecipients, notificationType, metaData, notificationLogged).catch(err => {
+        console.error("Badge count failed:", err);
+        return {};
+      });
+      console.log(`Badge counts computed for ${Object.keys(badgeCounts).length}/${badgeRecipients.length} profiles`);
+    }
+
     // ============ STEP 4: SEND PUSH NOTIFICATIONS ============
     const successfullProfileid = [];
     const failedFCM = [];
@@ -324,10 +376,28 @@ exports.notifyMobileApp = onDocumentCreated({
     const voipResults = { success: [], failed: [], invalidTokens: [] }; 
 
     if (fcmTokens.length > 0) {
-      const splitToken = commonService.chunkArray(fcmTokens, 500);
+      // Tokens grouped by badge value, then chunked — one multicast per distinct badge.
+      // Without badge counts every token lands in the single null group (same as before).
+      const tokenGroups = new Map();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        const tokenProfileid = tokenData?.["profile_ref"]?.id;
+        const badge = isBreakthroughsToken(tokenData) && badgeCounts[tokenProfileid] !== undefined ? badgeCounts[tokenProfileid] : null;
+        if (!tokenGroups.has(badge)) tokenGroups.set(badge, []);
+        tokenGroups.get(badge).push(token);
+      });
+      const splitToken = [];
+      const splitBadge = [];
+      tokenGroups.forEach((tokens, badge) => {
+        commonService.chunkArray(tokens, 500).forEach(chunk => {
+          splitToken.push(chunk);
+          splitBadge.push(badge);
+        });
+      });
 
       for (let i = 0; i < splitToken.length; i++) {
         const tokenSet = splitToken[i];
+        const badge = splitBadge[i];
         if (i > 0) {
           await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
         }
@@ -383,13 +453,13 @@ exports.notifyMobileApp = onDocumentCreated({
                 channel_id: "default_channel",
                 sound: "default",
                 color: '#ffffff',
-                tag: snapshot.data.id,
+                // chat_ / notif_ prefix lets the app clear these when its badge hits 0
+                tag: unreadBadge.notificationTag(notificationType, notificationLogged, snapshot.data.id),
               },
             },
             apns: {
               payload: {
                 aps: {
-                  badge: 1,
                   sound: "default",
                   "mutable-content": 1,
                   'content-available': 1,
@@ -401,6 +471,11 @@ exports.notifyMobileApp = onDocumentCreated({
             },
             tokens: tokenSet,
           };
+          // App-icon badge = exact unread total. No badge key → the badge is left as it is.
+          if (badge !== null && badge !== undefined) {
+            payload.apns.payload.aps.badge = badge;
+            if (badge > 0) payload.android.notification.notificationCount = badge;
+          }
         }
        
         // Old payload method
@@ -1753,13 +1828,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
   document: "email archive/{docid}",
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },
   async (snap) => {
     const change = snap.data;
@@ -1768,14 +1838,7 @@ exports.sendBatchEmailTest = onDocumentCreated({
  
     if (change.data()['status'] != 'queued') {
  
-      // FIX: Use .value() to get the actual secret string, not the Secret object
-      const serversMap = {
-        POSTMARK_STARLABS_V1,
-        POSTMARK_STARLABS_V2,
-        POSTMARK_STARLABS_V3,
-        POSTMARK_STARLABS_V4,
-        POSTMARK_STARLABS_TEST,
-      };
+      const serversMap = postmarkServersMap();
  
       const result = await sendBatchEmailArchive(newDocId, serversMap);
       console.log('Finished sending to participants', result);
@@ -1788,25 +1851,14 @@ exports.sendBatchEmail = onRequest({
   cors:true,
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
   const archiveid = req.body.archiveid;
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
   const result = await sendBatchEmailArchive(archiveid,serversMap);
   console.log('Finished sending to participants', result);
@@ -1916,7 +1968,7 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   // ── 2. Resolve Postmark server token ─────────────────────────────────────
-  const selectedSecret = serversMap[archiveData['servername']]?.value();
+  const selectedSecret = serversMap[archiveData['servername']];
 
   if (!selectedSecret) {
     console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
@@ -1925,6 +1977,7 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   const postmarkClient = new postmark.ServerClient(selectedSecret);
+  logPostmarkRawErrors(postmarkClient, { servername: archiveData['servername'], archiveid: emailArchiveId });
 
   // ── 3. Load participant metadata ─────────────────────────────────────────
   const mapProfile      = {};
@@ -2823,25 +2876,14 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   document:'email templates/{docid}',
   region: 'us-central1',
   cors: true,
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (change) => {
 
   let previousData = change.data?.before.data();
   let currentData = change.data?.after.data();
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
     const selectedSecret = serversMap[currentData['servername']];
 
@@ -2849,7 +2891,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
       throw new Error(`Invalid server name: ${currentData['servername']}`);
     }
 
-    const postmarkClient = new postmark.ServerClient(selectedSecret.value());
+    const postmarkClient = new postmark.ServerClient(selectedSecret);
+    logPostmarkRawErrors(postmarkClient, { servername: currentData['servername'], templatedocid: currentData['docid'], templatename: currentData['templatename'] });
 
   if(currentData['type'] == "email"){
 
@@ -4415,6 +4458,7 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         "click_action": "FLUTTER_NOTIFICATION_CLICK",
         "messageRef": supportChatData.id,
         "groupref": supportChatData.id,
+        "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
       }
     });
   }
@@ -4899,7 +4943,9 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
 exports.workshopprogressmessagev2 = onRequest({ 
   cors: true,
   timeoutSeconds: 300,
-  memory: '512MiB'
+  memory: '512MiB',
+  secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
+  ...commonService.postmarkEgress,
 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
@@ -5029,9 +5075,10 @@ exports.workshopprogressmessagev2 = onRequest({
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()[commonService.eventWatiServerId]
+        const watiServerId = commonService.eventWatiServerId || '101723';
+        const watiData = wati.data()[watiServerId]
         apikey = watiData['watitoken'];
-        serverid = commonService.eventWatiServerId;
+        serverid = watiServerId;
       }
     })
 
@@ -5311,7 +5358,7 @@ exports.workshopprogressmessagev2 = onRequest({
   }
 });
 
-exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => {
+exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1], ...commonService.postmarkEgress }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
     return;
@@ -5421,9 +5468,10 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()[commonService.eventWatiServerId]
+        const watiServerId = commonService.eventWatiServerId || '101723';
+        const watiData = wati.data()[watiServerId]
         apikey = watiData['watitoken'];
-        serverid = commonService.eventWatiServerId;
+        serverid = watiServerId;
       }
     })
 
