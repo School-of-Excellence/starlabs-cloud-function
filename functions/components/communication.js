@@ -5367,6 +5367,31 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
   const { type } = req.body;
   console.log("Request type:", type);
 
+  // Delivery on hold (operator 2026-10-13): nobody whose profile_data has
+  // deliveryonhold == true is sent this communication — mail or WhatsApp.
+  // The profile_data document id IS the profileid the screens send with each
+  // recipient. A recipient that arrives without a profileid (an older caller)
+  // cannot be checked and is sent as before.
+  // If the lookup itself fails, send NOTHING: messaging someone on hold is the
+  // worse mistake, and the screens already report a failed send.
+  const heldProfileIds = [];
+  try {
+    const heldSnap = await admin.firestore().collection('profile_data').where('deliveryonhold', '==', true).get();
+    heldSnap.forEach((doc) => heldProfileIds.push(doc.id));
+  } catch (error) {
+    console.error('Could not read delivery-on-hold profiles; nothing sent:', error);
+    res.status(500).json({
+      message: "Could not check delivery-on-hold profiles; nothing was sent",
+      error: error.message || 'Unknown error',
+      successCount: 0,
+      failureCount: 0
+    });
+    return;
+  }
+  const heldSet = new Set(heldProfileIds);
+  const isHeld = (entry) => !!(entry && entry.profileid && heldSet.has(String(entry.profileid)));
+  console.log("Delivery-on-hold profiles:", heldProfileIds.length);
+
   // Email - BULK 
   if (type === 'mail') {
     const { subject, message, recipients } = req.body;
@@ -5376,10 +5401,27 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
       res.status(400).send("Missing required fields for bulk email send");
       return;
     }
+    const heldRecipients = recipients.filter(isHeld);
+    const sendableRecipients = recipients.filter((r) => !isHeld(r));
+    if (heldRecipients.length) {
+      console.log(`Skipping ${heldRecipients.length} delivery-on-hold recipient(s):`, heldRecipients.map((r) => r.profileid));
+    }
+    if (sendableRecipients.length === 0) {
+      res.status(200).json({
+        message: "All recipients are on delivery hold — nothing sent",
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldRecipients.length,
+        heldProfileIds: heldRecipients.map((r) => r.profileid),
+        totalProcessed: recipients.length,
+        results: []
+      });
+      return;
+    }
     let successCount = 0;
     let failureCount = 0;
     const results = [];
-    const sendEmailBulk = recipients.map(async (recipient) => {
+    const sendEmailBulk = sendableRecipients.map(async (recipient) => {
       const { email, name } = recipient;
 
       if (!email || !name) {
@@ -5451,6 +5493,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
       message: "Bulk email send completed",
       successCount,
       failureCount,
+      heldCount: heldRecipients.length,
+      heldProfileIds: heldRecipients.map((r) => r.profileid),
       totalProcessed: recipients.length,
       results: results
     });
@@ -5461,6 +5505,25 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
 
     if (!templateName || !participants || !Array.isArray(participants) || participants.length === 0) {
       res.status(400).send("Missing required fields for WhatsApp bulk send");
+      return;
+    }
+
+    const heldParticipants = participants.filter(isHeld);
+    const sendableParticipants = participants.filter((p) => !isHeld(p));
+    if (heldParticipants.length) {
+      console.log(`Skipping ${heldParticipants.length} delivery-on-hold participant(s):`, heldParticipants.map((p) => p.profileid));
+    }
+    // Nobody left: return before fetching the WATI token or calling WATI with an empty broadcast.
+    if (sendableParticipants.length === 0) {
+      res.status(200).json({
+        message: "All participants are on delivery hold — nothing sent",
+        templateName: templateName,
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
+        totalProcessed: participants.length
+      });
       return;
     }
 
@@ -5487,7 +5550,7 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         'Content-Type': 'application/json-patch+json', 
       };
 
-      const receivers = participants.map(participant => ({
+      const receivers = sendableParticipants.map(participant => ({
         whatsappNumber: participant.phonenumber,
         customParams: participant.customParams.map(param => ({
           name: param.name,
@@ -5536,6 +5599,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         templateName: templateName,
         successCount: receivers.length,
         failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
         totalProcessed: participants.length,
         broadcastDetails: response.data
       });
@@ -5553,7 +5618,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         error: error.response?.data || error.message,
         errorStatus: error.response?.status,
         successCount: 0,
-        failureCount: participants.length,
+        failureCount: sendableParticipants.length,
+        heldCount: heldParticipants.length,
         totalProcessed: participants.length
       });
     }
