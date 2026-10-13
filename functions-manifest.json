@@ -40,6 +40,13 @@
       "codebase": "default"
     },
     {
+      "name": "approveTvLogin",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "atcdata_to_pmd",
       "type": "onDocumentWritten",
       "file": "components/participantmetadata.js",
@@ -96,7 +103,7 @@
     {
       "name": "awsEventWebhook",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -165,7 +172,14 @@
     {
       "name": "CheckMasternodeStatus",
       "type": "onSchedule",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "CheckOciNodeStatus",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -207,6 +221,13 @@
       "codebase": "default"
     },
     {
+      "name": "createLivekitCloudToken",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "createOpenViduToken",
       "type": "onRequest",
       "file": "components/openVidu.js",
@@ -235,6 +256,20 @@
       "file": "components/queuesystem.js",
       "triggerPath": "live assignment/{docid}",
       "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
+      "name": "createTvCastGrant",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "createTvLoginRequest",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
       "codebase": "default"
     },
     {
@@ -276,7 +311,7 @@
     },
     {
       "name": "discoverpagelog",
-      "type": "onDocumentWritten",
+      "type": "onCall",
       "file": "components/workshop.js",
       "triggerPath": "discoverpagelogs/{docid}",
       "emulatorLoaded": false,
@@ -307,13 +342,6 @@
       "codebase": "default"
     },
     {
-      "name": "flushOpenviduCallQuality",
-      "type": "onRequest",
-      "file": "components/openVidu.js",
-      "emulatorLoaded": false,
-      "codebase": "default"
-    },
-    {
       "name": "generalContentUpdate",
       "type": "onRequest",
       "file": "components/content.js",
@@ -324,6 +352,13 @@
       "name": "getSignedUrlAWS",
       "type": "onRequest",
       "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "getSignedUrlOci",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -367,6 +402,41 @@
       "codebase": "default"
     },
     {
+      "name": "livekitCloudCloseRoom",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudKickParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudMuteParticipant",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStartRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "livekitCloudStopRecording",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "muteParticipant",
       "type": "onRequest",
       "file": "components/openVidu.js",
@@ -398,6 +468,13 @@
       "codebase": "default"
     },
     {
+      "name": "ociEventWebhook",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "onBreakthroughsPosted",
       "type": "onDocumentCreated",
       "file": "components/achievements.js",
@@ -418,6 +495,20 @@
       "type": "onRequest",
       "file": "components/queuesystem.js",
       "triggerPath": "event collection/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventLivekitCloud",
+      "type": "onRequest",
+      "file": "components/livekitCloud.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "onEventOci",
+      "type": "onRequest",
+      "file": "components/openVidu.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -569,6 +660,14 @@
       "codebase": "default"
     },
     {
+      "name": "processBulkProductJobs",
+      "type": "onDocumentWritten",
+      "file": "components/bulkproductjobs.js",
+      "triggerPath": "bulkProductJobs/{docid}",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
       "name": "productenquiryfromeiflix",
       "type": "onDocumentCreated",
       "file": "components/communication.js",
@@ -662,6 +761,13 @@
       "codebase": "default"
     },
     {
+      "name": "redeemTvLogin",
+      "type": "onCall",
+      "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "regenerateAtcDoc",
       "type": "onCall",
       "file": "components/queue-required-stage-aiatc-creation/atc_ondemand.js",
@@ -724,7 +830,14 @@
     {
       "name": "scaleMediaNodes",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "scaleOciMediaNodes",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -845,7 +958,14 @@
     {
       "name": "startMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "startOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -860,7 +980,14 @@
     {
       "name": "stopMasterNodeHTTP",
       "type": "onRequest",
-      "file": "components/openVidu.js",
+      "file": "components/AWS_endpoint.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "stopOciMasterHTTP",
+      "type": "onRequest",
+      "file": "components/OCI_endpoint.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
