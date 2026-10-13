@@ -84,6 +84,26 @@ describe("probe-lib: service account & project safety", () => {
     for (const id of lib.DENYLIST) expect(() => lib.checkProject(id, id)).toThrow(/HARD ABORT/);
     expect(() => lib.checkProject("starlabs-test", "watsonproduction-becde")).toThrow(/HARD ABORT/);
   });
+  test("production opt-in: ONLY production:true + prod key + prod target passes; every other combination still aborts", () => {
+    const P = lib.PRODUCTION_PROJECT;
+    expect(P).toBe("fir-sample-aae4a");
+    expect(() => lib.checkProject(P, P, { production: true })).not.toThrow();
+    const fsx = fakeFs({ "/k/prod.json": JSON.stringify(PROD_SA), "/k/test.json": JSON.stringify(TEST_SA) });
+    expect(lib.loadServiceAccount({ sa: "/k/prod.json", project: P, production: true }, env(), fsx).sa.project_id).toBe(P);
+    // flag absent / falsy / truthy-but-not-true -> still HARD ABORT
+    expect(() => lib.checkProject(P, P)).toThrow(/HARD ABORT/);
+    expect(() => lib.checkProject(P, P, { production: false })).toThrow(/HARD ABORT/);
+    expect(() => lib.checkProject(P, P, { production: "yes" })).toThrow(/HARD ABORT/);
+    expect(() => lib.checkProject(P, P, { production: 1 })).toThrow(/HARD ABORT/);
+    // flag present but key/target mismatch -> abort
+    expect(() => lib.checkProject(P, "starlabs-test", { production: true })).toThrow(/HARD ABORT/);
+    expect(() => lib.checkProject("starlabs-test", P, { production: true })).toThrow(/HARD ABORT/);
+    expect(() => lib.loadServiceAccount({ sa: "/k/test.json", project: P, production: true }, env(), fsx)).toThrow(expect.objectContaining({ exitCode: 3 }));
+    // the flag can never unlock the other denied projects
+    for (const id of lib.DENYLIST.filter((d) => d !== P)) expect(() => lib.checkProject(id, id, { production: true })).toThrow(/HARD ABORT/);
+    // with the flag, a TEST key + test target still works exactly as before
+    expect(() => lib.checkProject("starlabs-test", "starlabs-test", { production: true })).not.toThrow();
+  });
   test("project must be allow-listed and must equal the key's project_id (exit 3)", () => {
     expect(() => lib.checkProject("starlabs-cicd", "some-other")).toThrow(/not an allowed probe target/);
     expect(() => lib.checkProject("starlabs-cicd", "starlabs-test")).toThrow(/service account is for 'starlabs-cicd' but --project is 'starlabs-test'/);
@@ -232,7 +252,17 @@ describe("probe CLIs: static checks (never executed)", () => {
       expect(iModule).toBeGreaterThan(iAdmin);
       expect(src).not.toMatch(/process\.exit\(/); // exitCode + app.delete() instead
       expect(src).not.toMatch(/firestore-atc/);
+      // the participant360 probes have NO production path: no flag, no PRODUCTION_PROJECT, no prod id
+      expect(src).not.toMatch(/production/i);
+      expect(src).not.toMatch(/fir-sample-aae4a/);
     }
+  });
+  test("clientissue-export is the only script that can opt into production, and only via the flag", () => {
+    const src = read("clientissue-export.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    expect(src).toMatch(/a === "--production"/);
+    expect(src).not.toMatch(/fir-sample-aae4a/); // never hard-coded; always lib.PRODUCTION_PROJECT
+    expect(src).not.toMatch(/production:\s*true/); // never forced on
+    expect(src).toMatch(/lib\.loadServiceAccount\(args\)/); // the flag reaches the gate only through parsed args
   });
   test("package.json exposes both npm shortcuts", () => {
     const pkg = require("../../../package.json");

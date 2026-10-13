@@ -16,7 +16,9 @@ const path = require("path");
 const os = require("os");
 
 const DEFAULT_PROJECT = "starlabs-test"; // Firestore project behind the starlabs-test-19.web.app test site
-const DENYLIST = Object.freeze(["fir-sample-aae4a", "watsonproduction-becde", "salesleadcrm", "launch-your-legacy-development"]);
+/** The live StarLabs project. Denied by default; only clientissue-export.js --production may target it (read-only). */
+const PRODUCTION_PROJECT = "fir-sample-aae4a";
+const DENYLIST = Object.freeze([PRODUCTION_PROJECT, "watsonproduction-becde", "salesleadcrm", "launch-your-legacy-development"]);
 /** Only these project ids may ever be probed. --project can pick one of them; nothing else. */
 const ALLOWLIST = Object.freeze(["starlabs-test", "starlabs-test-19", "starlabs-cicd"]);
 const TOOLS_DIR = path.join(__dirname, "..", "..", "components", "participant360", "tools");
@@ -64,7 +66,7 @@ function expandHome(p) {
  * Resolves and validates the service-account key. Never loads any Firebase code.
  * @returns {{ sa: object, saPath: string }}
  */
-function loadServiceAccount({ sa, project }, env = process.env, fsx = fs) {
+function loadServiceAccount({ sa, project, production = false }, env = process.env, fsx = fs) {
   const saPath = expandHome(sa || env.STARLABS_TEST_SA || env.GOOGLE_APPLICATION_CREDENTIALS);
   if (!saPath || !fsx.existsSync(saPath)) throw new ProbeError("service-account file not found. Pass --sa <path> or set STARLABS_TEST_SA / GOOGLE_APPLICATION_CREDENTIALS.", 2);
   let key;
@@ -72,12 +74,17 @@ function loadServiceAccount({ sa, project }, env = process.env, fsx = fs) {
   if (!key || key.type !== "service_account" || !key.client_email || !key.private_key || !key.project_id) {
     throw new ProbeError("file is not a Firebase service-account key (needs type=service_account, project_id, client_email, private_key).", 2);
   }
-  checkProject(key.project_id, project);
+  checkProject(key.project_id, project, { production });
   return { sa: key, saPath };
 }
 
-/** Deny-list wins over everything; then the target must be allow-listed; then the key must match it. */
-function checkProject(keyProjectId, requestedProject) {
+/**
+ * Deny-list wins over everything; then the target must be allow-listed; then the key must match it.
+ * The single exception: `production: true` AND key AND target all equal PRODUCTION_PROJECT. Watson / CRM /
+ * any other denied project can never be unlocked, and a production key without the flag still aborts.
+ */
+function checkProject(keyProjectId, requestedProject, { production = false } = {}) {
+  if (production === true && keyProjectId === PRODUCTION_PROJECT && requestedProject === PRODUCTION_PROJECT) return;
   if (DENYLIST.includes(keyProjectId) || DENYLIST.includes(requestedProject)) {
     throw new ProbeError(`HARD ABORT: project '${keyProjectId}' is production/finance/CRM. This probe only runs against ${DEFAULT_PROJECT}.`, 3);
   }
@@ -170,4 +177,4 @@ function exitCodeFor(results) {
   return results.length && results.every((r) => r.ok) ? 0 : 1;
 }
 
-module.exports = { ProbeError, DEFAULT_PROJECT, DENYLIST, ALLOWLIST, ALL_ORDER, ADC_ENV, TOOLS_DIR, OUTPUT_DIR, parseArgs, expandHome, loadServiceAccount, checkProject, hardenEnv, listTools, selectTools, toPlain, runOne, runMany, summaryTable, buildReport, exitCodeFor };
+module.exports = { ProbeError, DEFAULT_PROJECT, PRODUCTION_PROJECT, DENYLIST, ALLOWLIST, ALL_ORDER, ADC_ENV, TOOLS_DIR, OUTPUT_DIR, parseArgs, expandHome, loadServiceAccount, checkProject, hardenEnv, listTools, selectTools, toPlain, runOne, runMany, summaryTable, buildReport, exitCodeFor };

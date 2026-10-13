@@ -31,7 +31,8 @@
     "graph:refresh": "$(cat graphify-out/.graphify_python) scripts/graphify-refresh.py",
     "graph:query": "graphify query",
     "p360:probe": "node scripts/participant360/probe-purchase.js",
-    "p360:probe:all": "node scripts/participant360/probe-all.js"
+    "p360:probe:all": "node scripts/participant360/probe-all.js",
+    "p360:clientissue": "node scripts/participant360/clientissue-export.js"
   },
   "engines": {
     "node": "22"
