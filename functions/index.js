@@ -15,6 +15,7 @@ const interimReportSystem = require("./components/interimreport");
 const participantMetaDataSystem = require("./components/participantmetadata");
 const participantModeSystem = require("./components/participantmode");
 const participantProductSystem = require("./components/participantproduct");
+const bulkProductJobSystem = require("./components/bulkproductjobs");
 const queueSystem = require("./components/queuesystem");
 const salescrmUpdates = require("./components/salescrm-updates")
 const userRegistration = require("./components/user_registration")
@@ -164,6 +165,9 @@ exports.onEventApprovalProductMode = participantModeSystem.onEventApprovalProduc
 exports.participantsproductinitiated = participantProductSystem.participantsproductinitiated // w - '/participantsproduct/{id}'
 exports.startParticipantNextDeliverySequence = participantProductSystem.startParticipantNextDeliverySequence // u - "deliverables/{id}"
 exports.participantJourneyproductSocialcommitupdate = participantProductSystem.participantJourneyproductSocialcommitupdate // on request
+
+//bulk add products queue
+exports.processBulkProductJobs = bulkProductJobSystem.processBulkProductJobs // w - "bulkProductJobs/{docid}"
 
 //queue system
 // exports.queueStage = queueSystem.queueStage // w - "queue_token/{id}"
