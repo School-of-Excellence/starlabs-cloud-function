@@ -192,7 +192,7 @@ exports.verifyEmailOTPNewUsers = onCall(
   async (request) => {
     try {
       // const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
-      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags } = request.data;
+      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags, platform_name } = request.data;
       if (!otpId || !otp || !password) {
         throw new HttpsError('invalid-argument', 'OTP ID, OTP, and password are required');
       }
@@ -234,7 +234,36 @@ exports.verifyEmailOTPNewUsers = onCall(
           emailVerified: true,
         });
         console.log('User created:', userRecord.uid);
-		  var profileid = admin.firestore().collection("new_user_data").doc().id;
+
+        var profileid = admin.firestore().collection("new_user_data").doc().id;
+        let salescrmurl = '';
+        if (commonService.production) {
+          salescrmurl = "https://us-central1-salesleadcrm.cloudfunctions.net/personProfileWebhook";
+        } else {
+          salescrmurl = "https://us-central1-salescrm-test-19.cloudfunctions.net/personProfileWebhook";
+        }
+        // Sync with Sales CRM — if the person already exists there, reuse their profileid
+        try {
+          const crmResponse = await axios.post(salescrmurl, {
+            email: otpData.email,
+            profileid: profileid,
+            name: otpData.name,
+            mobile: phoneNumber,
+            countrycode: countryCode,
+            source: "eiflix",
+          }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 10000,
+          });
+          const crmData = crmResponse.data || {};
+          console.log('Sales CRM personProfileWebhook response:', crmData);
+          if (crmData.status === 'exists' && crmData.profileid) {
+            profileid = crmData.profileid;
+          }
+        } catch (crmError) {
+          console.error('Error calling Sales CRM personProfileWebhook:', crmError.message,
+            crmError.response ? { status: crmError.response.status, data: crmError.response.data } : '');
+        }
         const userData = {
           uid: userRecord.uid,
           profileid:profileid,
@@ -253,6 +282,10 @@ exports.verifyEmailOTPNewUsers = onCall(
           workshoponly:true,
           tags: Array.isArray(tags) ? tags.filter(t => typeof t === 'string' && t.trim() !== '') : [],
         };
+        // platform_name is optional — only store it when the client sends a non-empty value
+        if (typeof platform_name === 'string' && platform_name.trim() !== '') {
+          userData.platform_name = platform_name.trim();
+        }
         await admin.firestore().collection('new_user_data').doc(profileid).set(userData);
         await otpDocRef.update({
           verified: true,
