@@ -3481,10 +3481,6 @@ exports.createTvCastGrant = onCall(
     const db = getFirestore();
     const col = db.collection(TV_LOGIN_COLLECTION);
     const now = Date.now();
-
-    // 2. The approver's profile, by email, as approveTvLogin records it.
-    //    Best-effort: a failure logs a warning and stores nulls; the grant
-    //    itself never waits on it (the TV's gate resolves the account again).
     let profileId = null;
     let profileCollection = null;
     try {
@@ -3503,12 +3499,6 @@ exports.createTvCastGrant = onCall(
         `createTvCastGrant: profile lookup failed for uid ${uid}: ${error.message}`
       );
     }
-
-    // 3. The grant: 32 CSPRNG bytes → base64url (43 chars), stored as its
-    //    SHA-256 only — redeemTvLogin's lookup key. Born approved for the
-    //    caller, with every field the three lookups key on present (a null
-    //    userCodeHash can never match a code) and the request kind's whole
-    //    field set, so the Console shows one schema.
     const secret = base64url(crypto.randomBytes(32));
     const secretHash = sha256hex(secret);
     const docRef = col.doc();
@@ -3535,11 +3525,6 @@ exports.createTvCastGrant = onCall(
       throw new HttpsError("internal", "Could not prepare the cast. Please try again.");
     }
 
-    // 4. Best-effort cleanup, the same ONE query createTvLoginRequest runs
-    //    (expiresAt more than an hour past, any kind, limit 20): a phone
-    //    casts far more often than a TV asks for a code, so the sweep has
-    //    to ride on this call too or spent grants would only ever be swept
-    //    by a signed-out TV. Errors are swallowed.
     try {
       const stale = await col
         .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
