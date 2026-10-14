@@ -3,6 +3,8 @@
  * predeploy.js — the CF PREDEPLOY gate (master plan 2026-07-02 L13/L14; Option B rework 2026-07-05).
  *
  * Wired in firebase.json → runs on EVERY `firebase deploy`. Flow:
+ *  -1. SECRET SCAN of the functions deploy package (scripts/cicd/secret-scan.js) — FIRST, so no later
+ *      early exit (fast-path, SKIP_TEST, menu "Skip") can bypass it; fails closed; no opt-out switch;
  *   0. REQUIRE GitHub CLI login — postdeploy records the deploy under the dev's identity (`gh auth token`);
  *   1. regenerate functions-manifest.json (guard + console read it);
  *   2. detect WHICH functions this deploy ships (parse the parent `firebase deploy --only`);
@@ -26,6 +28,25 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const HUB_REPO = 'https://github.com/School-of-Excellence/starlabs-e2e-tests';
 const CACHE = path.join(REPO_ROOT, '.cicd-hub'); // gitignored, auto-managed hub checkout
 
+// --- secret scan gate: block uploading hardcoded credentials. FAIL CLOSED — the deploy continues only on a
+//     clean exit 0; secrets (1), scanner error (2), crash, timeout, signal or a missing scanner all block.
+function requireSecretScanClean() {
+  const scannerPath = path.join(__dirname, 'secret-scan.js');
+  if (!fs.existsSync(scannerPath)) {
+    console.error(`✋ predeploy blocked: secret scan could not complete — ${scannerPath} is missing (failing closed).`);
+    process.exit(1);
+  }
+  const scan = spawnSync(process.execPath, [scannerPath, '--root', REPO_ROOT], { stdio: 'inherit', timeout: 120000 });
+  if (!scan.error && !scan.signal && scan.status === 0) return;
+  if (!scan.error && !scan.signal && scan.status === 1) {
+    console.error('✋ predeploy blocked by the secret scan (see the findings above).');
+  } else {
+    const why = scan.error ? scan.error.message : scan.signal ? `killed by ${scan.signal}` : `exit code ${scan.status}`;
+    console.error(`✋ predeploy blocked: secret scan could not complete (${why}) — failing closed.`);
+  }
+  process.exit(1);
+}
+
 // --- gh auth gate: identity-based deploy recording needs `gh auth token` (postdeploy). Fail fast so a
 //     dev never deploys and then silently fails to record. -----------------------------------------
 function requireGhAuth() {
@@ -39,11 +60,39 @@ function requireGhAuth() {
 }
 
 /**
+ * Windows: `ps -o` doesn't exist (Git Bash's MSYS ps rejects -o; cmd/PowerShell have no ps), and
+ * process.ppid is a WINDOWS pid that MSYS ps can't resolve anyway. Read the whole process table
+ * ONCE via CIM (pid → {ppid, args}) and walk it in JS. Same fail-safe: any error → '' → full guard.
+ */
+function deployCommandWindows() {
+  let table;
+  try {
+    const json = execSync(
+      'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | ' +
+        'Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const rows = [].concat(JSON.parse(json));
+    table = new Map(rows.map((r) => [r.ProcessId, { ppid: r.ParentProcessId, args: r.CommandLine || '' }]));
+  } catch {
+    return '';
+  }
+  let pid = process.ppid;
+  for (let i = 0; i < 6 && pid && table.has(pid); i++) {
+    const { ppid, args } = table.get(pid);
+    if (/\bdeploy\b/.test(args) && !/predeploy\.js/.test(args)) return args;
+    pid = ppid;
+  }
+  return '';
+}
+
+/**
  * Find the real `firebase deploy …` command line. Hooks run as `sh -c node …` children of the
  * CLI, so the DIRECT parent is a shell — walk the ancestry (ps) until a command containing
  * `deploy` appears (the firebase invocation), max 6 levels. Fail-safe: unparseable → full guard.
  */
 function deployCommand() {
+  if (process.platform === 'win32') return deployCommandWindows();
   let pid = process.ppid;
   for (let i = 0; i < 6 && pid && pid > 1; i++) {
     let args = '';
@@ -121,6 +170,84 @@ function askRunTests(scopeLabel) {
   });
 }
 
+/**
+ * The bash that runs the hub's scripts. POSIX: plain `bash`. Windows: plain `bash` is often WSL's
+ * launcher (WindowsApps\bash.exe — first on PATH from PowerShell/cmd), which runs the scripts in a Linux
+ * distro without the dev's node/java and drops Windows env vars (CF_GUARD_ONLY never arrives). Use Git for
+ * Windows' bash instead: <git root>\bin\bash.exe (the wrapper that sets up the MSYS PATH), found via
+ * `git --exec-path` (<git root>/mingw64/libexec/git-core) so non-default install dirs work too.
+ * Not found → block (never silently fall back to WSL).
+ */
+function bashPath() {
+  if (process.platform !== 'win32') return 'bash';
+  const candidates = [];
+  try {
+    const execPath = execSync('git --exec-path', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    candidates.push(path.resolve(execPath, '..', '..', '..', 'bin', 'bash.exe'));
+  } catch {
+    /* git not on PATH — fall through to the default install locations */
+  }
+  for (const base of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')]) {
+    if (base) candidates.push(path.join(base, 'Git', 'bin', 'bash.exe'));
+  }
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (found) return found;
+  console.error('✋ predeploy blocked: Git Bash (Git for Windows) not found — the loop-guard needs it on Windows.');
+  console.error(`   Looked in: ${candidates.join(' | ')}`);
+  console.error('   Install Git for Windows (https://git-scm.com/download/win) and retry.');
+  process.exit(1);
+}
+
+/**
+ * Windows: the hub's kill_emulator (pkill/lsof) can't stop the guard's emulator, so it outlives the
+ * guard — and its wrapper (deploy-cf-emulator.sh) keeps functions/package.json "main" swapped to
+ * index.emulator.js until it exits. Left alone, `firebase deploy` would then package the EMULATOR entry,
+ * and a leftover also holds the ports so the next guard can't boot. Kill the guard's own emulator (only
+ * the one started from .cicd-hub — never a dev's other emulators) by Windows pid; the wrapper's EXIT trap
+ * then restores package.json. Wait for that restore; if "main" is still swapped, BLOCK (never deploy it).
+ * No-op on POSIX (the hub's own cleanup works there).
+ */
+function ensureGuardEmulatorStoppedWindows() {
+  if (process.platform !== 'win32') return;
+  try {
+    const json = execSync(
+      'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | ' +
+        'Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"',
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    // Filter in JS, not in the PowerShell query — the query's own command line would match itself.
+    const emulators = [].concat(JSON.parse(json || '[]')).filter((p) => {
+      const c = (p && p.CommandLine) || '';
+      return c.includes('emulators:start') && c.toLowerCase().includes('.cicd-hub');
+    });
+    for (const { ProcessId } of emulators) {
+      console.log(`   stopping the guard's emulator (pid ${ProcessId}) — the hub's pkill/lsof cleanup can't on Windows`);
+      try {
+        execSync(`taskkill /PID ${ProcessId} /T /F`, { stdio: 'ignore' });
+      } catch {
+        /* already gone */
+      }
+    }
+  } catch {
+    /* process lookup failed — the "main" check below still protects the deploy */
+  }
+  const pkgPath = path.join(REPO_ROOT, 'functions', 'package.json');
+  const mainIsEmulatorEntry = () => {
+    try {
+      return JSON.parse(fs.readFileSync(pkgPath, 'utf8')).main === 'index.emulator.js';
+    } catch {
+      return false;
+    }
+  };
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  for (let waited = 0; mainIsEmulatorEntry() && waited < 20000; waited += 500) Atomics.wait(sleeper, 0, 0, 500);
+  if (mainIsEmulatorEntry()) {
+    console.error('✋ predeploy blocked: functions/package.json "main" is still "index.emulator.js" (left by the guard\'s');
+    console.error('   emulator wrapper). Deploying now would ship the EMULATOR entry. Set "main" back to "index.js" and retry.');
+    process.exit(1);
+  }
+}
+
 // --- Option B: keep the PUBLIC hub cached + set up, then reuse its cf-predeploy.sh (no drift) ------
 function hubLatestSha() {
   try {
@@ -167,7 +294,7 @@ function ensureHubCache() {
     // CF-guard-only: stage the emulator config WITHOUT wiring the Angular app (the guard runs no app —
     // a bare hub clone has no app symlink, so the full overlay would fail on APP_PATH). See the hub's
     // ci/setup-emulator-config.sh CF_GUARD_ONLY branch.
-    execSync('bash ci/setup-emulator-config.sh', {
+    execSync(`"${bashPath()}" ci/setup-emulator-config.sh`, {
       cwd: CACHE,
       stdio: 'inherit',
       env: { ...process.env, CF_GUARD_ONLY: '1' }, // cross-platform (inline VAR=val is bash-only, breaks on Windows cmd)
@@ -182,6 +309,9 @@ function ensureHubCache() {
 
 (async () => {
   console.log('\n══ CF predeploy gate (loop-guard) ═══════════════════════════════');
+
+  // -1. Secret scan — before every other step and every early exit below.
+  requireSecretScanClean();
 
   // 0. Identity gate — postdeploy records under the dev's GitHub identity.
   requireGhAuth();
@@ -232,10 +362,12 @@ function ensureHubCache() {
 
   // 4. Ensure the cached hub, then run its (hub-owned) guard against THIS repo's code.
   ensureHubCache();
-  const guard = spawnSync('bash', [path.join(CACHE, 'scripts', 'cf-predeploy.sh')], {
+  ensureGuardEmulatorStoppedWindows(); // clear a leftover from an earlier run (ports + swapped "main")
+  const guard = spawnSync(bashPath(), [path.join(CACHE, 'scripts', 'cf-predeploy.sh')], {
     cwd: CACHE,
     stdio: 'inherit',
     env: { ...process.env, CF_DIR: REPO_ROOT, ...(only ? { GUARD_ONLY: only.join(',') } : {}) },
   });
+  ensureGuardEmulatorStoppedWindows(); // never let the deploy package index.emulator.js
   process.exit(guard.status ?? 1);
 })();
