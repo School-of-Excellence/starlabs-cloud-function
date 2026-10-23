@@ -1804,10 +1804,11 @@ exports.sendBatchEmail = onRequest({
 });
 
 //harish
-exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, memory: "512MiB"},async (req, res) => {
+exports.postmarkResponseCapture = onRequest({region: "us-central1", cors: true, memory: "512MiB"}, async (req, res) => {
 
-  console.log("RESPONSEBODY",req.body);
-  let responseData = req.body
+  console.log("RESPONSEBODY", req.body);
+  const responseData = req.body;
+
   // TEMP DEBUG: identify the source/stream of the incoming webhook to diagnose MessageID mismatch per server
   console.log("POSTMARK_WEBHOOK_DEBUG", JSON.stringify({
     MessageID: responseData['MessageID'],
@@ -1817,60 +1818,16 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
     Recipient: responseData['Recipient'],
     Email: responseData['Email'],
   }));
-  let mapProfileEmail = {};
-  await admin.firestore().collection("profile_data").orderBy("name","asc").get().then((profile)=>{
-    for (let i = 0; i < profile.docs.length; i++) {
-      const profileData = profile.docs[i].data();
-      mapProfileEmail[profileData['email']] = profileData;
-    }
-  });
 
-  await admin.firestore().collection("email archive").where("postmark_msgid","array-contains",responseData['MessageID']).limit(1).get().then(async(emailarchivedocs)=>{
-    if(emailarchivedocs.docs.length != 0){
-      console.log("Doc Found", responseData['MessageID']);
-      const emailArchiveRef = emailarchivedocs.docs[0].ref;
-      let broadcastData = emailarchivedocs.docs[0].data();
+  const db = admin.firestore();
 
-      const docref  = admin.firestore().collection("email logs").doc();
+  try {
+    const emailarchivedocs = await db.collection("email archive")
+      .where("postmark_msgid", "array-contains", responseData['MessageID'])
+      .limit(1)
+      .get();
 
-      if([null,undefined,""].includes(responseData['Recipient'])){
-
-        responseData['email'] = responseData['Email'];
-
-      }else if([null,undefined,""].includes(responseData['Email'])){
-
-        responseData['email'] = responseData['Recipient'];
-
-      }
-
-      responseData['profileid'] = [null,undefined,""].includes(mapProfileEmail[responseData['Recipient']]) ? null : mapProfileEmail[responseData['Recipient']]['profileid'];
-      responseData['postmark_msgid'] = responseData['MessageID'];
-      responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim();
-      responseData['templateid'] = broadcastData['templateid'];
-      responseData['emailarchiveid'] = broadcastData['docid'];
-      responseData['time'] = admin.firestore.FieldValue.serverTimestamp();
-
-      try {
-        await docref.set(responseData);
-        console.log("Log Added SUCCESSFULLY");
-      } catch (error) {
-        console.log("ERROR WHILE Adding Log", error);
-        return res.status(500).send({ message: "Internal Server Error" });
-      }
-
-      // Log is saved — archive update is best-effort so Postmark won't retry
-      // (and duplicate the log) if only this step fails.
-      try {
-        await emailArchiveRef.update({
-          [responseData['msgstatus']] : admin.firestore.FieldValue.arrayUnion(responseData['Recipient'])
-        });
-        console.log("Archive Updated SUCCESSFULLY");
-      } catch (error) {
-        console.log("ERROR WHILE Updating Archive", error);
-      }
-
-      return res.status(200).send({ message: "Success" });
-    } else {
+    if (emailarchivedocs.empty) {
       // TEMP DEBUG: no email archive stored this MessageID — likely wrong server/stream/env or sent outside this code
       console.log("POSTMARK_WEBHOOK_NO_MATCH", JSON.stringify({
         MessageID: responseData['MessageID'],
@@ -1881,9 +1838,67 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
       console.log("Doc Not Found", responseData['MessageID']);
       return res.status(200).send({ message: "Doc Not Found" });
     }
-  });
 
+    console.log("Doc Found", responseData['MessageID']);
+    const emailArchiveRef = emailarchivedocs.docs[0].ref;
+    const broadcastData = emailarchivedocs.docs[0].data();
+
+    // Delivery/Open/Click events carry "Recipient"; Bounce/SpamComplaint carry "Email"
+    const recipientEmail = [null, undefined, ""].includes(responseData['Recipient'])
+      ? responseData['Email']
+      : responseData['Recipient'];
+    responseData['email'] = recipientEmail;
+
+    // Fetch only the matching participant instead of the whole collection
+    let profileid = null;
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      const participantSnap = await db.collection("participant metadata")
+        .where("email", "==", recipientEmail)
+        .limit(1)
+        .get();
+      if (!participantSnap.empty) {
+        profileid = participantSnap.docs[0].data()['profileid'] ?? null;
+      }
+    }
+
+    const docref = db.collection("email logs").doc();
+
+    responseData['profileid'] = profileid;
+    responseData['postmark_msgid'] = responseData['MessageID'];
+    responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim();
+    responseData['templateid'] = broadcastData['templateid'];
+    responseData['emailarchiveid'] = broadcastData['docid'];
+    responseData['time'] = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+      await docref.set(responseData);
+      console.log("Log Added SUCCESSFULLY");
+    } catch (error) {
+      console.log("ERROR WHILE Adding Log", error);
+      return res.status(500).send({ message: "Internal Server Error" });
+    }
+
+    // Log is saved — archive update is best-effort so Postmark won't retry
+    // (and duplicate the log) if only this step fails.
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      try {
+        await emailArchiveRef.update({
+          [responseData['msgstatus']]: admin.firestore.FieldValue.arrayUnion(recipientEmail)
+        });
+        console.log("Archive Updated SUCCESSFULLY");
+      } catch (error) {
+        console.log("ERROR WHILE Updating Archive", error);
+      }
+    }
+
+    return res.status(200).send({ message: "Success" });
+
+  } catch (error) {
+    console.log("ERROR IN postmarkResponseCapture", error);
+    return res.status(500).send({ message: "Internal Server Error" });
+  }
 });
+
 async function sendBatchEmailArchive(emailArchiveId, serversMap) {
 
   // ── 1. Fetch archive doc ─────────────────────────────────────────────────
