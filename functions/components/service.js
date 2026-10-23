@@ -31,15 +31,30 @@ const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sep
 
 // Post Mark
 const postmark = require("postmark");
-// StarLabs V1 server token, read from the POSTMARK_STARLABS_V1 environment variable (functions/.env,
-// written by the deploy workflow from the GitHub repository secret). Same server for every project.
-// Built lazily: the postmark client throws on an empty token, and that must not break module load
-// (deploy-time function discovery, emulator runs without a .env).
+// Postmark server tokens live in Cloud Secret Manager (firebase functions:secrets:set <NAME>) and are
+// declared ONCE here, shared by every component. A function that sends mail must list the secret(s)
+// it uses in its `secrets: [...]` option, otherwise `.value()` is empty at runtime.
+// The shared client below uses the StarLabs V1 server. Built lazily because `.value()` is only
+// available inside a bound function, never at module load.
+const { defineSecret } = require("firebase-functions/params");
+const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
+const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
+const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
+const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
+const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
+const postmarkSecrets = { POSTMARK_STARLABS_V1, POSTMARK_STARLABS_V2, POSTMARK_STARLABS_V3, POSTMARK_STARLABS_V4, POSTMARK_STARLABS_TEST };
+// Postmark's edge blocks some shared Google egress IPs, so functions that call Postmark spread this
+// into their options to leave via Cloud NAT's static IP (35.226.111.222). The connector exists on production
+// only. Keyed off `production` rather than .env: firebase deploy evaluates function options with only
+// GCLOUD_PROJECT/FIREBASE_CONFIG set, so .env.<project> values are undefined at that point.
+const postmarkEgress = production
+	? { vpcConnector: "functions-egress", vpcConnectorEgressSettings: "ALL_TRAFFIC" }
+	: {};
 let _postmarkClient = null;
 function getPostmarkClient() {
 	if (!_postmarkClient) {
-		const token = process.env.POSTMARK_STARLABS_V1;
-		if (!token) throw new Error("POSTMARK_STARLABS_V1 is not set — add it to functions/.env (see .env.example)");
+		const token = POSTMARK_STARLABS_V1.value();
+		if (!token) throw new Error("POSTMARK_STARLABS_V1 secret is empty — add commonService.postmarkSecrets.POSTMARK_STARLABS_V1 to this function's `secrets` option");
 		_postmarkClient = new postmark.ServerClient(token);
 	}
 	return _postmarkClient;
@@ -999,6 +1014,8 @@ module.exports = {
 	// slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
 	get postmarkClient() { return getPostmarkClient(); },
+	postmarkSecrets,
+	postmarkEgress,
 	monthName,
 	chunkArray,
 	saveNotificationRecord,
@@ -1017,7 +1034,8 @@ module.exports = {
 	generateZoomMeeting,
 	createEmailArchiveDocument,
 	createWatiArchiveDocument,
-	getWebhookUrl
+	getWebhookUrl,
+	eventWatiServerId,
 }
 
 async function createEmailArchiveDocument({
