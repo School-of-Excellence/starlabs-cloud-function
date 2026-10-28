@@ -4311,6 +4311,74 @@ exports.slackLoginEvent = onDocumentCreated("loginlog/{docid}",async (change) =>
   }
 });
 
+// Group chat push text. Longest body sent, in characters — keeps the push well
+// inside the 4 KB APNs payload limit (the OS truncates the display anyway).
+const CHAT_PUSH_MAX_CHARS = 240;
+const CHAT_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp"];
+const CHAT_VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "avi", "mkv", "3gp"];
+const CHAT_AUDIO_EXTENSIONS = ["m4a", "mp3", "aac", "wav", "ogg", "opus", "amr", "caf", "flac"];
+// Voice notes are named voice-note-<seconds>s.m4a by the apps that record them.
+const CHAT_VOICE_NOTE_NAME = /^voice-note-\d{1,4}s\.m4a$/;
+// A MIME type standing in for a message's text (image/png, audio/webm;codecs=opus).
+const CHAT_MIME_TEXT = /^[a-z]+\/[a-z0-9.+-]+(;.*)?$/i;
+// The label for each media type word (the part of a MIME type before "/").
+const CHAT_KIND_LABELS = { image: "📷 Photo", video: "🎥 Video", audio: "🎵 Audio", voice: "🎵 Audio" };
+
+// The push body for a chat message: its text clipped to CHAT_PUSH_MAX_CHARS
+// (by code point, so an emoji is never cut in half), or — for an attachment
+// sent without words — a label for what was sent.
+function chatPushText(text, messageData) {
+  const trimmed = String(text || "").trim();
+  const body = trimmed === "" || isAttachmentStandIn(trimmed, messageData)
+    ? chatAttachmentLabel(messageData)
+    : trimmed;
+  const chars = Array.from(body);
+  if (chars.length <= CHAT_PUSH_MAX_CHARS) return body;
+  return chars.slice(0, CHAT_PUSH_MAX_CHARS - 1).join("").trimEnd() + "…";
+}
+
+// Whether a message's text only stands in for its attachment: the file's own
+// name (EiFlix and the web send each file as a message whose text is its name)
+// or a MIME type. Typed words are never treated as one.
+function isAttachmentStandIn(text, messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  const names = files
+    .map(file => (file && typeof file === "object") ? String(file["filename"] || "") : "")
+    .concat(String(messageData["fileName"] || ""))
+    .filter(name => name !== "");
+  return names.includes(text) || CHAT_MIME_TEXT.test(text);
+}
+
+// "🎤 Voice message", "📷 Photo", … from the message's files (or the legacy
+// single-file fields). The media type decides first and the extension only when
+// the type names no media, as the apps do. Reads only; never throws on missing
+// or odd fields.
+function chatAttachmentLabel(messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  if (files.length > 1) return `📎 ${files.length} attachments`;
+  const file = (files[0] && typeof files[0] === "object") ? files[0] : {};
+  const name = String(file["filename"] || messageData["fileName"] || "");
+  if (CHAT_VOICE_NOTE_NAME.test(name)) return "🎤 Voice message";
+  const kind = String(file["mediatype"] || file["filetype"] || "").toLowerCase().split("/")[0];
+  if (CHAT_KIND_LABELS[kind]) return CHAT_KIND_LABELS[kind];
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  if (CHAT_IMAGE_EXTENSIONS.includes(extension)) return "📷 Photo";
+  if (CHAT_VIDEO_EXTENSIONS.includes(extension)) return "🎥 Video";
+  if (CHAT_AUDIO_EXTENSIONS.includes(extension)) return "🎵 Audio";
+  if (name) return `📄 ${name}`;
+  return "📎 Attachment";
+}
+
+// Whether a new_user_data profile may be notified: not moved to profile_data
+// (its profile_data record is used instead), deleted, blocked, or anything but
+// approved (enable must be exactly true) — the rules the apps sign in by.
+function isNotifiableNewUser(profile) {
+  return profile["movedtoexist"] !== true &&
+    profile["accountdeleted"] !== true &&
+    profile["block"] !== true &&
+    profile["enable"] === true;
+}
+
 // Group Chat Notification
 exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{msgid}", async (snapshot)=>{
   console.log(snapshot.data.ref.path);
@@ -4431,17 +4499,31 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     var group_name = supportChatData.group_name;
     var profileToSend = []
     for (let i = 0; i < pending_user.length; i+=10) {
-      var userRef = pending_user.slice(i, i+10).map(e => admin.firestore().collection("user_data").doc(e))
+      var uidBatch = pending_user.slice(i, i+10)
+      var userRef = uidBatch.map(e => admin.firestore().collection("user_data").doc(e))
       await admin.firestore().collection("profile_data").where("user_ref", "in", userRef).get().then(async (profile)=>{
         profile.forEach(doc=>{
           if(!profileToSend.includes(doc.id)) profileToSend.push(doc.id)
         })
       })
+      // Members who signed up through EiFlix may only have a new_user_data
+      // profile (uid field; doc id = profile id, as notifyMobileApp looks it up).
+      // Moved, deleted, blocked or unapproved accounts are left out.
+      await admin.firestore().collection("new_user_data").where("uid", "in", uidBatch).get().then(profile =>{
+        profile.forEach(doc=>{
+          if(isNotifiableNewUser(doc.data()) && !profileToSend.includes(doc.id)) profileToSend.push(doc.id)
+        })
+      }).catch(e =>{
+        console.log("new_user_data recipient lookup failed", e)
+      })
     }
+
+    // The sender's name as the message stores it when no profile_data name was found.
+    var pushSender = sender_name || messageData["sendername"] || "Someone"
 
     await commonService.saveNotificationRecord({
       title: `New message in ${group_name}`,
-      message: `${sender_name}: ${message}`,
+      message: `${pushSender}: ${chatPushText(message, messageData)}`,
       subtitle: null,
       date: admin.firestore.FieldValue.serverTimestamp(),
       landingpage: null,
@@ -4459,7 +4541,9 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         "messageRef": supportChatData.id,
         "groupref": supportChatData.id,
         "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
-      }
+      },
+      // Group chats are shared by Breakthroughs and EiFlix — notify both apps.
+      receivingapp: "all",
     });
   }
 });

@@ -8,7 +8,11 @@ const { onRequest,onCall, HttpsError  } = require("firebase-functions/v2/https")
 const https = require('https'); // HTTP Request/Response
 var IncomingWebhook = require('@slack/client').IncomingWebhook;
 const axios = require('axios');
+const { defineSecret } = require("firebase-functions/params");
 
+// Shared secret the Sales CRM personProfileWebhook checks on every request.
+// Lives in Cloud Secret Manager: firebase functions:secrets:set SALESCRM_WEBHOOK_SECRET
+const SALESCRM_WEBHOOK_SECRET = defineSecret("SALESCRM_WEBHOOK_SECRET");
 
 exports.createProfile_registeredUser = onDocumentCreated({document:"user_data/{docid}",runWith:{timeoutSeconds:540}},async (userData)=>{
 	console.log("New UserData created: " + userData.data.data().email)
@@ -186,7 +190,7 @@ exports.verifyEmailOTPNewUsers = onCall(
   {
     timeoutSeconds: 60,
     memory: "256MiB",
-    secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
+    secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1, SALESCRM_WEBHOOK_SECRET],
     ...commonService.postmarkEgress,
   },
   async (request) => {
@@ -252,7 +256,10 @@ exports.verifyEmailOTPNewUsers = onCall(
             countrycode: countryCode,
             source: "eiflix",
           }, {
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-webhook-secret': SALESCRM_WEBHOOK_SECRET.value(),
+            },
             timeout: 10000,
           });
           const crmData = crmResponse.data || {};

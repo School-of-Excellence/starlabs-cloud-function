@@ -586,12 +586,14 @@ exports.workshopenrolledwatti = onDocumentCreated(
             ? "WorkshopEnrolledMessageEvergreen"
             : categorybased
               ? "WorkshopEnrolledMessage1"
-              : "WorkshopEnrolledMessage";
+              // : "WorkshopEnrolledMessage";
+              :"workshopenrollmail"
           const postmarktemplateId = evergreenWorkshop
             ? '45591602'
             : categorybased
               ? '43859890'
-              : '42135513';
+              // : '42135513';
+              :"48350274"
           // await commonService.postmarkClient.sendEmailWithTemplate({
           //   From: "starlabs@excellenceinstallation.com",
           //   To: profile['email'],
