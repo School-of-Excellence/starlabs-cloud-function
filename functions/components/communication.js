@@ -1870,10 +1870,11 @@ exports.sendBatchEmail = onRequest({
 });
 
 //harish
-exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, memory: "512MiB"},async (req, res) => {
+exports.postmarkResponseCapture = onRequest({region: "us-central1", cors: true, memory: "512MiB"}, async (req, res) => {
 
-  console.log("RESPONSEBODY",req.body);
-  let responseData = req.body
+  console.log("RESPONSEBODY", req.body);
+  const responseData = req.body;
+
   // TEMP DEBUG: identify the source/stream of the incoming webhook to diagnose MessageID mismatch per server
   console.log("POSTMARK_WEBHOOK_DEBUG", JSON.stringify({
     MessageID: responseData['MessageID'],
@@ -1883,60 +1884,16 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
     Recipient: responseData['Recipient'],
     Email: responseData['Email'],
   }));
-  let mapProfileEmail = {};
-  await admin.firestore().collection("profile_data").orderBy("name","asc").get().then((profile)=>{
-    for (let i = 0; i < profile.docs.length; i++) {
-      const profileData = profile.docs[i].data();
-      mapProfileEmail[profileData['email']] = profileData;
-    }
-  });
 
-  await admin.firestore().collection("email archive").where("postmark_msgid","array-contains",responseData['MessageID']).limit(1).get().then(async(emailarchivedocs)=>{
-    if(emailarchivedocs.docs.length != 0){
-      console.log("Doc Found", responseData['MessageID']);
-      const emailArchiveRef = emailarchivedocs.docs[0].ref;
-      let broadcastData = emailarchivedocs.docs[0].data();
+  const db = admin.firestore();
 
-      const docref  = admin.firestore().collection("email logs").doc();
+  try {
+    const emailarchivedocs = await db.collection("email archive")
+      .where("postmark_msgid", "array-contains", responseData['MessageID'])
+      .limit(1)
+      .get();
 
-      if([null,undefined,""].includes(responseData['Recipient'])){
-
-        responseData['email'] = responseData['Email'];
-
-      }else if([null,undefined,""].includes(responseData['Email'])){
-
-        responseData['email'] = responseData['Recipient'];
-
-      }
-
-      responseData['profileid'] = [null,undefined,""].includes(mapProfileEmail[responseData['Recipient']]) ? null : mapProfileEmail[responseData['Recipient']]['profileid'];
-      responseData['postmark_msgid'] = responseData['MessageID'];
-      responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim();
-      responseData['templateid'] = broadcastData['templateid'];
-      responseData['emailarchiveid'] = broadcastData['docid'];
-      responseData['time'] = admin.firestore.FieldValue.serverTimestamp();
-
-      try {
-        await docref.set(responseData);
-        console.log("Log Added SUCCESSFULLY");
-      } catch (error) {
-        console.log("ERROR WHILE Adding Log", error);
-        return res.status(500).send({ message: "Internal Server Error" });
-      }
-
-      // Log is saved — archive update is best-effort so Postmark won't retry
-      // (and duplicate the log) if only this step fails.
-      try {
-        await emailArchiveRef.update({
-          [responseData['msgstatus']] : admin.firestore.FieldValue.arrayUnion(responseData['Recipient'])
-        });
-        console.log("Archive Updated SUCCESSFULLY");
-      } catch (error) {
-        console.log("ERROR WHILE Updating Archive", error);
-      }
-
-      return res.status(200).send({ message: "Success" });
-    } else {
+    if (emailarchivedocs.empty) {
       // TEMP DEBUG: no email archive stored this MessageID — likely wrong server/stream/env or sent outside this code
       console.log("POSTMARK_WEBHOOK_NO_MATCH", JSON.stringify({
         MessageID: responseData['MessageID'],
@@ -1947,9 +1904,67 @@ exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, m
       console.log("Doc Not Found", responseData['MessageID']);
       return res.status(200).send({ message: "Doc Not Found" });
     }
-  });
 
+    console.log("Doc Found", responseData['MessageID']);
+    const emailArchiveRef = emailarchivedocs.docs[0].ref;
+    const broadcastData = emailarchivedocs.docs[0].data();
+
+    // Delivery/Open/Click events carry "Recipient"; Bounce/SpamComplaint carry "Email"
+    const recipientEmail = [null, undefined, ""].includes(responseData['Recipient'])
+      ? responseData['Email']
+      : responseData['Recipient'];
+    responseData['email'] = recipientEmail;
+
+    // Fetch only the matching participant instead of the whole collection
+    let profileid = null;
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      const participantSnap = await db.collection("participant metadata")
+        .where("email", "==", recipientEmail)
+        .limit(1)
+        .get();
+      if (!participantSnap.empty) {
+        profileid = participantSnap.docs[0].data()['profileid'] ?? null;
+      }
+    }
+
+    const docref = db.collection("email logs").doc();
+
+    responseData['profileid'] = profileid;
+    responseData['postmark_msgid'] = responseData['MessageID'];
+    responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim();
+    responseData['templateid'] = broadcastData['templateid'];
+    responseData['emailarchiveid'] = broadcastData['docid'];
+    responseData['time'] = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+      await docref.set(responseData);
+      console.log("Log Added SUCCESSFULLY");
+    } catch (error) {
+      console.log("ERROR WHILE Adding Log", error);
+      return res.status(500).send({ message: "Internal Server Error" });
+    }
+
+    // Log is saved — archive update is best-effort so Postmark won't retry
+    // (and duplicate the log) if only this step fails.
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      try {
+        await emailArchiveRef.update({
+          [responseData['msgstatus']]: admin.firestore.FieldValue.arrayUnion(recipientEmail)
+        });
+        console.log("Archive Updated SUCCESSFULLY");
+      } catch (error) {
+        console.log("ERROR WHILE Updating Archive", error);
+      }
+    }
+
+    return res.status(200).send({ message: "Success" });
+
+  } catch (error) {
+    console.log("ERROR IN postmarkResponseCapture", error);
+    return res.status(500).send({ message: "Internal Server Error" });
+  }
 });
+
 async function sendBatchEmailArchive(emailArchiveId, serversMap) {
 
   // ── 1. Fetch archive doc ─────────────────────────────────────────────────
@@ -4311,6 +4326,74 @@ exports.slackLoginEvent = onDocumentCreated("loginlog/{docid}",async (change) =>
   }
 });
 
+// Group chat push text. Longest body sent, in characters — keeps the push well
+// inside the 4 KB APNs payload limit (the OS truncates the display anyway).
+const CHAT_PUSH_MAX_CHARS = 240;
+const CHAT_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp"];
+const CHAT_VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "avi", "mkv", "3gp"];
+const CHAT_AUDIO_EXTENSIONS = ["m4a", "mp3", "aac", "wav", "ogg", "opus", "amr", "caf", "flac"];
+// Voice notes are named voice-note-<seconds>s.m4a by the apps that record them.
+const CHAT_VOICE_NOTE_NAME = /^voice-note-\d{1,4}s\.m4a$/;
+// A MIME type standing in for a message's text (image/png, audio/webm;codecs=opus).
+const CHAT_MIME_TEXT = /^[a-z]+\/[a-z0-9.+-]+(;.*)?$/i;
+// The label for each media type word (the part of a MIME type before "/").
+const CHAT_KIND_LABELS = { image: "📷 Photo", video: "🎥 Video", audio: "🎵 Audio", voice: "🎵 Audio" };
+
+// The push body for a chat message: its text clipped to CHAT_PUSH_MAX_CHARS
+// (by code point, so an emoji is never cut in half), or — for an attachment
+// sent without words — a label for what was sent.
+function chatPushText(text, messageData) {
+  const trimmed = String(text || "").trim();
+  const body = trimmed === "" || isAttachmentStandIn(trimmed, messageData)
+    ? chatAttachmentLabel(messageData)
+    : trimmed;
+  const chars = Array.from(body);
+  if (chars.length <= CHAT_PUSH_MAX_CHARS) return body;
+  return chars.slice(0, CHAT_PUSH_MAX_CHARS - 1).join("").trimEnd() + "…";
+}
+
+// Whether a message's text only stands in for its attachment: the file's own
+// name (EiFlix and the web send each file as a message whose text is its name)
+// or a MIME type. Typed words are never treated as one.
+function isAttachmentStandIn(text, messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  const names = files
+    .map(file => (file && typeof file === "object") ? String(file["filename"] || "") : "")
+    .concat(String(messageData["fileName"] || ""))
+    .filter(name => name !== "");
+  return names.includes(text) || CHAT_MIME_TEXT.test(text);
+}
+
+// "🎤 Voice message", "📷 Photo", … from the message's files (or the legacy
+// single-file fields). The media type decides first and the extension only when
+// the type names no media, as the apps do. Reads only; never throws on missing
+// or odd fields.
+function chatAttachmentLabel(messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  if (files.length > 1) return `📎 ${files.length} attachments`;
+  const file = (files[0] && typeof files[0] === "object") ? files[0] : {};
+  const name = String(file["filename"] || messageData["fileName"] || "");
+  if (CHAT_VOICE_NOTE_NAME.test(name)) return "🎤 Voice message";
+  const kind = String(file["mediatype"] || file["filetype"] || "").toLowerCase().split("/")[0];
+  if (CHAT_KIND_LABELS[kind]) return CHAT_KIND_LABELS[kind];
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  if (CHAT_IMAGE_EXTENSIONS.includes(extension)) return "📷 Photo";
+  if (CHAT_VIDEO_EXTENSIONS.includes(extension)) return "🎥 Video";
+  if (CHAT_AUDIO_EXTENSIONS.includes(extension)) return "🎵 Audio";
+  if (name) return `📄 ${name}`;
+  return "📎 Attachment";
+}
+
+// Whether a new_user_data profile may be notified: not moved to profile_data
+// (its profile_data record is used instead), deleted, blocked, or anything but
+// approved (enable must be exactly true) — the rules the apps sign in by.
+function isNotifiableNewUser(profile) {
+  return profile["movedtoexist"] !== true &&
+    profile["accountdeleted"] !== true &&
+    profile["block"] !== true &&
+    profile["enable"] === true;
+}
+
 // Group Chat Notification
 exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{msgid}", async (snapshot)=>{
   console.log(snapshot.data.ref.path);
@@ -4431,17 +4514,31 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
     var group_name = supportChatData.group_name;
     var profileToSend = []
     for (let i = 0; i < pending_user.length; i+=10) {
-      var userRef = pending_user.slice(i, i+10).map(e => admin.firestore().collection("user_data").doc(e))
+      var uidBatch = pending_user.slice(i, i+10)
+      var userRef = uidBatch.map(e => admin.firestore().collection("user_data").doc(e))
       await admin.firestore().collection("profile_data").where("user_ref", "in", userRef).get().then(async (profile)=>{
         profile.forEach(doc=>{
           if(!profileToSend.includes(doc.id)) profileToSend.push(doc.id)
         })
       })
+      // Members who signed up through EiFlix may only have a new_user_data
+      // profile (uid field; doc id = profile id, as notifyMobileApp looks it up).
+      // Moved, deleted, blocked or unapproved accounts are left out.
+      await admin.firestore().collection("new_user_data").where("uid", "in", uidBatch).get().then(profile =>{
+        profile.forEach(doc=>{
+          if(isNotifiableNewUser(doc.data()) && !profileToSend.includes(doc.id)) profileToSend.push(doc.id)
+        })
+      }).catch(e =>{
+        console.log("new_user_data recipient lookup failed", e)
+      })
     }
+
+    // The sender's name as the message stores it when no profile_data name was found.
+    var pushSender = sender_name || messageData["sendername"] || "Someone"
 
     await commonService.saveNotificationRecord({
       title: `New message in ${group_name}`,
-      message: `${sender_name}: ${message}`,
+      message: `${pushSender}: ${chatPushText(message, messageData)}`,
       subtitle: null,
       date: admin.firestore.FieldValue.serverTimestamp(),
       landingpage: null,
@@ -4459,7 +4556,9 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         "messageRef": supportChatData.id,
         "groupref": supportChatData.id,
         "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
-      }
+      },
+      // Group chats are shared by Breakthroughs and EiFlix — notify both apps.
+      receivingapp: "all",
     });
   }
 });
@@ -5367,6 +5466,31 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
   const { type } = req.body;
   console.log("Request type:", type);
 
+  // Delivery on hold (operator 2026-10-13): nobody whose profile_data has
+  // deliveryonhold == true is sent this communication — mail or WhatsApp.
+  // The profile_data document id IS the profileid the screens send with each
+  // recipient. A recipient that arrives without a profileid (an older caller)
+  // cannot be checked and is sent as before.
+  // If the lookup itself fails, send NOTHING: messaging someone on hold is the
+  // worse mistake, and the screens already report a failed send.
+  const heldProfileIds = [];
+  try {
+    const heldSnap = await admin.firestore().collection('profile_data').where('deliveryonhold', '==', true).get();
+    heldSnap.forEach((doc) => heldProfileIds.push(doc.id));
+  } catch (error) {
+    console.error('Could not read delivery-on-hold profiles; nothing sent:', error);
+    res.status(500).json({
+      message: "Could not check delivery-on-hold profiles; nothing was sent",
+      error: error.message || 'Unknown error',
+      successCount: 0,
+      failureCount: 0
+    });
+    return;
+  }
+  const heldSet = new Set(heldProfileIds);
+  const isHeld = (entry) => !!(entry && entry.profileid && heldSet.has(String(entry.profileid)));
+  console.log("Delivery-on-hold profiles:", heldProfileIds.length);
+
   // Email - BULK 
   if (type === 'mail') {
     const { subject, message, recipients } = req.body;
@@ -5376,10 +5500,27 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
       res.status(400).send("Missing required fields for bulk email send");
       return;
     }
+    const heldRecipients = recipients.filter(isHeld);
+    const sendableRecipients = recipients.filter((r) => !isHeld(r));
+    if (heldRecipients.length) {
+      console.log(`Skipping ${heldRecipients.length} delivery-on-hold recipient(s):`, heldRecipients.map((r) => r.profileid));
+    }
+    if (sendableRecipients.length === 0) {
+      res.status(200).json({
+        message: "All recipients are on delivery hold — nothing sent",
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldRecipients.length,
+        heldProfileIds: heldRecipients.map((r) => r.profileid),
+        totalProcessed: recipients.length,
+        results: []
+      });
+      return;
+    }
     let successCount = 0;
     let failureCount = 0;
     const results = [];
-    const sendEmailBulk = recipients.map(async (recipient) => {
+    const sendEmailBulk = sendableRecipients.map(async (recipient) => {
       const { email, name } = recipient;
 
       if (!email || !name) {
@@ -5451,6 +5592,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
       message: "Bulk email send completed",
       successCount,
       failureCount,
+      heldCount: heldRecipients.length,
+      heldProfileIds: heldRecipients.map((r) => r.profileid),
       totalProcessed: recipients.length,
       results: results
     });
@@ -5461,6 +5604,25 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
 
     if (!templateName || !participants || !Array.isArray(participants) || participants.length === 0) {
       res.status(400).send("Missing required fields for WhatsApp bulk send");
+      return;
+    }
+
+    const heldParticipants = participants.filter(isHeld);
+    const sendableParticipants = participants.filter((p) => !isHeld(p));
+    if (heldParticipants.length) {
+      console.log(`Skipping ${heldParticipants.length} delivery-on-hold participant(s):`, heldParticipants.map((p) => p.profileid));
+    }
+    // Nobody left: return before fetching the WATI token or calling WATI with an empty broadcast.
+    if (sendableParticipants.length === 0) {
+      res.status(200).json({
+        message: "All participants are on delivery hold — nothing sent",
+        templateName: templateName,
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
+        totalProcessed: participants.length
+      });
       return;
     }
 
@@ -5487,7 +5649,7 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         'Content-Type': 'application/json-patch+json', 
       };
 
-      const receivers = participants.map(participant => ({
+      const receivers = sendableParticipants.map(participant => ({
         whatsappNumber: participant.phonenumber,
         customParams: participant.customParams.map(param => ({
           name: param.name,
@@ -5536,6 +5698,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         templateName: templateName,
         successCount: receivers.length,
         failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
         totalProcessed: participants.length,
         broadcastDetails: response.data
       });
@@ -5553,7 +5717,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
         error: error.response?.data || error.message,
         errorStatus: error.response?.status,
         successCount: 0,
-        failureCount: participants.length,
+        failureCount: sendableParticipants.length,
+        heldCount: heldParticipants.length,
         totalProcessed: participants.length
       });
     }
