@@ -61,45 +61,22 @@ exports.onQueueStageChange = onDocumentWritten({
     });
   }
 
-  // get slot title if variation id exists
-  let getSlotTitle = () => null;
-
-  if (afterData['variationid']) {
-    const queuePlanningSnap = await admin.firestore()
-      .collection('queue planning')
-      .where('queueref', '==', afterData['queueref'])
-      .where('variationlist', 'array-contains', afterData['variationid'])
-      .get();
-
-    const planDoc = queuePlanningSnap.docs[0];
-
-    if (planDoc) {
-      const planning = planDoc.data()['planning'] || [];
-      
-      const slots = planning.flatMap(plan =>
-        (plan['segments'] || []).flatMap(segment =>
-          (segment['slots'] || []).map(slot => ({
-            ...slot,
-            segmentid: segment['segmentid']  
-          }))
-        )
-      );
-
-      getSlotTitle = (slotValue, stageName) => {
-        const matchedSlot = slots.find(slot =>
-          slot['segmentid'] === slotValue['segmentid'] &&
-          slot['stagename'] === stageName &&
-          slot['startdate']?.seconds === slotValue['startdate']?.seconds &&
-          slot['enddate']?.seconds === slotValue['enddate']?.seconds
-        );
-        return matchedSlot?.['title'];
-      };
+  // get slot title from the queue availability doc 
+  const getSlotTitle = async (slotValue) => {
+    try {
+      if (slotValue && slotValue['docid']) {
+        const slotSnap = await admin.firestore().collection('queue availability').doc(slotValue['docid']).get();
+        if (slotSnap.exists) return slotSnap.data()['title'];
+      }
+    } catch (err) {
+      console.log('getSlotTitle error', err.toString());
     }
-  }
+    return slotValue ? slotValue['title'] : null;
+  };
 
   try {
-      let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
-      let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+      let beforeSelectedSlots = Object.keys(beforeData['bookedslot'] || {});
+      let afterSelectedSlots = Object.keys(afterData['bookedslot'] || {});
 
       const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
       const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
@@ -108,7 +85,7 @@ exports.onQueueStageChange = onDocumentWritten({
 
       // Process added keys
       for (const key of addedKeys) {
-        const addedValue = afterData['selectedstageslot'][key];
+        const addedValue = afterData['bookedslot'][key];
 
         try {
           commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
@@ -221,7 +198,7 @@ exports.onQueueStageChange = onDocumentWritten({
 
       // Process removed keys
       for (const key of removedKeys) {
-        const removedValue = beforeData['selectedstageslot'][key];
+        const removedValue = beforeData['bookedslot'][key];
         try {
           commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
         } catch (slackError) {
@@ -1872,7 +1849,7 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           ? preassigned[docData["currentstage"]]
           : []
 
-        if (stagePreassigned.length != 0) {
+        if (stagePreassigned.length != 0 || tokenData["bookedslot"]?.[docData["currentstage"]]?.slottype == "appointment") {
           batch.update(tokenDoc.ref, { queueposition: null })
           stagePreassigned.forEach(studio => {
             preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
@@ -1911,7 +1888,7 @@ exports.queueParticipantPositionUpdate = onDocumentCreated("queue stage log/{que
           ? preassigned[docData["previousstage"]]
           : [];
 
-        if (stagePreassigned.length != 0) {
+        if (stagePreassigned.length != 0 || tokenData["bookedslot"]?.[docData["currentstage"]]?.slottype == "appointment") {
           batch.update(tokenDoc.ref, { queueposition: null })
           stagePreassigned.forEach(studio => {
             preassignedMap[studio] = preassignedMap[studio] != null ? preassignedMap[studio] : [];
@@ -3587,8 +3564,8 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             tags: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.tags ?? [],
           }
           if (participantProductData["requestedslot"]) {
-            queueData["selectedstageslot"] = {}
-            queueData["selectedstageslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"]
+            queueData["bookedslot"] = {}
+            queueData["bookedslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"]
           }
           batch.set(admin.firestore().collection("queue_token").doc(queuedocid),queueData)
           n++
