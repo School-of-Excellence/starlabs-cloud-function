@@ -15,13 +15,16 @@ const interimReportSystem = require("./components/interimreport");
 const participantMetaDataSystem = require("./components/participantmetadata");
 const participantModeSystem = require("./components/participantmode");
 const participantProductSystem = require("./components/participantproduct");
+const bulkProductJobSystem = require("./components/bulkproductjobs");
 const queueSystem = require("./components/queuesystem");
 const salescrmUpdates = require("./components/salescrm-updates")
 const userRegistration = require("./components/user_registration")
 const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
 const openViduSystem = require("./components/openVidu")
+const livekitCloudSystem = require("./components/livekitCloud")
 const AWS_endpont = require("./components/AWS_endpoint")
+const OCI_endpoint = require("./components/OCI_endpoint")
 const workshop = require("./components/workshop")
 const runpodLLMRunning = require("./components/pod-execution-pipeline/runpod_ai")
 const queue_atc_generation = require("./components/queue-required-stage-aiatc-creation/queue_atc_generation")
@@ -163,6 +166,9 @@ exports.participantsproductinitiated = participantProductSystem.participantsprod
 exports.startParticipantNextDeliverySequence = participantProductSystem.startParticipantNextDeliverySequence // u - "deliverables/{id}"
 exports.participantJourneyproductSocialcommitupdate = participantProductSystem.participantJourneyproductSocialcommitupdate // on request
 
+//bulk add products queue
+exports.processBulkProductJobs = bulkProductJobSystem.processBulkProductJobs // w - "bulkProductJobs/{docid}"
+
 //queue system
 // exports.queueStage = queueSystem.queueStage // w - "queue_token/{id}"
 exports.onQueueStageChange = queueSystem.onQueueStageChange // w - "queue_token/{id}"
@@ -214,6 +220,11 @@ exports.sendEmailOTPNewUsers = userRegistration.sendEmailOTPNewUsers
 exports.verifyEmailOTPNewUsers = userRegistration.verifyEmailOTPNewUsers
 exports.resendEmailOTPNewUsers = userRegistration.resendEmailOTPNewUsers
 exports.newuserjoinedslackintegration = userRegistration.newuserjoinedslackintegration
+exports.createTvLoginRequest = workshop.createTvLoginRequest
+exports.approveTvLogin       = workshop.approveTvLogin
+exports.redeemTvLogin        = workshop.redeemTvLogin
+exports.createTvCastGrant        = workshop.createTvCastGrant
+
 
 //workshop Q&A
 exports.workshopQandA = communication.workshopQandA
@@ -233,6 +244,8 @@ exports.workshopprogressmessage = communication.workshopprogressmessage
 exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
+exports.eiflixadscommunicationschedule = workshop.eiflixadscommunicationschedule
+exports.discoverpagelog = workshop.discoverpagelog
 
 //tvlogin
 exports.authorizeTvDevice = workshop.authorizeTvDevice
@@ -250,18 +263,36 @@ exports.createOpenViduToken = openViduSystem.createOpenViduToken
 exports.openViduStartRecording = openViduSystem.openViduStartRecording
 exports.openViduStopRecording = openViduSystem.openViduStopRecording
 exports.onEventOpenVidu = openViduSystem.onEventOpenVidu
+exports.onEventOci = openViduSystem.onEventOci // OCI cluster webhook (OCI-signed; twin of onEventOpenVidu)
 exports.openViduCloseRoom = openViduSystem.openViduCloseRoom
-exports.CheckMasternodeStatus = openViduSystem.CheckMasternodeStatus
-exports.awsEventWebhook = openViduSystem.awsEventWebhook
-exports.startMasterNodeHTTP = openViduSystem.startMasterNodeHTTP
-exports.stopMasterNodeHTTP = openViduSystem.stopMasterNodeHTTP
-exports.scaleMediaNodes = openViduSystem.scaleMediaNodes
 exports.muteParticipant = openViduSystem.muteParticipant
 exports.kickParticipant = openViduSystem.kickParticipant
-exports.flushOpenviduCallQuality = openViduSystem.flushOpenviduCallQuality
+// flushOpenviduCallQuality removed 2026-08-14 (no callers) — archived in components/depreciated.js
 
-// AWS
+// LiveKit Cloud + Krisp variant (managed — no autoscaling). Same Firestore workflow.
+exports.createLivekitCloudToken = livekitCloudSystem.createLivekitCloudToken
+exports.livekitCloudStartRecording = livekitCloudSystem.livekitCloudStartRecording
+exports.livekitCloudStopRecording = livekitCloudSystem.livekitCloudStopRecording
+exports.livekitCloudCloseRoom = livekitCloudSystem.livekitCloudCloseRoom
+exports.livekitCloudMuteParticipant = livekitCloudSystem.livekitCloudMuteParticipant
+exports.livekitCloudKickParticipant = livekitCloudSystem.livekitCloudKickParticipant
+exports.onEventLivekitCloud = livekitCloudSystem.onEventLivekitCloud
+
+// AWS (self-hosted OpenVidu infrastructure — capacity/scaling, node lifecycle, state webhook)
 exports.getSignedUrlAWS = AWS_endpont.getSignedUrlAWS
+exports.CheckMasternodeStatus = AWS_endpont.CheckMasternodeStatus
+exports.awsEventWebhook = AWS_endpont.awsEventWebhook
+exports.startMasterNodeHTTP = AWS_endpont.startMasterNodeHTTP
+exports.stopMasterNodeHTTP = AWS_endpont.stopMasterNodeHTTP
+exports.scaleMediaNodes = AWS_endpont.scaleMediaNodes
+
+// OCI (self-hosted OpenVidu Elastic on Oracle Cloud)
+exports.getSignedUrlOci = OCI_endpoint.getSignedUrlOci
+exports.CheckOciNodeStatus = OCI_endpoint.CheckOciNodeStatus
+exports.startOciMasterHTTP = OCI_endpoint.startOciMasterHTTP
+exports.stopOciMasterHTTP = OCI_endpoint.stopOciMasterHTTP
+exports.scaleOciMediaNodes = OCI_endpoint.scaleOciMediaNodes
+exports.ociEventWebhook = OCI_endpoint.ociEventWebhook
 
 //live changework
 exports.livechangeworkadjustment = achievementSystem.livechangeworkadjustment
