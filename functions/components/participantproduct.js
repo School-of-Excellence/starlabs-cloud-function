@@ -474,13 +474,25 @@ exports.startParticipantNextDeliverySequence = onDocumentUpdated("deliverables/{
           };
 
           if (participantProductData["requestedslot"]) {
-            tokenData["selectedstageslot"] = {};
-            tokenData["selectedstageslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"];
+            tokenData["bookedslot"] = {};
+            tokenData["bookedslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"];
           }
 
           await newTokenRef.set(tokenData);
           fileRef = newTokenRef;
           console.log(`✅ Queue token ${tokenno} created successfully for delivery: ${deliveryRef}`);
+
+          if (
+            participantProductData["requestedslot"] &&
+            participantProductData["requestedslot"]["slottype"] === "appointment" &&
+            participantProductData["requestedslot"]["appointmentref"]
+          ) {
+            const apptRef = participantProductData["requestedslot"]["appointmentref"];
+
+            await apptRef.update({ queuetokenref: newTokenRef }).catch(err => {
+              console.log("Failed to backfill queuetokenref on appointments doc:", err.toString());
+            });
+          }
         }
       }
     }
