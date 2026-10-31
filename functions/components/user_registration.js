@@ -144,26 +144,26 @@ exports.sendEmailOTPNewUsers = onCall(
         email: email,
         validity: '5 minutes',
       };
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
-      });
-
-      // await commonService.createEmailArchiveDocument({
-      //   emailData: templateData,
-      //   datamodel: templateData,
-      //   attachments: [],
-      //   emailTo: [email],
-      //   emailMap: { [email]: null },
-      //   fileURL: '',
-      //   from: 'starlabs@excellenceinstallation.com',
-      //   notes: '',
-      //   profileId: [null],
-      //   postmarkTemplateId: '42066392',
-      //   templateAlias: 'register-otp-newuser'
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
       // });
+
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: { [email]: null },
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '46317127',
+        templateAlias: 'register-otp-newuser'
+      });
 
       console.log(`OTP sent to ${email}: ${otpDoc.id}`);
       return {
@@ -186,6 +186,8 @@ exports.verifyEmailOTPNewUsers = onCall(
   {
     timeoutSeconds: 60,
     memory: "256MiB",
+    secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
+    ...commonService.postmarkEgress,
   },
   async (request) => {
     try {
@@ -415,26 +417,26 @@ exports.resendEmailOTPNewUsers = onCall(
         validity: '5 minutes',
       };
       
-      await commonService.postmarkClient.sendEmailWithTemplate({
-        From: "starlabs@excellenceinstallation.com",
-        To: email,
-        TemplateAlias: "register-otp-newuser",
-        TemplateModel: templateData,
-      });
-      
-      // await commonService.createEmailArchiveDocument({
-      //   emailData: templateData,
-      //   datamodel: templateData,
-      //   attachments: [],
-      //   emailTo: [email],
-      //   emailMap: { [email]: null },
-      //   fileURL: '',
-      //   from: 'starlabs@excellenceinstallation.com',
-      //   notes: '',
-      //   profileId: [null],
-      //   postmarkTemplateId: '42066392',
-      //   templateAlias: 'register-otp-newuser'
+      // await commonService.postmarkClient.sendEmailWithTemplate({
+      //   From: "starlabs@excellenceinstallation.com",
+      //   To: email,
+      //   TemplateAlias: "register-otp-newuser",
+      //   TemplateModel: templateData,
       // });
+      
+      await commonService.createEmailArchiveDocument({
+        emailData: templateData,
+        datamodel: templateData,
+        attachments: [],
+        emailTo: [email],
+        emailMap: { [email]: null },
+        fileURL: '',
+        from: 'starlabs@excellenceinstallation.com',
+        notes: '',
+        profileId: [null],
+        postmarkTemplateId: '46317127',
+        templateAlias: 'register-otp-newuser'
+      });
 
       console.log(`OTP resent to ${email}: ${otpDoc.id}`);
       return {
@@ -453,6 +455,7 @@ exports.resendEmailOTPNewUsers = onCall(
     }
   }
 );
+
 exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}", async (document) => {
   const snapshot = document.data;
   var data = snapshot.data();
@@ -534,9 +537,12 @@ exports.newuserjoinedslackintegration = onDocumentCreated("new_user_data/{docid}
       🚀 *${name}* just joined EiFlix as a *SUBSCRIBER*! 🌱
       `;
     } else {
-    message = `
-    🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
-    `;
+      message = `
+      🚀 *${name}* just joined EiFlix! 🌱
+      `;
+    // message = `
+    // 🚀 *${name}* just joined EiFlix, referred by *${referredProfileName}*! 🌱
+    // `;
     }
     console.log(message);
 

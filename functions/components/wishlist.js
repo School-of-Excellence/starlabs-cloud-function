@@ -1,11 +1,9 @@
 const admin = require('firebase-admin');
 const commonService = require('./service');
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
-var postmark = require("postmark");
-var postmarkClient = new postmark.ServerClient("67d8b50e-1208-4913-8265-695f57e43939"); // Postmark email:
 
 
-exports.evolutionFamilyWishlistOnWrite = onDocumentWritten("/evolutionwishlistlog/{docid}",async (changedata) => {
+exports.evolutionFamilyWishlistOnWrite = onDocumentWritten({ document: "/evolutionwishlistlog/{docid}", secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1], ...commonService.postmarkEgress }, async (changedata) => {
   let change = changedata.data
   let newDoc = change.after.data()
   console.log("doc id test", changedata.params.docid);
@@ -69,7 +67,7 @@ exports.evolutionFamilyWishlistOnWrite = onDocumentWritten("/evolutionwishlistlo
             link:"https://breakthroughs.app/evolutionwishlist?data=" + encodeURIComponent(JSON.stringify(element))
           }
           allPromises.push(
-            await postmarkClient.sendEmailWithTemplate({
+            await commonService.postmarkClient.sendEmailWithTemplate({
               From: "starlabs@excellenceinstallation.com",
               To:element['contact'].trim(),
               TemplateAlias: "evolution_wishlist",

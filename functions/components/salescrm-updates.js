@@ -467,7 +467,7 @@ exports.sendSlackNotificationSaleRejection = onDocumentUpdated({document:'salesl
     //
     var url
     if(commonService.production){
-      url = await commonService.getWebhookUrl("slackSaleRejection") // Production
+      url = await commonService.getWebhookUrl("LogSalesRejected") // Production
     }
     else{
       url = await commonService.getWebhookUrl("slackDevTest") // Test
