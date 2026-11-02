@@ -446,7 +446,7 @@ exports.computeSlot = onDocumentCreated("/availability/{docid}", async (snapshot
 // New Appointment Booked
 exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (snapshotdata) =>{
   var snapshot = snapshotdata.data
-  if(snapshot.exists){
+  if(snapshot.exists && !snapshot.data()["queueref"]){
     var appointmentname = ""
     var duration;
     var bookedby = {
@@ -1072,7 +1072,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       }
     })
     var hostid = []
-    var hostbody = "Your slot with " + bookedby.name + + " for " + appointmentName + " has been cancelled"
+    var hostbody = "Your slot with " + bookedby.name  + " for " + appointmentName + " has been cancelled"
     for (let i = 0; i < snapshot.after.data()["hosts"].length; i++) {
       const hosts = snapshot.after.data()["hosts"][i];
       hostid.push(hosts.id)

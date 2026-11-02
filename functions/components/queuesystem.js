@@ -63,15 +63,21 @@ exports.onQueueStageChange = onDocumentWritten({
 
   // get slot title from the queue availability doc 
   const getSlotTitle = async (slotValue) => {
+    let title = slotValue ? slotValue['title'] : null;
     try {
       if (slotValue && slotValue['docid']) {
         const slotSnap = await admin.firestore().collection('queue availability').doc(slotValue['docid']).get();
-        if (slotSnap.exists) return slotSnap.data()['title'];
+        if (slotSnap.exists) title = slotSnap.data()['title'];
       }
     } catch (err) {
       console.log('getSlotTitle error', err.toString());
     }
-    return slotValue ? slotValue['title'] : null;
+    if (title && `${title}`.trim()) return title;
+
+    const start = slotValue?.['startdate'];
+    if (!start) return null;
+    const d = start.toDate ? start.toDate() : start._seconds ? new Date(start._seconds * 1000) : new Date(start);
+    return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
   };
 
   try {
@@ -99,7 +105,7 @@ exports.onQueueStageChange = onDocumentWritten({
         const isScopeEnhancement = key === 'Scope Enhancement';
         const isGuidedOrientation = key === 'Guided Pre ATC Orientation' || key === 'Guided Self ATC Orientation';
         const isDiagnostics = key === 'Diagnostics';
-        const formattedTitle = getSlotTitle(addedValue, key);
+        const formattedTitle = await getSlotTitle(addedValue);
 
         try {
           await commonService.saveNotificationRecord({
@@ -118,6 +124,28 @@ exports.onQueueStageChange = onDocumentWritten({
           console.log(`Push notification sent for confirmed slot | key: ${key}`);
         } catch (pushError) {
           console.error(`Push notification failed for key ${key}:`, pushError.message);
+        }
+
+        // Appointment slots have a specialist (hostref); queue slots do not
+        if (addedValue['slottype'] === 'appointment' && addedValue['hostref']) {
+          try {
+            await commonService.saveNotificationRecord({
+              title: 'Your slot is confirmed ✅',
+              message: `${profiledata['name']} has booked a slot with you for ${key} on ${formattedTitle}`,
+              subtitle: null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: null,
+              logged: true,
+              profileid: [addedValue['hostref'].id],
+              sticky: false,
+              notificationtype: 'appointment',
+              notificationimage: null,
+              metadata: { appointmentid: addedValue['appointmentref']?.id ?? null }
+            });
+            console.log(`Specialist notification sent | key: ${key}`);
+          } catch (hostPushError) {
+            console.error(`Specialist notification failed for key ${key}:`, hostPushError.message);
+          }
         }
 
         // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
@@ -214,26 +242,28 @@ exports.onQueueStageChange = onDocumentWritten({
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-          const formattedTitle = getSlotTitle(removedValue, key);
+          const formattedTitle = await getSlotTitle(removedValue);
 
-          // push notification for revert slot
-          try {
-            await commonService.saveNotificationRecord({
-              title: 'Slot Reverted',
-              message: `Your ${key} slot has been reverted for ${formattedTitle}`,
-              subtitle: null,
-              date: admin.firestore.FieldValue.serverTimestamp(),
-              landingpage: null,
-              logged: true,
-              profileid: [profileid],
-              sticky: false,
-              notificationtype: 'queue',
-              notificationimage: null,
-              metadata: { ...afterData }
-            });
-            console.log(`Push notification sent for reverted slot | key: ${key}`);
-          } catch (pushError) {
-            console.error(`Push notification failed for key ${key}:`, pushError.message);
+          // push notification for revert slot (appointment slots already get "Appointment cancelled" from appointment.js)
+          if (removedValue['slottype'] !== 'appointment') {
+            try {
+              await commonService.saveNotificationRecord({
+                title: 'Slot Reverted',
+                message: `Your ${key} slot has been reverted for ${formattedTitle}`,
+                subtitle: null,
+                date: admin.firestore.FieldValue.serverTimestamp(),
+                landingpage: null,
+                logged: true,
+                profileid: [profileid],
+                sticky: false,
+                notificationtype: 'queue',
+                notificationimage: null,
+                metadata: { ...afterData }
+              });
+              console.log(`Push notification sent for reverted slot | key: ${key}`);
+            } catch (pushError) {
+              console.error(`Push notification failed for key ${key}:`, pushError.message);
+            }
           }
 
           const phoneNumber = `${profiledata['number']}`;
