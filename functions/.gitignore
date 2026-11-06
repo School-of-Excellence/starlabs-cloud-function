@@ -23,3 +23,6 @@ backup/
 
 # graphify knowledge-graph build output — regenerable, not source
 graphify-out/
+
+# probe reports (participant data) - local only, never commit
+probe-output/
