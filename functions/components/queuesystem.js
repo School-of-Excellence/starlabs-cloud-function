@@ -149,7 +149,8 @@ exports.onQueueStageChange = onDocumentWritten({
         }
 
         // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
-        if (!isPrepStage && !isGuidedOrientation) {
+        //if (!isPrepStage && !isGuidedOrientation) {
+        if (!isScopeEnhancement) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
@@ -198,8 +199,8 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
-
+          // const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+          const templateId = 'se_slot_confirmed_msg_current_version';
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
             numbermap: { [`${waticontent['phonenumber']}`]: profileid },
