@@ -26,6 +26,8 @@ const CRM_PROJECT = { "starlabs-test": "salescrm-test-19", "fir-sample-aae4a": "
 const CRM_ORIGINS = CRM_PROJECT
   ? [new RegExp(`^https://${CRM_PROJECT}\\.(web\\.app|firebaseapp\\.com)$`), /^http:\/\/localhost:\d+$/]
   : false;
+// Production keeps one instance warm: a cold start loads every Breakthroughs function (~15 s) while a rep waits.
+const MIN_INSTANCES = process.env.GCLOUD_PROJECT === "fir-sample-aae4a" ? 1 : 0;
 const PM = "participant metadata";
 
 const ids = (list) => (Array.isArray(list) ? list.filter((id) => typeof id === "string" && id) : []);
@@ -139,7 +141,7 @@ async function snapshot(db, body) {
 }
 
 exports.crmParticipantSnapshot = onRequest(
-  { secrets: [WEBHOOK_SECRET], cors: CRM_ORIGINS, timeoutSeconds: 30, memory: "256MiB", maxInstances: 10 },
+  { secrets: [WEBHOOK_SECRET], cors: CRM_ORIGINS, timeoutSeconds: 30, memory: "256MiB", minInstances: MIN_INSTANCES, maxInstances: 10 },
   async (req, res) => {
     if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
     if (!(await authorized(req))) return res.status(401).json({ error: "Unauthorized" });
