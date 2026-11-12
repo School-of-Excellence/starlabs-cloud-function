@@ -4368,100 +4368,124 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
 
   console.log("Message Data", messageData);
 
-  var sender_name = null;
-  
-  await admin.firestore().collection("profile_data").where("user_ref", "==", admin.firestore().collection("user_data").doc(sender_uid)).get().then(userData =>{
-    if(userData.docs.length != 0){
-      sender_name = userData.docs[0].data()["name"]
-    }
-  });
-  // var sender_name = await (await admin.firestore().collection("profile_data").where("user_ref", "==", admin.firestore().collection("user_data").doc(sender_uid)).get()).docs[0].data().name
-  console.log(sender_name)
-  console.log(sender_uid)
-  var message = messageData["message"]
-  var pending_user = messageData["pending"]
-  var readby_user = messageData["read_by"]
-  var time = messageData["time"].toDate()
+  // ── Group / support chat message ──────────────────────────────────────────
+  // SPEED (QA, Nov 2026: pushes arrived 2–5 s after sending). Everything this needs is read at once
+  // instead of one read after another (sender, chat doc, mentions, recipients), the chat doc is read
+  // once instead of three times, and the last_* update runs alongside the push instead of before it.
+  //
+  // NAMES: the app shows an A&H team member (role doc chatxadmin or ahmember) to participants as
+  // "A&H Team" — as the sender and in @mentions. The push now says the same thing: team recipients get
+  // the real names, participants get "A&H Team", so a group push may be written as two records.
+  const db = admin.firestore();
+  const TEAM_NAME = "A&H Team";
+  const chatRef = db.collection("supportchat").doc(chatid);
+  const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+  // The profile ids among these profile docs that are A&H team — the app's rule, via each profile's role_ref.
+  const teamOf = async (profileDocs) => {
+    const refs = [...new Map(profileDocs.map(p => p.get("role_ref")).filter(r => r && r.path).map(r => [r.path, r])).values()];
+    const roles = refs.length ? await db.getAll(...refs) : [];
+    const byPath = new Map(roles.map(r => [r.ref.path, r.exists ? r.data() : null]));
+    return new Set(profileDocs.filter(p => {
+      const role = p.get("role_ref") && byPath.get(p.get("role_ref").path);
+      return !!role && (role.chatxadmin === true || role.ahmember === true);
+    }).map(p => p.id));
+  };
 
-  const mentions = message.match(/@\w+/g);
-  console.log("Mentions", mentions);
+  var rawMessage = messageData["message"] || "";
+  var pending_user = messageData["pending"] || [];
+  var readby_user = messageData["read_by"];
+  var time = messageData["time"].toDate();
+  const mentionIds = [...new Set((rawMessage.match(/@\w+/g) || []).map(m => m.slice(1)))];
 
-  if((mentions || []).length != 0){
-    var mentionMap = {}
-    var profileID = []
-    for (let i = 0; i < mentions.length; i++) {
-      const profilemention = mentions[i];
-      profileID.push(profilemention.slice(1))
-    }
-    console.log("Mentioned ProfileID", profileID);
-    for (let a = 0; a < profileID.length; a+=10) {
-      await admin.firestore().collection("profile_data").where("profileid", "in", profileID.slice(a, a+10)).get().then(list =>{
-        list.docs.forEach(doc =>{
-          var data = doc.data()
-          mentionMap["@"+doc.id] = "@"+data["name"]
-        })
-      })
-    }
-    console.log("Mention Map", mentionMap)
-    const replacedText = message.replace(/@\w+/g, match => {
-      return mentionMap[match] || match; // Replace if found, else keep original
-    });
-    message = replacedText
-  }
+  const [senderSnap, chatSnap, mentionSnaps, recipientSnaps] = await Promise.all([
+    db.collection("profile_data").where("user_ref", "==", db.collection("user_data").doc(sender_uid)).limit(1).get(),
+    chatRef.get(),
+    Promise.all(chunk(mentionIds, 30).map(ids => db.collection("profile_data").where("profileid", "in", ids).get())),
+    Promise.all(chunk(pending_user, 30).map(uids =>
+      db.collection("profile_data").where("user_ref", "in", uids.map(u => db.collection("user_data").doc(u))).get())),
+  ]);
+  const senderDoc = senderSnap.docs[0] || null;
+  var sender_name = senderDoc ? senderDoc.get("name") : null;
+  const mentionDocs = mentionSnaps.flatMap(s => s.docs);
+  const recipientDocs = [...new Map(recipientSnaps.flatMap(s => s.docs).map(d => [d.id, d])).values()];
+  const chatData = chatSnap.exists ? (chatSnap.data() || {}) : {};
+  console.log(sender_name, sender_uid);
 
-  console.log("message", message)
+  // @<profileid> → @Name; ids in `asTeam` become "@A&H Team" (what participants see in the app).
+  const mentionName = {};
+  mentionDocs.forEach(d => { mentionName["@" + d.id] = "@" + d.get("name"); });
+  const withNames = (text, asTeam) => text.replace(/@\w+/g, m =>
+    asTeam && asTeam.has(m.slice(1)) ? "@" + TEAM_NAME : (mentionName[m] || m));
+  var message = withNames(rawMessage);
+  console.log("message", message);
 
   // Update Last Chat data
+  // A media-only message has no text, so the chat lists would show nothing. Use the first file's kind
+  // ("image") as both apps do. The web sends files with the message; the Flutter app's files land after
+  // this runs and set last_message to the kind themselves (AppService.uploadMedia).
+  var files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  var last_message = message;
+  if (!String(message || "").trim() && files.length && files[0] && files[0]["mediatype"]) {
+    last_message = String(files[0]["mediatype"]);
+  }
   var chatMeta = {
-    last_message: message,
+    last_message: last_message,
     last_pending: pending_user,
     last_read_by: readby_user,
     last_sender_uid: sender_uid,
     last_modification: time,
   }
-
-  await admin.firestore().collection("supportchat").doc(chatid).update(chatMeta).catch(e =>{
+  // Not awaited here: the push does not depend on it, so it runs alongside (awaited before returning).
+  const metaWrite = chatRef.update(chatMeta).catch(e => {
     console.log("Chat meta Error", e)
   });
-  var chat_type = (await admin.firestore().collection("supportchat").doc(chatid).get()).data().type
 
-  if(chat_type == "group"){
-    var supportChatDocSnap = await admin.firestore().collection("supportchat").doc(chatid).get();
-    var supportChatData = supportChatDocSnap.data();
-    var group_name = supportChatData.group_name;
-    var profileToSend = []
-    for (let i = 0; i < pending_user.length; i+=10) {
-      var userRef = pending_user.slice(i, i+10).map(e => admin.firestore().collection("user_data").doc(e))
-      await admin.firestore().collection("profile_data").where("user_ref", "in", userRef).get().then(async (profile)=>{
-        profile.forEach(doc=>{
-          if(!profileToSend.includes(doc.id)) profileToSend.push(doc.id)
-        })
-      })
-    }
-
-    await commonService.saveNotificationRecord({
-      title: `New message in ${group_name}`,
-      message: `${sender_name}: ${message}`,
-      subtitle: null,
-      date: admin.firestore.FieldValue.serverTimestamp(),
-      landingpage: null,
-      logged: false,
-      profileid: profileToSend,
-      sticky: false,
-      notificationtype: "groupchat",
-      notificationimage: null,
-      metadata: {
-        "type" : "chatx",
-        "chatType": "group",
-        "groupname":group_name,
-        "groupprofile":supportChatData.group_profile,
-        "click_action": "FLUTTER_NOTIFICATION_CLICK",
-        "messageRef": supportChatData.id,
-        "groupref": supportChatData.id,
-        "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
-      }
-    });
+  if (chatData.type != "group") {
+    await metaWrite;
+    return;
   }
+
+  var group_name = chatData.group_name;
+  const [senderTeam, recipientTeam, mentionTeam] = await Promise.all([
+    senderDoc ? teamOf([senderDoc]) : Promise.resolve(new Set()),
+    teamOf(recipientDocs),
+    teamOf(mentionDocs),
+  ]);
+  const senderIsTeam = !!senderDoc && senderTeam.has(senderDoc.id);
+  const teamIds = recipientDocs.filter(d => recipientTeam.has(d.id)).map(d => d.id);
+  const participantIds = recipientDocs.filter(d => !recipientTeam.has(d.id)).map(d => d.id);
+
+  const record = (text, profileid) => commonService.saveNotificationRecord({
+    title: `New message in ${group_name}`,
+    message: text,
+    subtitle: null,
+    date: admin.firestore.FieldValue.serverTimestamp(),
+    landingpage: null,
+    logged: false,
+    profileid: profileid,
+    sticky: false,
+    notificationtype: "groupchat",
+    notificationimage: null,
+    metadata: {
+      "type" : "chatx",
+      "chatType": "group",
+      "groupname":group_name,
+      "groupprofile":chatData.group_profile,
+      "click_action": "FLUTTER_NOTIFICATION_CLICK",
+      "messageRef": chatData.id,
+      "groupref": chatData.id,
+      "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
+    }
+  });
+
+  const writes = [metaWrite];
+  // The A&H team sees real names, as in the app.
+  if (teamIds.length) writes.push(record(`${sender_name}: ${message}`, teamIds));
+  // Participants see "A&H Team" for a team sender and for team members tagged in the message.
+  if (participantIds.length) {
+    writes.push(record(`${senderIsTeam ? TEAM_NAME : sender_name}: ${withNames(rawMessage, mentionTeam)}`, participantIds));
+  }
+  await Promise.all(writes);
 });
 
 // exports.createTwilioWhatsAppTemplate = onDocumentCreated('twilio_templates/{docid}',async (event) => {
