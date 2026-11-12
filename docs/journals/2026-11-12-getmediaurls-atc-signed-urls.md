@@ -108,3 +108,30 @@ Per-caller authorisation · production deploy · production data migration · to
 (irreversible, do last) · the 92 `getDownloadURL()` callers · cross-instance link sharing
 (each CF instance keeps its own caches, so two viewers on different instances can get two
 different valid links — would need Memorystore).
+
+---
+
+## Addendum, 2026-11-12 — runbook, and a correction to "Pending"
+
+The operational sequence for the data migration is not in either repo:
+
+`/Users/m1/Documents/storage-signed-url-migration/14-atc-media-production-runbook.md`
+
+It carries the four steps (URL→path · codebase · orphans both directions · token revocation), the
+order constraint and why breaking it destroys media, and an iteration log of the ten mistakes made
+getting it right on `starlabs-test`.
+
+Corrections to the Pending list above:
+
+- **"the 92 `getDownloadURL()` callers"** — measured properly: **127 live call sites in 81 files**,
+  of which **126 run immediately after an upload** and exactly one read-side site is a `.spec`
+  fixture. So tightening Storage Rules breaks *uploads*, not viewing — and breaks them silently,
+  because almost every site swallows the error in a `.catch(err => console.log(err))` and writes an
+  empty media field.
+- **Token revocation** must come after the code deploy *and* a complete data migration. `revoke()`
+  iterates Storage objects and does not consult Firestore, so any collection the migration missed
+  loses its media permanently.
+- `getMediaUrls` is now also exported from `index.emulator.js` (ATC-free: this module requires only
+  `firebase-admin` and `firebase-functions/v2/https`). It cannot succeed there — the emulator has no
+  key to sign with — but a *missing* callable fails the whole call and logs `console.error`, which
+  the hub's console guard counts as fatal, whereas a per-ref `sign-failed` is a recoverable warning.
