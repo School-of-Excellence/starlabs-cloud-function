@@ -6,11 +6,15 @@
  *   auth  Authorization: Bearer <SalesCRM Firebase ID token>   — the signed-in rep, from the browser
  *     or  x-webhook-secret: SALESCRM_WEBHOOK_SECRET             — server to server
  *   → { found, matchedby, profileid, participantmode, customerstatus,
- *       activeproduct: [id], consumedproducts: [id], unconsumedproducts: [id], opentickets: [...] }
+ *       activeproduct: [id], consumedproducts: [id], unconsumedproducts: [id],
+ *       products: { ongoing, consumed, unconsumed: [{ product, journey, journeyname, status, statusdate, productdate }] },
+ *       opentickets: [...] }
  *
  * Paired CRM: starlabs-test ↔ salescrm-test-19, fir-sample-aae4a ↔ salesleadcrm (tokens of any other project fail).
  * Match: the email when exactly one profile has it (a real profile beats test users), else the first existing
  * profileid. Tickets come from `clientissue` (not `participant metadata.customersupport`, which misses new tickets).
+ * `products` reads `participantsproduct` and groups it the way productsdata_to_pmd fills participant metadata's lists;
+ * each entry is shaped like SalesCRM's `person.activeproduct` (journey = package id), plus the package name.
  */
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -80,10 +84,46 @@ async function openTickets(db, profileid) {
   }));
 }
 
+/** participantsproduct status → participant metadata list (null: not listed there, e.g. cancelled or shifted). */
+const productGroup = (status) =>
+  status == null ? "unconsumed" : status === "completed" ? "consumed" : ["initiated", "ongoing"].includes(status) ? "ongoing" : null;
+
+async function productDetails(db, profileid) {
+  const snap = await db.collection("participantsproduct").where("profileid", "==", profileid).get();
+  const docs = snap.docs.slice().sort((a, b) => (a.get("sequenceorder") ?? 0) - (b.get("sequenceorder") ?? 0));
+
+  const packageIds = [...new Set(docs.map((d) => refId(d.get("packageref"))).filter(Boolean))];
+  const packages = packageIds.length ? await db.getAll(...packageIds.map((id) => db.collection("package").doc(id))) : [];
+  const packageName = Object.fromEntries(packages.filter((p) => p.exists).map((p) => [p.id, p.get("package") || null]));
+
+  const out = { ongoing: [], consumed: [], unconsumed: [] };
+  for (const d of docs) {
+    const p = d.data();
+    const group = productGroup(p.status);
+    const product = refId(p.productref);
+    if (!group || !product) continue;
+    const statusdate = Object.fromEntries(
+      Object.entries(p.statusdate || {}).map(([k, v]) => [k, iso(v) || (typeof v === "string" ? v : null)]),
+    );
+    const latest = Object.values(statusdate).filter(Boolean).sort().pop() || null;
+    out[group].push({
+      product,
+      journey: refId(p.packageref),
+      journeyname: packageName[refId(p.packageref)] || null,
+      status: p.status ?? null,
+      statusdate,
+      // When the current status was set; else the latest status change; else when the product was added.
+      productdate: statusdate[p.status] || latest || iso(d.createTime),
+    });
+  }
+  return out;
+}
+
 async function snapshot(db, body) {
   const hit = await findProfile(db, body || {});
   if (!hit) return { found: false };
   const pm = hit.doc.data() || {};
+  const [products, opentickets] = await Promise.all([productDetails(db, hit.doc.id), openTickets(db, hit.doc.id)]);
   return {
     found: true,
     matchedby: hit.matchedby,
@@ -93,7 +133,8 @@ async function snapshot(db, body) {
     activeproduct: ids(pm.activeproduct),
     consumedproducts: ids(pm.consumedproducts),
     unconsumedproducts: ids(pm.unconsumedproducts),
-    opentickets: await openTickets(db, hit.doc.id),
+    products,
+    opentickets,
   };
 }
 
