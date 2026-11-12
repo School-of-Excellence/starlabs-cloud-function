@@ -194,7 +194,7 @@
       "name": "communityPostHLS",
       "type": "onDocumentCreated",
       "file": "components/content.js",
-      "triggerPath": "/participantvideoask/{id}",
+      "triggerPath": "buffermix archive/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -276,6 +276,13 @@
       "name": "createWorkshopPaymentOrder",
       "type": "onCall",
       "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "crmParticipantSnapshot",
+      "type": "onRequest",
+      "file": "components/crm-participant-snapshot.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
