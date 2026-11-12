@@ -445,7 +445,7 @@ exports.productNextModeUpdate = onSchedule({schedule : "05 00 * * *", region: "a
         }
         if(data["eventref"]){
           if([null, undefined].includes(mapEventData[data["eventref"].path])){
-            await admin.firestore().collection("event_collection").orderBy("end_date", "desc").get().then(event =>{
+            await admin.firestore().collection("event collection").orderBy("end_date", "desc").get().then(event =>{
               for (let i = 0; i < event.docs.length; i++) {
                 const doc = event.docs[i];
                 var data = doc.data()
