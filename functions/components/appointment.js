@@ -8,6 +8,7 @@ const { Buffer } = require('buffer');
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const cors = require("cors")({ origin: true });
 const workshop = require('./workshop');
+const eiSolutionsAppointmentTypes = ["DFU Onboarding", "EI Celebration Call", "EI Diagnostics", "EI Implementation", "EI Review"]
 
 // Request Scheduling
 exports.requestScheduling = onRequest(async (req, res) => {
@@ -681,6 +682,69 @@ exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (sn
     //   console.log(err)
     // });
 
+    try {
+      const bookedProfile = (await admin.firestore().collection('profile_data').doc(bookedby.profileid).get()).data();
+      const hasNumber = bookedProfile && bookedProfile.number;
+      const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentname);
+      const canSendWati = hasNumber && isEiSolutionsAppointment;
+
+      if (canSendWati) {
+        const bookedDate = starttime.toLocaleDateString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        });
+
+        const bookedTime = starttime.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        }) + ' IST';
+
+        const watiParams = [
+          { name: 'Participant', value: bookedProfile.name },
+          { name: 'callname', value: appointmentname },
+          { name: 'date', value: bookedDate },
+          { name: 'time', value: bookedTime },
+          { name: 'ZoomLink', value: dataModel?.meetingurl }
+        ];
+
+        const invalidParams = watiParams.filter(
+          param => param.value === undefined || param.value === null || param.value === ''
+        );
+
+        if (invalidParams.length) {
+          throw new Error('One or more WATI template parameters are missing');
+        }
+
+        const parameterConfig = watiParams.map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+
+        await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(bookedProfile.number)],
+          numbermap: {
+            [`${bookedProfile.number}`]: bookedby.profileid
+          },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig,
+          params: [],
+          profileid: [bookedby.profileid],
+          templateid: null,
+          watitemplateid: 'dfu_session_scheduled'
+        });
+      }
+    } catch (error) {
+      console.error('WATI booking notification error:', error);
+    }
+
     // Specialist Mail
     if(snapshot.data()["journeycoach"]) {
       dataModel["meetingurl"] = `https://${commonService.production ? "breakthroughs" : "breakthroughs-test.web"}.app/appointmentstudio`
@@ -1012,7 +1076,75 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       templateAlias:'appointment-cancelled'
     }).then(()=>{
       console.log('Sent for email archive');
-    });    
+    });
+    
+    try {
+      const cancelledProfile = (await admin.firestore().collection('profile_data').doc(bookedby.profileid).get()).data();
+      const hasNumber = cancelledProfile && cancelledProfile.number;
+      const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentName);
+      const canSendWati = hasNumber && isEiSolutionsAppointment;
+
+      if (canSendWati) {
+        const isInvalidTime = !(time instanceof Date) || isNaN(time.getTime());
+
+        if (isInvalidTime) {
+          throw new Error('Invalid cancellation date/time');
+        }
+
+        const cancelledDate = time.toLocaleDateString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        });
+
+        const cancelledTime = time.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        }) + ' IST';
+
+        const watiParams = [
+          { name: 'Participant', value: cancelledProfile.name },
+          { name: 'callname', value: appointmentName },
+          { name: 'date', value: cancelledDate },
+          { name: 'time', value: cancelledTime }
+        ];
+
+        const invalidParams = watiParams.filter(
+          param => param.value === undefined || param.value === null || param.value === ''
+        );
+
+        if (invalidParams.length > 0) {
+          throw new Error('Missing WATI template parameter values');
+        }
+
+        const parameterConfig = watiParams.map(param => ({
+          excelColumn: null,
+          fillType: 'static',
+          metadataField: null,
+          name: param.name,
+          staticValue: param.value
+        }));
+
+        await commonService.createWatiArchiveDocument({
+          numbers: [parseInt(cancelledProfile.number, 10)],
+          numbermap: {
+            [`${cancelledProfile.number}`]: bookedby.profileid
+          },
+          broadcastname: 'Individual',
+          paramFillMode: 'static',
+          parameterConfig,
+          params: [],
+          profileid: [bookedby.profileid],
+          templateid: null,
+          watitemplateid: 'cancellation_of_the_dfu_slot'
+        });
+      }
+    } catch (error) {
+      console.error('WATI cancellation notification error:', error);
+    }
 
     // Send To Hosts
     for (let i = 0; i < hosts.length; i++) {
@@ -1489,7 +1621,7 @@ exports.appointmentremainder = onSchedule({ schedule: "every 5 minutes" }, async
   var nextfive = new Date()
   nextfive.setMinutes(currentTime.getMinutes() + 5)
   console.log("Five Minutes Time", currentTime.toTimeString(), nextfive.toTimeString())
-  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", currentTime).where("starttime", "<=", nextfive).get().then(async appt => {
+  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", currentTime).where("starttime", "<", nextfive).get().then(async appt => {
     console.log("Next 5 Mins Appt", appt.size)
     var profileid = []
     if (appt.docs.length != 0) {
@@ -1521,6 +1653,100 @@ exports.appointmentremainder = onSchedule({ schedule: "every 5 minutes" }, async
             appointmentid: appDoc.id
           }
         })
+        // wati remainder
+        try {
+          const reminderProfileId = apptData["bookedby"].id
+          const reminderProfile = (await admin.firestore().collection("profile_data").doc(reminderProfileId).get()).data()
+          const hasNumber = reminderProfile && reminderProfile["number"]
+          const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentName)
+          const canSendWati = hasNumber && isEiSolutionsAppointment
+          if (canSendWati) {
+            const reminderStart = apptData["starttime"].toDate()
+            const reminderDate = reminderStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' })
+            const reminderTime = reminderStart.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }) + " IST"
+
+            const watiParams = [
+              { name: 'Participant', value: reminderProfile['name'] },
+              { name: 'callname', value: appointmentName },
+              { name: 'timing', value: '5 minutes' },
+              { name: 'date', value: reminderDate },
+              { name: 'time', value: reminderTime }
+            ]
+
+            const parameterConfig = watiParams.map(param => ({
+              excelColumn: null,
+              fillType: 'static',
+              metadataField: null,
+              name: param.name,
+              staticValue: param.value
+            }))
+
+            const response = await commonService.createWatiArchiveDocument({
+              numbers: [parseInt(reminderProfile['number'])],
+              numbermap: { [`${reminderProfile['number']}`]: reminderProfileId },
+              broadcastname: 'Individual',
+              paramFillMode: 'static',
+              parameterConfig: parameterConfig,
+              params: [],
+              profileid: [reminderProfileId],
+              templateid: null,
+              watitemplateid: 'reminder_dfu_slot',
+            })
+            console.log('WATI ARCHIVE RESPONSE', response)
+          }
+        } catch (error) {
+          console.log("WATI reminder_dfu_slot (5 min) error", error)
+        }
+        // email remainder
+        try {
+          const emailProfileId = apptData["bookedby"].id
+          const emailProfile = (await admin.firestore().collection("profile_data").doc(emailProfileId).get()).data()
+          const hasEmail = emailProfile && emailProfile["email"]
+          const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentName)
+          const canSendEmail = hasEmail && isEiSolutionsAppointment
+          if (canSendEmail) {
+            const hostNames = []
+            for (let h = 0; h < apptData["hosts"].length; h++) {
+              const hostRef = apptData["hosts"][h]
+              let hostDoc = await admin.firestore().collection("EISzoomcontact").doc(hostRef.id).get()
+              if (!hostDoc.exists) {
+                hostDoc = await admin.firestore().doc(hostRef.path).get()
+              }
+              hostNames.push(hostDoc.data()["name"])
+            }
+
+            const emailStart = apptData["starttime"].toDate()
+            const emailDate = emailStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' })
+            const emailSlot = emailStart.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true })
+
+           const reminderModel = {
+              Participant: emailProfile["name"],
+              Product: "EI Solutions",
+              CallName: appointmentName,
+              InTime: "5 minutes",
+              Date: emailDate,
+              Slot: emailSlot,
+              Specialist: hostNames.join(', '),
+              ZoomLink: apptData["zoomurl"],
+          };
+
+            await commonService.createEmailArchiveDocument({
+              emailData: reminderModel,
+              datamodel: reminderModel,
+              attachments: [],
+              emailTo: [emailProfile["email"]],
+              emailMap: { [emailProfile["email"]]: emailProfileId },
+              fileURL: '',
+              from: 'starlabs@excellenceinstallation.com',
+              notes: '',
+              profileId: [emailProfileId],
+              postmarkTemplateId: '48682135',
+              templateAlias: 'remtemplatetest'
+            })
+          }
+        } catch (error) {
+          console.log("Reminder email (5 min) error", error)
+        }
       }
     }
   })
@@ -1589,12 +1815,10 @@ exports.appointmentremainder = onSchedule({ schedule: "every 5 minutes" }, async
     })
 
   // One Hour
-  var starttime = new Date()
-  starttime.setMinutes(currentTime.getMinutes() + 55)
-  var endtime = new Date()
-  endtime.setMinutes(currentTime.getMinutes() + 65)
+  var starttime = new Date(currentTime.getTime() + 60 * 60 * 1000)
+  var endtime = new Date(currentTime.getTime() + 65 * 60 * 1000)
   console.log("Next One Hour", starttime.toTimeString(), endtime.toTimeString())
-  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", starttime).where("starttime", "<=", endtime).get().then(async appt => {
+  await admin.firestore().collection("appointments").where("cancelled", "==", false).where("starttime", ">=", starttime).where("starttime", "<", endtime).get().then(async appt => {
     console.log("Next 1 Hour Appt", appt.size)
     var profileid = []
     if (appt.docs.length != 0) {
@@ -1682,16 +1906,99 @@ exports.appointmentremainder = onSchedule({ schedule: "every 5 minutes" }, async
               watitemplateid: 'onboarding_1hr_reminder_v1',
             });
             console.log('WATI ARCHIVE RESPONSE', response);
+            const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentName)
+            if (isEiSolutionsAppointment) {
+              const reminderDate = appointmentTime.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' })
 
-            // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
-            //   console.log("Wati Appointment Remainder Error")
-            //   console.log(err)
-            // });
+              const dfuReminderParams = [
+                { name: 'Participant', value: profileData['name'] },
+                { name: 'callname', value: appointmentName },
+                { name: 'timing', value: '1 hour' },
+                { name: 'date', value: reminderDate },
+                { name: 'time', value: formatTime }
+              ]
+
+              const dfuReminderConfig = dfuReminderParams.map(param => ({
+                excelColumn: null,
+                fillType: 'static',
+                metadataField: null,
+                name: param.name,
+                staticValue: param.value
+              }))
+
+              const dfuReminderResponse = await commonService.createWatiArchiveDocument({
+                numbers: [parseInt(profileData['number'])],
+                numbermap: { [`${profileData['number']}`]: apptData["bookedby"].id },
+                broadcastname: 'Individual',
+                paramFillMode: 'static',
+                parameterConfig: dfuReminderConfig,
+                params: [],
+                profileid: [apptData["bookedby"].id],
+                templateid: null,
+                watitemplateid: 'reminder_dfu_slot',
+              })
+              console.log('WATI DFU REMINDER RESPONSE', dfuReminderResponse)
+
+              // await commonService.sendToWhatsappViaWati(waticontent).catch(err =>{
+              //   console.log("Wati Appointment Remainder Error")
+              //   console.log(err)
+              // });
+              }
           }
         } catch (error) {
           console.log("Wati Appointment Remainder Exception")
           console.log(error)
         }
+        // Email Remainder
+        try {
+          const emailProfileId = apptData["bookedby"].id
+          const emailProfile = (await admin.firestore().collection("profile_data").doc(emailProfileId).get()).data()
+          const hasEmail = emailProfile && emailProfile["email"]
+          const isEiSolutionsAppointment = eiSolutionsAppointmentTypes.includes(appointmentName)
+          const canSendEmail = hasEmail && isEiSolutionsAppointment
+          if (canSendEmail) {
+            const hostNames = []
+            for (let h = 0; h < apptData["hosts"].length; h++) {
+              const hostRef = apptData["hosts"][h]
+              let hostDoc = await admin.firestore().collection("EISzoomcontact").doc(hostRef.id).get()
+              if (!hostDoc.exists) {
+                hostDoc = await admin.firestore().doc(hostRef.path).get()
+              }
+              hostNames.push(hostDoc.data()["name"])
+            }
+
+            const emailStart = apptData["starttime"].toDate()
+            const emailDate = emailStart.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' })
+            const emailSlot = emailStart.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true })
+
+           const reminderModel = {
+              Participant: emailProfile["name"],
+              Product: "EI Solutions",
+              CallName: appointmentName,
+              InTime: "1 hour",
+              Date: emailDate,
+              Slot: emailSlot,
+              Specialist: hostNames.join(', '),
+              ZoomLink: apptData["zoomurl"],
+          };
+
+            await commonService.createEmailArchiveDocument({
+              emailData: reminderModel,
+              datamodel: reminderModel,
+              attachments: [],
+              emailTo: [emailProfile["email"]],
+              emailMap: { [emailProfile["email"]]: emailProfileId },
+              fileURL: '',
+              from: 'starlabs@excellenceinstallation.com',
+              notes: '',
+              profileId: [emailProfileId],
+              postmarkTemplateId: '48682135',
+              templateAlias: 'remtemplatetest'
+            })
+          }
+        } catch (error) {
+          console.log("Reminder email (1 hour) error", error)
+        }
       }
     }
   })
