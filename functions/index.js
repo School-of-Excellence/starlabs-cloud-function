@@ -18,6 +18,7 @@ const participantProductSystem = require("./components/participantproduct");
 const bulkProductJobSystem = require("./components/bulkproductjobs");
 const queueSystem = require("./components/queuesystem");
 const salescrmUpdates = require("./components/salescrm-updates")
+const crmParticipantSnapshot = require("./components/crm-participant-snapshot")
 const userRegistration = require("./components/user_registration")
 const wishlist = require("./components/wishlist")
 const watsonUpdates = require("./components/watson-updates")
@@ -200,6 +201,7 @@ exports.updateJourneyProductDataToSalesCRM = salescrmUpdates.updateJourneyProduc
 exports.salesCaptureSlackIntegration = salescrmUpdates.salesCaptureSlackIntegration // onrequest
 exports.sendSlackNotificationSaleRejection = salescrmUpdates.sendSlackNotificationSaleRejection // u - 'salesleads/{id}'
 exports.salesCRMProfilestatus = salescrmUpdates.salesCRMProfilestatus // on request
+exports.crmParticipantSnapshot = crmParticipantSnapshot.crmParticipantSnapshot // on request — SalesCRM webhook (rep login token from the CRM web app, or x-webhook-secret): products, mode, open tickets
 
 //user registration
 exports.createProfile_registeredUser = userRegistration.createProfile_registeredUser // c - "user_data/{docid}"
