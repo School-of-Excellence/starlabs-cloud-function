@@ -196,7 +196,7 @@ exports.verifyEmailOTPNewUsers = onCall(
   async (request) => {
     try {
       // const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber } = request.data;
-      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags, platform_name } = request.data;
+      const { otpId, otp, password, phoneNumber, countryCode, refferedby, refferedprofile, subscriber, tags, platform_name, completeurl } = request.data;
       if (!otpId || !otp || !password) {
         throw new HttpsError('invalid-argument', 'OTP ID, OTP, and password are required');
       }
@@ -292,6 +292,12 @@ exports.verifyEmailOTPNewUsers = onCall(
         // platform_name is optional — only store it when the client sends a non-empty value
         if (typeof platform_name === 'string' && platform_name.trim() !== '') {
           userData.platform_name = platform_name.trim();
+        }
+        // completeurl is optional — the full link that last opened EiFlix (web
+        // or app) before sign-up; only stored when the client sends one, capped
+        // at 2048 characters
+        if (typeof completeurl === 'string' && completeurl.trim() !== '') {
+          userData.completeurl = completeurl.trim().slice(0, 2048);
         }
         await admin.firestore().collection('new_user_data').doc(profileid).set(userData);
         await otpDocRef.update({
