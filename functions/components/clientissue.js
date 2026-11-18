@@ -829,20 +829,20 @@ exports.dashboardcustomersupport = onDocumentWritten("clientissue/{id}", async (
     triggerdoc: change.data.after.ref.path,
   };
 
-  let mapProfile = {};
+  // let mapProfile = {};
   
   // Get profile data
-  await admin.firestore().collection("profile_data").get().then((profileSnapshot) => {
-    if (profileSnapshot.docs.length > 0) {
-      for (let i = 0; i < profileSnapshot.docs.length; i++) {
-        const profile = profileSnapshot.docs[i];
-        mapProfile[profile.id] = profile.data();
-      }
-      console.log("Profiles Mapped");
-    } else {
-      console.log("No profiles found in profile_data collection");
-    }
-  });
+  // await admin.firestore().collection("profile_data").get().then((profileSnapshot) => {
+  //   if (profileSnapshot.docs.length > 0) {
+  //     for (let i = 0; i < profileSnapshot.docs.length; i++) {
+  //       const profile = profileSnapshot.docs[i];
+  //       mapProfile[profile.id] = profile.data();
+  //     }
+  //     console.log("Profiles Mapped");
+  //   } else {
+  //     console.log("No profiles found in profile_data collection");
+  //   }
+  // });
 
   if (![null, undefined, ""].includes(newdoc)) {
     if ([null, undefined, ""].includes(olddoc) && ![null, undefined, ""].includes(newdoc)) {
@@ -853,199 +853,199 @@ exports.dashboardcustomersupport = onDocumentWritten("clientissue/{id}", async (
     }
 
     // Send Data to Watson
-    try {
-      let url = '';
-      let salescrmurl = '';
-      if (commonService.production) {
-        url = "https://us-central1-watsonproduction-becde.cloudfunctions.net/support_tickets";
-        salescrmurl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
-      } else {
-        url = "https://us-central1-watson-test-19.cloudfunctions.net/support_tickets";
-        salescrmurl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
-      }
+    // try {
+    //   let url = '';
+    //   let salescrmurl = '';
+    //   if (commonService.production) {
+    //     url = "https://us-central1-watsonproduction-becde.cloudfunctions.net/support_tickets";
+    //     salescrmurl = "https://us-central1-salesleadcrm.cloudfunctions.net/updatepersonfromstarlabs";
+    //   } else {
+    //     url = "https://us-central1-watson-test-19.cloudfunctions.net/support_tickets";
+    //     salescrmurl = "https://us-central1-salescrm-test-19.cloudfunctions.net/updatepersonfromstarlabs";
+    //   }
 
-      // Clean Firestore data for JSON serialization
-      const cleanFirestoreData = (obj) => {
-        if (obj === null || obj === undefined) return obj;
+    //   // Clean Firestore data for JSON serialization
+    //   const cleanFirestoreData = (obj) => {
+    //     if (obj === null || obj === undefined) return obj;
         
-        if (Array.isArray(obj)) {
-          return obj.map(item => cleanFirestoreData(item));
-        }
+    //     if (Array.isArray(obj)) {
+    //       return obj.map(item => cleanFirestoreData(item));
+    //     }
         
-        if (typeof obj === 'object') {
-          // Handle Firestore Timestamp
-          if (obj._seconds !== undefined) {
-            return new Date(obj._seconds * 1000).toISOString();
-          }
+    //     if (typeof obj === 'object') {
+    //       // Handle Firestore Timestamp
+    //       if (obj._seconds !== undefined) {
+    //         return new Date(obj._seconds * 1000).toISOString();
+    //       }
           
-          // Handle Firestore DocumentReference
-          if (obj._path && obj._path.segments) {
-            return obj._path.segments[obj._path.segments.length - 1]; // Just return the ID
-          }
+    //       // Handle Firestore DocumentReference
+    //       if (obj._path && obj._path.segments) {
+    //         return obj._path.segments[obj._path.segments.length - 1]; // Just return the ID
+    //       }
           
-          // Handle regular objects
-          const cleaned = {};
-          for (const [key, value] of Object.entries(obj)) {
-            cleaned[key] = cleanFirestoreData(value);
-          }
-          return cleaned;
-        }
+    //       // Handle regular objects
+    //       const cleaned = {};
+    //       for (const [key, value] of Object.entries(obj)) {
+    //         cleaned[key] = cleanFirestoreData(value);
+    //       }
+    //       return cleaned;
+    //     }
         
-        return obj;
-      };
+    //     return obj;
+    //   };
 
-      // Create a clean copy of ticket data
-      var ticketdata = cleanFirestoreData({ ...newdoc });
-      ticketdata.profileid = profileid;
+    //   // Create a clean copy of ticket data
+    //   var ticketdata = cleanFirestoreData({ ...newdoc });
+    //   ticketdata.profileid = profileid;
       
-      // Remove any remaining problematic fields
-      delete ticketdata._firestore;
-      delete ticketdata._path;
-      delete ticketdata._converter;
+    //   // Remove any remaining problematic fields
+    //   delete ticketdata._firestore;
+    //   delete ticketdata._path;
+    //   delete ticketdata._converter;
 
-      let assignArray = [];
-      let peopleInvolved = [];
+    //   let assignArray = [];
+    //   let peopleInvolved = [];
 
-      console.log("url", url);
-      console.log("Original Ticket Data Keys:", Object.keys(newdoc));
+    //   console.log("url", url);
+    //   console.log("Original Ticket Data Keys:", Object.keys(newdoc));
 
-      // Process assign array
-      if (![null, undefined, ""].includes(ticketdata['assign']) && Array.isArray(ticketdata['assign']) && ticketdata['assign'].length !== 0) {
-        ticketdata['assign'].forEach(element => { 
-          if (mapProfile[element] && mapProfile[element]['name']) {
-            assignArray.push(mapProfile[element]['name']);
-          } else {
-            console.warn(`Profile not found for assign ID: ${element}`);
-          }
-        });
-      }
+    //   // Process assign array
+    //   if (![null, undefined, ""].includes(ticketdata['assign']) && Array.isArray(ticketdata['assign']) && ticketdata['assign'].length !== 0) {
+    //     ticketdata['assign'].forEach(element => { 
+    //       if (mapProfile[element] && mapProfile[element]['name']) {
+    //         assignArray.push(mapProfile[element]['name']);
+    //       } else {
+    //         console.warn(`Profile not found for assign ID: ${element}`);
+    //       }
+    //     });
+    //   }
 
-      // Process people involved array
-      if (![null, undefined, ""].includes(ticketdata['peopleinvolved']) && Array.isArray(ticketdata['peopleinvolved']) && ticketdata['peopleinvolved'].length !== 0) {
-        ticketdata['peopleinvolved'].forEach(element => { 
-          if (mapProfile[element] && mapProfile[element]['name']) {
-            peopleInvolved.push(mapProfile[element]['name']);
-          } else {
-            console.warn(`Profile not found for peopleinvolved ID: ${element}`);
-          }
-        });
-      }
-      //clientid
-      ticketdata['assign'] = assignArray;
-      ticketdata['peopleinvolved'] = peopleInvolved;
+    //   // Process people involved array
+    //   if (![null, undefined, ""].includes(ticketdata['peopleinvolved']) && Array.isArray(ticketdata['peopleinvolved']) && ticketdata['peopleinvolved'].length !== 0) {
+    //     ticketdata['peopleinvolved'].forEach(element => { 
+    //       if (mapProfile[element] && mapProfile[element]['name']) {
+    //         peopleInvolved.push(mapProfile[element]['name']);
+    //       } else {
+    //         console.warn(`Profile not found for peopleinvolved ID: ${element}`);
+    //       }
+    //     });
+    //   }
+    //   //clientid
+    //   ticketdata['assign'] = assignArray;
+    //   ticketdata['peopleinvolved'] = peopleInvolved;
 
-      // Validate JSON serialization
-      try {
-        const jsonString = JSON.stringify(ticketdata);
-        console.log("JSON serialization successful, payload size:", jsonString.length);
-        console.log("Final ticket data structure:", JSON.stringify(ticketdata, null, 2));
-      } catch (jsonError) {
-        console.error("JSON serialization failed:", jsonError);
-        throw new Error("Data contains non-serializable content: " + jsonError.message);
-      }
+    //   // Validate JSON serialization
+    //   try {
+    //     const jsonString = JSON.stringify(ticketdata);
+    //     console.log("JSON serialization successful, payload size:", jsonString.length);
+    //     console.log("Final ticket data structure:", JSON.stringify(ticketdata, null, 2));
+    //   } catch (jsonError) {
+    //     console.error("JSON serialization failed:", jsonError);
+    //     throw new Error("Data contains non-serializable content: " + jsonError.message);
+    //   }
 
-      // Send request with enhanced error handling
-      try {
-        const response = await axios({
-          method: 'post',
-          url: url,
-          data: ticketdata,
-          timeout: 30000, // 30 second timeout
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          validateStatus: function (status) {
-            return status < 600; // Don't throw on 4xx or 5xx, let us handle it
-          }
-        });
+    //   // Send request with enhanced error handling
+    //   try {
+    //     const response = await axios({
+    //       method: 'post',
+    //       url: url,
+    //       data: ticketdata,
+    //       timeout: 30000, // 30 second timeout
+    //       headers: {
+    //         'Content-Type': 'application/json',
+    //         'Accept': 'application/json'
+    //       },
+    //       validateStatus: function (status) {
+    //         return status < 600; // Don't throw on 4xx or 5xx, let us handle it
+    //       }
+    //     });
 
-        const salescrmresponse = await axios({
-          method: 'post',
-          url: salescrmurl,
-          data: ticketdata,
-          timeout: 30000, // 30 second timeout
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          validateStatus: function (status) {
-            return status < 600; // Don't throw on 4xx or 5xx, let us handle it
-          }
-        });
+    //     const salescrmresponse = await axios({
+    //       method: 'post',
+    //       url: salescrmurl,
+    //       data: ticketdata,
+    //       timeout: 30000, // 30 second timeout
+    //       headers: {
+    //         'Content-Type': 'application/json',
+    //         'Accept': 'application/json'
+    //       },
+    //       validateStatus: function (status) {
+    //         return status < 600; // Don't throw on 4xx or 5xx, let us handle it
+    //       }
+    //     });
 
-        if (salescrmresponse.status >= 400) {
-          throw new Error(`SalesCRM HTTP ${salescrmresponse.status}`);
-        }
+    //     if (salescrmresponse.status >= 400) {
+    //       throw new Error(`SalesCRM HTTP ${salescrmresponse.status}`);
+    //     }
 
-        if (response.status >= 400) {
-          console.error('HTTP Error Response Details:', {
-            status: response.status,
-            statusText: response.statusText,
-            responseData: response.data,
-            responseHeaders: response.headers,
-            requestUrl: url,
-            requestData: ticketdata
-          });
+    //     if (response.status >= 400) {
+    //       console.error('HTTP Error Response Details:', {
+    //         status: response.status,
+    //         statusText: response.statusText,
+    //         responseData: response.data,
+    //         responseHeaders: response.headers,
+    //         requestUrl: url,
+    //         requestData: ticketdata
+    //       });
           
-          errorData = {
-            failed: "HTTP error from support_tickets endpoint",
-            httpStatus: response.status,
-            httpStatusText: response.statusText,
-            responseData: response.data,
-            err: `HTTP ${response.status}: ${response.statusText}`
-          };
-          await throwParticipantMetaDataException(errorData);
-          return; // Exit early on HTTP error
-        }
+    //       errorData = {
+    //         failed: "HTTP error from support_tickets endpoint",
+    //         httpStatus: response.status,
+    //         httpStatusText: response.statusText,
+    //         responseData: response.data,
+    //         err: `HTTP ${response.status}: ${response.statusText}`
+    //       };
+    //       await throwParticipantMetaDataException(errorData);
+    //       return; // Exit early on HTTP error
+    //     }
 
-        console.log('Successfully posted ticket data to support_tickets endpoint. Status:', response.status);
+    //     console.log('Successfully posted ticket data to support_tickets endpoint. Status:', response.status);
         
-      } catch (axiosError) {
-        // Detailed error logging
-        console.error('Detailed Axios Error Information:', {
-          message: axiosError.message,
-          code: axiosError.code,
-          response: axiosError.response ? {
-            status: axiosError.response.status,
-            statusText: axiosError.response.statusText,
-            data: axiosError.response.data,
-            headers: axiosError.response.headers
-          } : 'No response received from server',
-          request: axiosError.request ? 'Request was made but no response received' : 'Request configuration error',
-          config: {
-            url: axiosError.config?.url,
-            method: axiosError.config?.method,
-            timeout: axiosError.config?.timeout,
-            dataSize: JSON.stringify(axiosError.config?.data || {}).length
-          },
-          stack: axiosError.stack
-        });
+    //   } catch (axiosError) {
+    //     // Detailed error logging
+    //     console.error('Detailed Axios Error Information:', {
+    //       message: axiosError.message,
+    //       code: axiosError.code,
+    //       response: axiosError.response ? {
+    //         status: axiosError.response.status,
+    //         statusText: axiosError.response.statusText,
+    //         data: axiosError.response.data,
+    //         headers: axiosError.response.headers
+    //       } : 'No response received from server',
+    //       request: axiosError.request ? 'Request was made but no response received' : 'Request configuration error',
+    //       config: {
+    //         url: axiosError.config?.url,
+    //         method: axiosError.config?.method,
+    //         timeout: axiosError.config?.timeout,
+    //         dataSize: JSON.stringify(axiosError.config?.data || {}).length
+    //       },
+    //       stack: axiosError.stack
+    //     });
         
-        errorData = {
-          failed: "Error posting to support_tickets endpoint",
-          err: axiosError.toString(),
-          details: {
-            status: axiosError.response?.status,
-            statusText: axiosError.response?.statusText,
-            responseData: axiosError.response?.data,
-            code: axiosError.code
-          }
-        };
-        await throwParticipantMetaDataException(errorData);
-        throw axiosError; // Re-throw to prevent further execution
-      }
+    //     errorData = {
+    //       failed: "Error posting to support_tickets endpoint",
+    //       err: axiosError.toString(),
+    //       details: {
+    //         status: axiosError.response?.status,
+    //         statusText: axiosError.response?.statusText,
+    //         responseData: axiosError.response?.data,
+    //         code: axiosError.code
+    //       }
+    //     };
+    //     await throwParticipantMetaDataException(errorData);
+    //     throw axiosError; // Re-throw to prevent further execution
+    //   }
       
-    } catch (ticketProcessError) {
-      console.error('Error in ticket processing section:', ticketProcessError);
-      errorData = {
-        failed: "Error processing ticket data",
-        err: ticketProcessError.toString(),
-        stack: ticketProcessError.stack
-      };
-      await throwParticipantMetaDataException(errorData);
-      return; // Exit early on processing error
-    }
+    // } catch (ticketProcessError) {
+    //   console.error('Error in ticket processing section:', ticketProcessError);
+    //   errorData = {
+    //     failed: "Error processing ticket data",
+    //     err: ticketProcessError.toString(),
+    //     stack: ticketProcessError.stack
+    //   };
+    //   await throwParticipantMetaDataException(errorData);
+    //   return; // Exit early on processing error
+    // }
 
     // Store Data in Starlabs Participant Data
     if (olddoc && (olddoc.status !== newdoc.status || 
@@ -1086,10 +1086,10 @@ exports.dashboardcustomersupport = onDocumentWritten("clientissue/{id}", async (
         console.log('CUSTOMER TICKETS COUNT:', ticketcount);
 
         try {
-          await admin.firestore().collection('participant metadata').doc(profileid).set({
+          await admin.firestore().collection('participant metadata').doc(profileid).update({
             customersupport: issueupdatestatus,
             customersupporttickets: ticketcount
-          }, { merge: true });
+          });
           
           console.log('Participant metadata updated successfully for profile:', profileid);
           
