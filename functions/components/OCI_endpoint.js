@@ -60,6 +60,23 @@ const MAX_MEDIA_NODES = 5;
 // One-room-one-node, same as AWS (CONFIG.maxRoomsPerInstance = 1 there).
 const CONFIG = { maxRoomsPerInstance: 1 };
 
+// A pool instance is "ready" (media software installed, joined the cluster, can take a call)
+// this long after Oracle created it. OpenVidu 3 has no media-node readiness API, so readiness
+// is time-based (2026-11-14 plan item 3.1, Option A). 8 min = the 5–8 min bootstrap seen on
+// 2026-07-16 (journal 2026-07-16-oci-recording-and-webhook.md). TUNE after measuring a few boots
+// in Grafana ("OpenVidu Cluster Nodes Logs"); Option B (boot-script callback) if this is not enough.
+const MEDIA_NODE_READY_AFTER_MS = 8 * 60 * 1000;
+
+function isMediaNodeReady(poolInstance, now = Date.now()) {
+  if ((poolInstance.state || "") !== "Running" || !poolInstance.timeCreated) return false;
+  const created = new Date(poolInstance.timeCreated).getTime();
+  return !isNaN(created) && now - created >= MEDIA_NODE_READY_AFTER_MS;
+}
+
+// Wake-on-join window: a room opened within this time while the server is stopped wakes it,
+// and a room the server was woken for is kept out of housekeeping for this long.
+const WAKE_WINDOW_MS = 30 * 60 * 1000;
+
 // LiveKit connection credentials for the OCI OpenVidu master.
 exports.creds = () => ({
   url: LIVEKIT_URL_OCI.value(),
@@ -216,10 +233,15 @@ async function collectOciStatus(clients) {
   const { instancePool } = await mgmt.getInstancePool({ instancePoolId: OCI_MEDIA_POOL_ID.value() });
   const poolInstances = await mgmt.listInstancePoolInstances({ compartmentId: COMPARTMENT_ID, instancePoolId: OCI_MEDIA_POOL_ID.value() });
 
-  const instanceStates = { healthy: 0, unhealthy: 0, pending: 0, terminating: 0, total: poolInstances.items.length };
+  // healthy = VM running (media software may still be installing); ready = can take a call
+  // (isMediaNodeReady). The call tab waits for ready, not healthy (plan item 3.1).
+  const instanceStates = { healthy: 0, ready: 0, unhealthy: 0, pending: 0, terminating: 0, total: poolInstances.items.length };
+  const now = Date.now();
   const instances = poolInstances.items.map(i => {
     const state = i.state || "";
     const isHealthy = state === "Running";
+    const isReady = isMediaNodeReady(i, now);
+    if (isReady) instanceStates.ready++;
     if (isHealthy) instanceStates.healthy++;
     else if (state === "Provisioning" || state === "Starting" || state === "Scaling") instanceStates.pending++;
     else if (state === "Terminating" || state === "Stopping") instanceStates.terminating++;
@@ -230,6 +252,7 @@ async function collectOciStatus(clients) {
       lifecycleState: state,
       availabilityZone: i.availabilityDomain || "",
       isHealthy: isHealthy,
+      isReady: isReady,
     };
   });
 
@@ -237,7 +260,7 @@ async function collectOciStatus(clients) {
   if (instancePool.size > instanceStates.healthy) scalingStatus = 'scaling-up';
   else if (instanceStates.terminating > 0) scalingStatus = 'scaling-down';
 
-  console.log(`OCI pool: size=${instancePool.size} healthy=${instanceStates.healthy} status=${scalingStatus}`);
+  console.log(`OCI pool: size=${instancePool.size} healthy=${instanceStates.healthy} ready=${instanceStates.ready} status=${scalingStatus}`);
 
   return {
     master,
@@ -255,8 +278,10 @@ async function collectOciStatus(clients) {
 
 // Collect + write OCI_System/instance_status (twin of AWS_System/instance_status; `asgName`
 // carries the pool name so the monitor UI reuses InfrastructureStatus). Returns the status.
-async function refreshOciStatus(clients) {
-  const status = await collectOciStatus(clients);
+// `known`: a status this caller already collected in the same run and has not changed since —
+// written as-is instead of asking Oracle again (fewer API calls; prod saw "Too many requests").
+async function refreshOciStatus(clients, known) {
+  const status = known || await collectOciStatus(clients);
   await admin.firestore().doc('OCI_System/instance_status').set({
     master: status.master,
     media: status.media,
@@ -276,13 +301,25 @@ async function setPoolSize(mgmt, size) {
   console.log(`OCI media pool size set to ${size}`);
 }
 
-async function startOciMaster(clients) {
+async function startOciMaster(clients, poolSize = 1) {
   // Fire-and-forget START — no waiters (scheduled runs stay well under timeout; boot
-  // progress is visible via the event webhook / next ticks). Pool follows to 1 so a media
-  // node boots alongside the master, mirroring the operator's manual bring-up routine.
+  // progress is visible via the event webhook / next ticks). The media pool is ordered at the
+  // same time so media nodes boot alongside the master. `poolSize` = how many calls are about
+  // to need a node (upcoming meetings + rooms waiting), so a burst of meetings does not wait
+  // for nodes to be added one at a time (2026-11-14 plan item 1.5). Manual start keeps 1.
+  const size = Math.min(Math.max(poolSize, 1), MAX_MEDIA_NODES);
   await clients.compute.instanceAction({ instanceId: OCI_MASTER_INSTANCE_ID.value(), action: "START" });
   console.log('OCI master START issued');
-  await setPoolSize(clients.mgmt, 1);
+  await setPoolSize(clients.mgmt, size);
+}
+
+// How many media nodes the calls in sight need: rooms already active + upcoming meetings whose
+// room is not active yet (a pre-created meeting room is in both lists — count it once).
+// One call per node (CONFIG.maxRoomsPerInstance = 1), capped at MAX_MEDIA_NODES.
+function mediaNodesNeeded(activeRoomIds, meetings) {
+  const pending = meetings.filter(m => !activeRoomIds.has(m.id)).length;
+  const nodes = Math.ceil((activeRoomIds.size + pending) / CONFIG.maxRoomsPerInstance);
+  return Math.min(Math.max(nodes, 1), MAX_MEDIA_NODES);
 }
 
 async function stopOciMaster(clients) {
@@ -301,17 +338,29 @@ async function stopOciMaster(clients) {
 // creates the room, the second's check then counts that room as "capacity used" and scales
 // up a node nobody needs (observed 2026-07-18: pool 1→2 on a single 2-person call). The
 // caller occupies the target room whether it creates or joins it, so it must not count.
+//
+// Ready vs ordered (2026-11-14 plan item 3.1): a room is allowed only on a READY node
+// (isMediaNodeReady). Counting ORDERED nodes let a second call in while its node was still
+// booting, so it landed on node 1 next to the first call (laggy video for both).
+// `needsNode` = even the ordered nodes are not enough → the caller orders one more. When it is
+// false but `allowed` is false, a node is already on its way: answer "please wait", order nothing.
 async function checkOciCapacity(mgmt, roomClient, targetRoomName) {
   const { instancePool } = await mgmt.getInstancePool({ instancePoolId: OCI_MEDIA_POOL_ID.value() });
   const totalInstances = instancePool.size;
   if (totalInstances === 0) {
-    return { allowed: false, activeRooms: 0, maxRooms: 0, totalInstances: 0, reason: 'No instances running' };
+    return { allowed: false, needsNode: true, activeRooms: 0, maxRooms: 0, totalInstances: 0, readyInstances: 0, reason: 'No instances running' };
   }
+  const poolInstances = await mgmt.listInstancePoolInstances({ compartmentId: COMPARTMENT_ID, instancePoolId: OCI_MEDIA_POOL_ID.value() });
+  const now = Date.now();
+  const readyInstances = Math.min(poolInstances.items.filter(i => isMediaNodeReady(i, now)).length, totalInstances);
   const rooms = await roomClient.listRooms();
   const otherRoomCount = rooms.filter(r => r.name !== targetRoomName).length;
-  const maxRooms = totalInstances * CONFIG.maxRoomsPerInstance;
-  console.log(`OCI capacity: ${otherRoomCount} other room(s) / ${maxRooms} max (${totalInstances} instances), target=${targetRoomName}`);
-  return { allowed: otherRoomCount < maxRooms, activeRooms: otherRoomCount, maxRooms, totalInstances };
+  const maxRooms = readyInstances * CONFIG.maxRoomsPerInstance;
+  const orderedRooms = totalInstances * CONFIG.maxRoomsPerInstance;
+  const allowed = otherRoomCount < maxRooms;
+  const needsNode = otherRoomCount >= orderedRooms;
+  console.log(`OCI capacity: ${otherRoomCount} other room(s) / ${maxRooms} ready max (${readyInstances} ready of ${totalInstances} ordered), allowed=${allowed} needsNode=${needsNode}, target=${targetRoomName}`);
+  return { allowed, needsNode, activeRooms: otherRoomCount, maxRooms, totalInstances, readyInstances };
 }
 
 async function scaleOciUp(mgmt) {
@@ -351,8 +400,12 @@ exports.prepareRoom = async ({ roomName, url, key, secret }) => {
       return { scaling: true, activeRooms: 0, maxRooms: 0, totalInstances: 0 };
     }
     if (!canCreateRoom.allowed) {
-      console.log(`[${roomName}] At OCI capacity - scaling up`);
-      await scaleOciUp(mgmt).catch(e => console.error('OCI scaleUp failed:', e.message));
+      if (canCreateRoom.needsNode) {
+        console.log(`[${roomName}] At OCI capacity - scaling up`);
+        await scaleOciUp(mgmt).catch(e => console.error('OCI scaleUp failed:', e.message));
+      } else {
+        console.log(`[${roomName}] Media node still booting - asking the caller to wait`);
+      }
       return { scaling: true, activeRooms: canCreateRoom.activeRooms, maxRooms: canCreateRoom.maxRooms, totalInstances: canCreateRoom.totalInstances };
     }
     try {
@@ -412,6 +465,12 @@ async function houseKeepOciRooms() {
         : (room.createddate && room.createddate.toMillis ? room.createddate.toMillis() : nowMs);
       const ageMs = nowMs - updatedMs;
 
+      // A room the controller just woke the server for: its people are waiting through a cold
+      // boot (≤5 min to the next tick + ~10 min boot), so it looks empty and idle. Don't close
+      // it before WAKE_WINDOW_MS has passed, or the server would stop just as it comes up.
+      const wokeMs = room.wokeServerAt && room.wokeServerAt.toMillis ? room.wokeServerAt.toMillis() : 0;
+      if (wokeMs && nowMs - wokeMs < WAKE_WINDOW_MS) continue;
+
       if (isEmpty && ageMs > INACTIVE_MS) {
         await docSnap.ref.update({
           active: false,
@@ -438,6 +497,36 @@ async function getOciActiveRoomsCount() {
     console.error('Error checking Firestore for active OCI sessions:', error);
     return 1; // fail safe: assume busy so we never stop a cluster we can't assess
   }
+}
+
+// Ids of the active OCI rooms (same query as the count). null when Firestore can't be read —
+// callers then treat the cluster as busy and take no stop / size-down decision.
+async function getOciActiveRoomIds() {
+  try {
+    const snap = await admin.firestore().collection('openviduroom')
+      .where('active', '==', true).where('mediaProvider', '==', 'oci').get();
+    console.log(`Active OCI sessions in Firestore: ${snap.size}`);
+    return new Set(snap.docs.map(d => d.id));
+  } catch (error) {
+    console.error('Error reading active OCI rooms:', error);
+    return null;
+  }
+}
+
+// Wake-on-join (2026-11-14 plan item 1.2 / decision D2). Rooms someone opened recently while
+// the OCI server is stopped: active, hosted on OCI (or not yet marked — the active cloud is
+// OCI whenever this controller acts), and created / reactivated within WAKE_WINDOW_MS.
+// The freshness test matters: prod holds old rooms still flagged active (e.g. cancelled
+// meetings); waking for those would keep the server on all day.
+async function findRoomsWaitingForServer() {
+  const snap = await admin.firestore().collection('openviduroom').where('active', '==', true).get();
+  const nowMs = Date.now();
+  return snap.docs.filter(d => {
+    const provider = d.get('mediaProvider');
+    if (provider && provider !== 'oci') return false;
+    const updatedMs = d.updateTime ? d.updateTime.toMillis() : 0;
+    return nowMs - updatedMs <= WAKE_WINDOW_MS;
+  });
 }
 
 // Full pre-create for an upcoming meeting — twin of AWS createRoomForMeeting: ensures the
@@ -472,11 +561,15 @@ async function createOciRoomForMeeting(meeting, clients) {
       capacity = await checkOciCapacity(clients.mgmt, roomClient, roomName);
     } catch (error) {
       console.error(`[Pre-create oci] Capacity check failed: ${error.message}`);
-      capacity = { allowed: false };
+      capacity = { allowed: false, needsNode: false };
     }
     if (!capacity.allowed) {
-      console.log(`[Pre-create oci] At capacity - scaling up and deferring ${roomName}`);
-      await scaleOciUp(clients.mgmt).catch(e => console.error('OCI scaleUp failed:', e.message));
+      if (capacity.needsNode) {
+        console.log(`[Pre-create oci] At capacity - scaling up and deferring ${roomName}`);
+        await scaleOciUp(clients.mgmt).catch(e => console.error('OCI scaleUp failed:', e.message));
+      } else {
+        console.log(`[Pre-create oci] Media node not ready yet - deferring ${roomName}`);
+      }
       return;
     }
     try {
@@ -507,11 +600,21 @@ async function createOciRoomForMeeting(meeting, clients) {
   }) : [];
   const participantid = (meeting.bookedby && meeting.bookedby.id) || meeting.bookedby || null;
 
+  // Read only the participant + hosts named in the title. This used to load the WHOLE
+  // profile_data collection once per meeting, which pushed this 5-minute job past its memory
+  // limit mid pre-create (prod, 2026-11-12 14:55 and 17:25 IST). The openviduroom doc was
+  // then never written, so the 15:00 / 17:30 ticks counted 0 rooms and stopped the server
+  // at meeting start.
   const mapProfile = {};
-  const profilesSnapshot = await admin.firestore().collection('profile_data').get();
-  profilesSnapshot.forEach(doc => {
-    mapProfile[doc.id] = doc.data().name || 'Unknown';
-  });
+  const profileIds = [...new Set([participantid, ...hostIds].filter(id => typeof id === 'string' && id))];
+  if (profileIds.length > 0) {
+    const profileDocs = await admin.firestore().getAll(
+      ...profileIds.map(id => admin.firestore().collection('profile_data').doc(id))
+    );
+    profileDocs.forEach(doc => {
+      if (doc.exists) mapProfile[doc.id] = doc.data().name || 'Unknown';
+    });
+  }
 
   let appointmentTypeName = 'Appointment';
   if (meeting.appointment && meeting.appointment.id) {
@@ -582,7 +685,8 @@ async function getActiveProvider() {
 // activeprovider gate: when OCI is not the active provider this tick only refreshes the
 // status doc (keeps the monitor's inactive-server alert truthful) and takes NO lifecycle
 // actions — so even with both schedulers running, exactly one cloud creates rooms.
-exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", timeoutSeconds: 300, secrets: [OCI_TENANCY_OCID, OCI_USER_OCID, OCI_KEY_FINGERPRINT, OCI_API_PRIVATE_KEY, OCI_MASTER_INSTANCE_ID, OCI_MEDIA_POOL_ID, LIVEKIT_URL_OCI, LIVEKIT_API_KEY_OCI, LIVEKIT_API_SECRET_OCI] }, async (event) => {
+// memory: 512MiB — the default 256MiB was exceeded in prod (OCI SDK clients + room pre-create).
+exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "Asia/Kolkata", region: "asia-south1", timeoutSeconds: 300, memory: "512MiB", secrets: [OCI_TENANCY_OCID, OCI_USER_OCID, OCI_KEY_FINGERPRINT, OCI_API_PRIVATE_KEY, OCI_MASTER_INSTANCE_ID, OCI_MEDIA_POOL_ID, LIVEKIT_URL_OCI, LIVEKIT_API_KEY_OCI, LIVEKIT_API_SECRET_OCI] }, async (event) => {
   const clients = getOciClients();
 
   try {
@@ -593,10 +697,13 @@ exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "As
       return null;
     }
 
-    // 1. Current master state
+    // 1. Current master state. Collected once; reused for the final status write when this
+    // run changes nothing on the Oracle side (2026-11-14 plan item 1.4).
     const status = await collectOciStatus(clients);
-    const masterRunning = status.master.state === 'running';
-    console.log(`OCI master is currently: ${masterRunning ? 'RUNNING' : 'NOT RUNNING'}`);
+    const masterState = status.master.state;
+    const masterRunning = masterState === 'running';
+    let changed = false;
+    console.log(`OCI master is currently: ${masterRunning ? 'RUNNING' : 'NOT RUNNING'} (${masterState})`);
 
     // 2. Upcoming meetings (same query as AWS — platform openvidu, next 15 min)
     const now = admin.firestore.Timestamp.now();
@@ -616,16 +723,39 @@ exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "As
       console.log(`Found ${meetings.length} upcoming meeting(s)`);
     }
 
-    // Start master if needed
-    if (!masterRunning && meetings.length > 0) {
-      console.log('Starting OCI master node...');
-      await startOciMaster(clients);
+    // 3. Server not running → start it for upcoming meetings OR for rooms people just opened
+    // (wake-on-join, plan item 1.2 / D2). Only from a clean 'stopped' state: while it is
+    // starting or stopping, wait for the next run instead of issuing another action.
+    if (!masterRunning) {
+      if (masterState !== 'stopped') {
+        console.log(`OCI master is ${masterState} - no lifecycle action this run`);
+        await refreshOciStatus(clients, status);
+        return null;
+      }
+      const waiting = await findRoomsWaitingForServer();
+      if (meetings.length === 0 && waiting.length === 0) {
+        await refreshOciStatus(clients, status);
+        return null;
+      }
+      const waitingIds = new Set(waiting.map(d => d.id));
+      const poolSize = mediaNodesNeeded(waitingIds, meetings);
+      console.log(`Starting OCI master: ${meetings.length} upcoming meeting(s), ${waiting.length} room(s) waiting [${[...waitingIds].join(', ')}] -> ${poolSize} media node(s)`);
+      await startOciMaster(clients, poolSize);
+      // Mark the rooms the server was woken for: stamp the cloud (so they are counted as
+      // active OCI rooms and the next runs keep the server on) and wokeServerAt (so
+      // housekeeping leaves them alone while their people wait for the boot).
+      await Promise.all(waiting.map(d => d.ref.update({
+        mediaProvider: 'oci',
+        wokeServerAt: admin.firestore.FieldValue.serverTimestamp(),
+      }).catch(e => console.error(`Wake mark failed for ${d.id}:`, e && e.message))));
       await refreshOciStatus(clients);
       return null;
     }
 
-    if (masterRunning && meetings.length > 0) {
+    // 4. Pre-create rooms for upcoming meetings (may grow the pool when at capacity)
+    if (meetings.length > 0) {
       console.log('Pre-creating LiveKit rooms (OCI)...');
+      changed = true;
       for (const meeting of meetings) {
         if (!meeting.livekitRoomPreCreated) {
           await createOciRoomForMeeting(meeting, clients).catch(e =>
@@ -636,33 +766,37 @@ exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "As
       }
     }
 
-    // 3. Housekeeping + active room count (OCI-scoped)
-    let activeRooms = 0;
-    if (masterRunning) {
-      await houseKeepOciRooms();
-      activeRooms = await getOciActiveRoomsCount();
-      console.log(`Active OCI rooms after housekeeping: ${activeRooms}`);
-    }
+    // 5. Housekeeping + active rooms (OCI-scoped). null = Firestore unreadable → treat as busy.
+    await houseKeepOciRooms();
+    const activeRoomIds = await getOciActiveRoomIds();
+    console.log(`Active OCI rooms after housekeeping: ${activeRoomIds ? activeRoomIds.size : 'unknown'}`);
 
-    // 4. Stop-to-zero when fully idle (no active rooms AND nothing upcoming in 15m)
-    if (masterRunning && activeRooms === 0 && meetings.length === 0) {
+    // 6. Stop-to-zero when fully idle (no active rooms AND nothing upcoming in 15m)
+    if (activeRoomIds !== null && activeRoomIds.size === 0 && meetings.length === 0) {
       console.log('No active OCI rooms and no upcoming meetings - stopping master');
       await stopOciMaster(clients);
       await refreshOciStatus(clients);
       return null;
     }
 
-    // 5. DC-safe pool right-sizing: scale UP to match active rooms (down to 0 happens in stop)
-    if (masterRunning) {
-      const target = Math.min(Math.max(activeRooms, 1), MAX_MEDIA_NODES);
-      if (status.media.desiredCapacity < target) {
-        console.log(`reconcileOciMediaUp: pool ${status.media.desiredCapacity} -> ${target} (active rooms: ${activeRooms})`);
+    // 7. Pool top-up: one node per active room + per upcoming meeting not active yet (plan
+    // item 1.5, so a burst of meetings gets its nodes ordered together). Compared against a
+    // FRESH pool size and never lowered here (plan item 1.6): the old code compared against
+    // the size read at the start of the run, so when pre-create had already grown the pool
+    // this run it set a smaller number and Oracle deleted a booting node (prod, Fri 06 Nov
+    // 16:55: 2 → 3 → 2). Scale-down only happens via stop-to-zero.
+    if (activeRoomIds !== null) {
+      const target = mediaNodesNeeded(activeRoomIds, meetings);
+      const { instancePool } = await clients.mgmt.getInstancePool({ instancePoolId: OCI_MEDIA_POOL_ID.value() });
+      if (instancePool.size < target) {
+        console.log(`reconcileOciMediaUp: pool ${instancePool.size} -> ${target} (active rooms: ${activeRoomIds.size}, upcoming meetings: ${meetings.length})`);
         await setPoolSize(clients.mgmt, target);
+        changed = true;
       }
     }
 
-    // 6. Always leave a fresh status doc
-    await refreshOciStatus(clients);
+    // 8. Always leave a fresh status doc (re-read from Oracle only if this run changed something)
+    await refreshOciStatus(clients, changed ? null : status);
     return null;
 
   } catch (error) {
@@ -674,8 +808,29 @@ exports.CheckOciNodeStatus = onSchedule({ schedule: "*/5 * * * *", timeZone: "As
 // ---- Manual controls (twins of AWS start/stopMasterNodeHTTP + scaleMediaNodes) ----
 // Each finishes with a status refresh so the monitor UI reflects the click in seconds.
 
+// These start / stop / resize paid servers, so they need a signed-in StarLabs user (Firebase
+// ID token in `Authorization: Bearer …`). Until 2026-11-14 they were open to anyone with the
+// URL. Signed-in (not admin-only) because the instant-meeting screen also calls the start
+// function for whoever creates the room. Returns the decoded token, or null after sending 401.
+async function requireSignedIn(req, res, action) {
+  const header = req.get("Authorization") || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (token) {
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      console.log(`${action} requested by uid=${decoded.uid}`);
+      return decoded;
+    } catch (err) {
+      console.warn(`${action}: invalid ID token:`, err && err.message);
+    }
+  }
+  res.status(401).json({ error: "Sign-in required" });
+  return null;
+}
+
 exports.startOciMasterHTTP = onRequest({ secrets: [...exports.API_SECRETS], cors: true }, async (req, res) => {
   try {
+    if (!(await requireSignedIn(req, res, 'startOciMasterHTTP'))) return;
     console.log('Start OCI master node request');
     const clients = getOciClients();
 
@@ -696,6 +851,7 @@ exports.startOciMasterHTTP = onRequest({ secrets: [...exports.API_SECRETS], cors
 
 exports.stopOciMasterHTTP = onRequest({ secrets: [...exports.API_SECRETS], cors: true }, async (req, res) => {
   try {
+    if (!(await requireSignedIn(req, res, 'stopOciMasterHTTP'))) return;
     console.log('Stop OCI master node request');
     const clients = getOciClients();
 
@@ -721,6 +877,7 @@ exports.stopOciMasterHTTP = onRequest({ secrets: [...exports.API_SECRETS], cors:
 
 exports.scaleOciMediaNodes = onRequest({ secrets: [...exports.API_SECRETS], cors: true }, async (req, res) => {
   try {
+    if (!(await requireSignedIn(req, res, 'scaleOciMediaNodes'))) return;
     const { action } = req.body;
     if (!action || !['scale-up', 'scale-down'].includes(action)) {
       return res.status(400).json({ error: 'Invalid action. Use "scale-up" or "scale-down"' });

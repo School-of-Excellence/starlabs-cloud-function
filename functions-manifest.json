@@ -281,6 +281,13 @@
       "codebase": "default"
     },
     {
+      "name": "crmParticipantSnapshot",
+      "type": "onRequest",
+      "file": "components/crm-participant-snapshot.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "dailyFirestoreAuditAnalysis",
       "type": "onSchedule",
       "file": "components/exports-alerts.js",
