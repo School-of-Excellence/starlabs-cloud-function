@@ -359,7 +359,7 @@
       "name": "getMediaUrls",
       "type": "onCall",
       "file": "components/media_signed_url.js",
-      "emulatorLoaded": false,
+      "emulatorLoaded": true,
       "codebase": "default"
     },
     {

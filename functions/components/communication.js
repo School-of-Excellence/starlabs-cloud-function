@@ -33,7 +33,6 @@ const { Buffer } = require('buffer');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { v4: uuidv4 } = require("uuid"); // To generate unique file names
 const XLSX = require('xlsx');
 
 // Apple APN
@@ -2858,22 +2857,21 @@ async function downloadAndUpload(recordingUrl,docRef) {
       writer.on('error', reject);
     });
     console.log('File downloaded successfully.');
-    const token = uuidv4();
     // Upload the file to Firebase Storage
     const firebaseFileName = `call_recordings/${Date.now()}-audio-file.mp3`; // Set the destination path in Firebase Storage
     console.log('Uploading to Firebase Storage...');
-    const bucketresponse = await bucket.upload(tempFilePath, {
+    // NO download token, and the stored value is the object PATH, not a URL (2026-11-18).
+    // A firebaseStorageDownloadTokens URL never expires and bypasses Storage Rules. The
+    // Calls tab resolves this path through getMediaUrls into a short-lived signed URL
+    // (duration + 20 min). Do not reintroduce getDownloadURL()/a token here.
+    await bucket.upload(tempFilePath, {
       destination: firebaseFileName,
       metadata: {
         contentType: 'audio/mpeg',
-        metadata: {
-          firebaseStorageDownloadTokens: token,
-        },
       },
     });
-    const bucketUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(firebaseFileName)}?alt=media&token=${token}`;
     await docRef.update({
-      recordingurl : bucketUrl
+      recordingurl : firebaseFileName
     }).then(()=>{
       console.log("Document Updated Successfully");
     }).catch((error)=>{

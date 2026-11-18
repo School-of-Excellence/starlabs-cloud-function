@@ -21,7 +21,9 @@
 //   audio   duration + 20 min        duration read from the file itself (see below)
 //   images  15 min
 //   unknown 30 min                   header unreadable; a brief is ~10 min at most, so
-//                                    10 + 20 covers it, and the client renews if not
+//                                    10 + 20 covers it, and the client renews if not.
+//                                    A call recording can run longer than 30 min — the
+//                                    shared player's renewal covers that case too.
 //
 // There is NO ceiling constant and no clamp, because there is nothing to clamp: the
 // duration is measured server-side, never supplied by the caller. An earlier revision
@@ -35,6 +37,15 @@
 // the other. The RIFF header carries the real sampleRate, channels and bit depth, so a
 // 4 KiB ranged read gives the exact length. It is read ONCE per object — a file's length
 // never changes — and only for the audio prefix.
+//
+// ── …and from the MP3 frame header for call recordings ──────────────────────────────
+//
+// call_recordings/ holds MP3s re-uploaded from MyOperator. The same "measure, never trust
+// the caller" rule applies, so the 4 KiB head is sniffed: a RIFF/WAVE file goes to
+// wavDuration, anything else to mp3Duration. An MP3's length is exact when the first frame
+// carries a Xing/Info or VBRI header (frame count × samples per frame ÷ sample rate);
+// without one the file is constant-bitrate and length is audio bytes × 8 ÷ bitrate, which
+// needs the object's size — one metadata read, once per object, MP3 only.
 //
 // ── Why the same link is handed to everyone ──────────────────────────────────────────
 //
@@ -67,12 +78,16 @@ const IMAGE_TTL_MS = 15 * 60 * 1000;
 const FALLBACK_TTL_MS = 30 * 60 * 1000;      // length unreadable: 10 min brief + 20 min pad
 
 const WAV_HEADER_BYTES = 4096;               // ample for a RIFF header; a full read is ~5 MB/min
+const HEADER_BYTES = WAV_HEADER_BYTES;       // first ranged read, whatever the format
 
 // Prefixes this callable will sign, and how each one's lifetime is decided. Deliberately a
-// short allow-list, not a wildcard: a general "sign anything for any signed-in user"
-// endpoint would hand every authenticated caller the 7,822 objects under call_recordings/,
-// which is a worse exposure than the one being fixed. Each new screen adds its prefix here
-// on purpose.
+// short allow-list, not a wildcard: each new screen adds its prefix here on purpose.
+//
+// call_recordings/ was added DELIBERATELY on 2026-11-18 for the Notification Record → Calls
+// tab. It means any signed-in user can obtain a short-lived link to any call recording —
+// which was already true, more permanently, through the stored download URLs. Narrowing WHO
+// may sign a call recording is the agreed follow-up (role metadata on the auth user), not
+// part of this change.
 //
 // NOTE the fence is about WHERE, not WHO. Until per-caller authorization lands, any
 // signed-in user can sign any object under these prefixes.
@@ -82,6 +97,7 @@ const PREFIXES = [
   { re: /^ATC_Audio_Notes\/.+$/, kind: "audio" },     // changeworkbrief
   { re: /^Uploaded ATC\/.+$/, kind: "fixed" },        // imagenotes
   { re: /^Online ATC Images\/.+$/, kind: "fixed" },   // prescription_image
+  { re: /^call_recordings\/.+$/, kind: "audio" },     // myoperator calls.recordingurl (MP3)
 ];
 
 function prefixFor(path) {
@@ -193,6 +209,107 @@ function wavDuration(buf) {
   }
 }
 
+// ── MP3 length ───────────────────────────────────────────────────────────────────────
+// Layer III only (that is what an .mp3 is). Every function returns null rather than guess,
+// so anything unexpected falls to FALLBACK_TTL_MS and the player's renewal.
+
+const MP3_BITRATE_KBPS = {
+  v1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  v2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],   // MPEG-2 and 2.5
+};
+const MP3_SAMPLE_RATE = { 3: [44100, 48000, 32000], 2: [22050, 24000, 16000], 0: [11025, 12000, 8000] };
+
+/** Byte offset where audio starts after a leading ID3v2 tag, or 0 when there is none. */
+function id3v2End(buf) {
+  if (buf.length < 10 || buf.toString("latin1", 0, 3) !== "ID3") return 0;
+  const size = ((buf[6] & 0x7f) << 21) | ((buf[7] & 0x7f) << 14) | ((buf[8] & 0x7f) << 7) | (buf[9] & 0x7f);
+  const footer = buf[5] & 0x10 ? 10 : 0;
+  return 10 + size + footer;
+}
+
+/** Decode a Layer III frame header at `i`, or null if those 4 bytes are not one. */
+function mp3FrameAt(buf, i) {
+  if (i + 4 > buf.length || buf[i] !== 0xff || (buf[i + 1] & 0xe0) !== 0xe0) return null;
+  const version = (buf[i + 1] >> 3) & 3;               // 3 = MPEG-1, 2 = MPEG-2, 0 = MPEG-2.5
+  const layer = (buf[i + 1] >> 1) & 3;                 // 1 = Layer III
+  const brIdx = buf[i + 2] >> 4;
+  const srIdx = (buf[i + 2] >> 2) & 3;
+  if (version === 1 || layer !== 1 || brIdx === 0 || brIdx === 15 || srIdx === 3) return null;
+  const v1 = version === 3;
+  const kbps = (v1 ? MP3_BITRATE_KBPS.v1 : MP3_BITRATE_KBPS.v2)[brIdx];
+  const rate = MP3_SAMPLE_RATE[version][srIdx];
+  const padding = (buf[i + 2] >> 1) & 1;
+  const mono = (buf[i + 3] >> 6) === 3;
+  return {
+    kbps,
+    rate,
+    samples: v1 ? 1152 : 576,
+    length: Math.floor(((v1 ? 144 : 72) * kbps * 1000) / rate) + padding,
+    sideInfo: v1 ? (mono ? 17 : 32) : (mono ? 9 : 17),
+  };
+}
+
+/**
+ * Seconds of MP3 audio, or null.
+ *   buf       bytes read from the object, starting at file offset `base`
+ *   fileSize  the object's size, needed only for a constant-bitrate file
+ */
+function mp3Duration(buf, fileSize, base = 0) {
+  try {
+    let i = base === 0 ? id3v2End(buf) : 0;
+    // Find the first frame whose successor is where its length says (rules out a stray
+    // 0xFFE… inside tag padding). The last frame in the buffer is accepted on its own.
+    let frame = null;
+    for (; i + 4 <= buf.length; i++) {
+      const f = mp3FrameAt(buf, i);
+      if (!f) continue;
+      const next = i + f.length;
+      if (next + 4 > buf.length || mp3FrameAt(buf, next)) { frame = f; break; }
+    }
+    if (!frame) return null;
+
+    // VBR: a Xing/Info (after side info) or VBRI (fixed offset 32) header carries the count.
+    const x = i + 4 + frame.sideInfo;
+    let frames = 0;
+    if (x + 12 <= buf.length) {
+      const tag = buf.toString("latin1", x, x + 4);
+      if ((tag === "Xing" || tag === "Info") && buf.readUInt32BE(x + 4) & 1) frames = buf.readUInt32BE(x + 8);
+    }
+    const v = i + 4 + 32;
+    if (!frames && v + 18 <= buf.length && buf.toString("latin1", v, v + 4) === "VBRI") {
+      frames = buf.readUInt32BE(v + 14);
+    }
+    if (frames) return +((frames * frame.samples) / frame.rate).toFixed(2);
+
+    // CBR: every frame has this bitrate, so length follows from the audio byte count.
+    const audioBytes = Number(fileSize) - (base + i);
+    if (!Number.isFinite(audioBytes) || audioBytes <= 0) return null;
+    return +((audioBytes * 8) / (frame.kbps * 1000)).toFixed(2);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read just enough of the object to measure it. WAV: one 4 KiB ranged read, as before.
+ * MP3: the same read, plus a second one only when an ID3 tag (embedded artwork) pushes the
+ * first frame past it, plus a metadata read for the size.
+ */
+async function measureAudio(file) {
+  const [head] = await file.download({ start: 0, end: HEADER_BYTES - 1 });
+  const wav = wavDuration(head);
+  if (wav !== null) return wav;
+
+  let buf = head, base = 0;
+  const audioStart = id3v2End(head);
+  if (audioStart && audioStart + 64 > head.length) {
+    [buf] = await file.download({ start: audioStart, end: audioStart + HEADER_BYTES - 1 });
+    base = audioStart;
+  }
+  const [meta] = await file.getMetadata();
+  return mp3Duration(buf, meta && meta.size, base);
+}
+
 // Header reads are throttled. A note page asked for 25 clips at once, which issued 25
 // concurrent ranged downloads — 23 of them failed, and because the failures were cached
 // those clips were left permanently "unmeasured" and fell back to a flat 30 minutes.
@@ -229,8 +346,7 @@ function durationOf(bucket, path, cache) {
   const pending = (async () => {
     await headerSlot();
     try {
-      const [head] = await bucket.file(path).download({ start: 0, end: WAV_HEADER_BYTES - 1 });
-      return wavDuration(head);
+      return await measureAudio(bucket.file(path));
     } catch {
       return null;                         // object may still sign fine; just unmeasured
     } finally {
@@ -348,6 +464,11 @@ function assertAuthed(request) {
 
 exports.getMediaUrls = onCall(async (request) => {
   assertAuthed(request);
+  // Warm-up ping (2026-11-18). Screens with a player send { warm: true } on open and every
+  // 10 minutes while visible, so the instance is already running when someone presses Play
+  // — a cold start measured 14–17 s, a warm call under 1 s. Signs nothing, reads nothing,
+  // logs nothing. Still behind the sign-in check: an outsider cannot use it to keep us warm.
+  if (request.data && request.data.warm === true) return { warm: true };
   const refs = request.data && request.data.refs;
   if (!Array.isArray(refs) || refs.length === 0) {
     throw new HttpsError("invalid-argument", "refs must be a non-empty array.");
@@ -363,6 +484,7 @@ exports.getMediaUrlsCore = getMediaUrlsCore;
 exports.parseRef = parseRef;
 exports.normalizeRef = normalizeRef;
 exports.wavDuration = wavDuration;
+exports.mp3Duration = mp3Duration;
 exports.PAD_MS = PAD_MS;
 exports.REUSE_MARGIN_MS = REUSE_MARGIN_MS;
 exports.IMAGE_TTL_MS = IMAGE_TTL_MS;
