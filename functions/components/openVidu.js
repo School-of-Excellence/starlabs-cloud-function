@@ -34,6 +34,18 @@ function getCredsFor(provider) {
     return { url: LIVEKIT_URL.value(), key: LIVEKIT_API_KEY.value(), secret: LIVEKIT_API_SECRET.value() };
 }
 
+// Host controls (mute / remove / end room) must reach the cluster that hosts the room.
+// Read the room's cloud server-side from openviduroom/{roomName}.mediaProvider (missing =
+// "oci", the same default the token and recording functions use), so the app can't fake it
+// and no app change is needed. Returns { provider, roomDoc }. 2026-11-14 plan Phase 1b.
+async function roomServiceForRoom(roomName) {
+	const roomDoc = await admin.firestore().collection("openviduroom").doc(roomName).get();
+	const stored = roomDoc.exists ? roomDoc.get("mediaProvider") : null;
+	const provider = (stored || "oci").toString().toLowerCase();
+	const { url, key, secret } = getCredsFor(provider);
+	return { provider, roomDoc, roomService: new livekitServer.RoomServiceClient(url, key, secret) };
+}
+
 // LiveKit client
 let roomClient;
 function getRoomClient() {
@@ -493,8 +505,10 @@ exports.onEventOci = onRequest({ secrets: [...OCI_endpoint.SECRETS] }, async (re
 	cors(req, res, () => handleOpenViduEvent(req, res, "oci"));
 })
 
-exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
+exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, ...OCI_endpoint.SECRETS]}, async (req, res) => {
 	cors(req, res, async () => {
+		// Warm-up ping from a host's call screen (keeps this function loaded so the click is fast).
+		if (req.body && req.body.warmup) return res.status(204).end();
     if (req.method !== "POST") {
       return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
     }
@@ -505,13 +519,10 @@ exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SE
     }
 
     try {
-      const roomService = new livekitServer.RoomServiceClient(
-        LIVEKIT_URL.value(),
-        LIVEKIT_API_KEY.value(),
-        LIVEKIT_API_SECRET.value()
-      );
+      const { provider, roomService } = await roomServiceForRoom(roomName);
 
       await roomService.deleteRoom(roomName);
+      console.log(`[${roomName}] room closed [provider=${provider}]`);
 
 			await admin.firestore().collection("openviduroom").doc(roomName).update({
 				active: false,
@@ -527,8 +538,10 @@ exports.openViduCloseRoom = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SE
 	});
 });
 
-exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
+exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, ...OCI_endpoint.SECRETS]}, async (req, res) => {
 	cors(req, res, async () => {
+		// Warm-up ping from a host's call screen (keeps this function loaded so the click is fast).
+		if (req.body && req.body.warmup) return res.status(204).end();
 		if (req.method !== "POST") {
 			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
 		}
@@ -540,11 +553,7 @@ exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 		}
 
 		try {
-			const roomService = new livekitServer.RoomServiceClient(
-				LIVEKIT_URL.value(),
-				LIVEKIT_API_KEY.value(),
-				LIVEKIT_API_SECRET.value()
-			);
+			const { provider, roomService } = await roomServiceForRoom(roomName);
 
 			// Get participant to find their audio track SID
 			const participant = await roomService.getParticipant(roomName, participantIdentity);
@@ -560,7 +569,7 @@ exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 			// Always mute — host can only mute, not unmute
 			await roomService.mutePublishedTrack(roomName, participantIdentity, audioTrack.sid, true);
 
-			console.log(`[${roomName}] muted participant ${participantIdentity}`);
+			console.log(`[${roomName}] muted participant ${participantIdentity} [provider=${provider}]`);
 			return res.status(200).json({success: true, message: `${participantIdentity} has been muted`});
 		} catch (err) {
 			console.error(`[${roomName}] Mute error:`, err);
@@ -569,8 +578,10 @@ exports.muteParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 	});
 });
 
-exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL]}, async (req, res) => {
+exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL, ...OCI_endpoint.SECRETS]}, async (req, res) => {
 	cors(req, res, async () => {
+		// Warm-up ping from a host's call screen (keeps this function loaded so the click is fast).
+		if (req.body && req.body.warmup) return res.status(204).end();
 		if (req.method !== "POST") {
 			return res.status(405).json({error: "Method Not Allowed. Only POST allowed"});
 		}
@@ -582,21 +593,25 @@ exports.kickParticipant = onRequest({secrets: [LIVEKIT_API_KEY, LIVEKIT_API_SECR
 		}
 
 		try {
-			// Verify requester is a host
-			const roomDoc = await admin.firestore().collection("openviduroom").doc(roomName).get();
+			const { provider, roomDoc, roomService } = await roomServiceForRoom(roomName);
 			if (!roomDoc.exists) {
 				return res.status(404).json({error: "Room not found"});
 			}
 
-			const roomService = new livekitServer.RoomServiceClient(
-				LIVEKIT_URL.value(),
-				LIVEKIT_API_KEY.value(),
-				LIVEKIT_API_SECRET.value()
-			);
+			try {
+				await roomService.removeParticipant(roomName, participantIdentity);
+			} catch (lkErr) {
+				// Already gone = the goal is met. Test 2026-11-15: the first click was slow (cold start),
+				// the host clicked again, the first request removed them, and the second got LiveKit's
+				// not_found → "Failed to remove participant" although the removal had worked.
+				if (lkErr && (lkErr.status === 404 || lkErr.code === "not_found")) {
+					console.log(`[${roomName}] ${participantIdentity} already left [provider=${provider}]`);
+					return res.status(200).json({success: true, message: `${participantIdentity} has already left the room`});
+				}
+				throw lkErr;
+			}
 
-			await roomService.removeParticipant(roomName, participantIdentity);
-
-			console.log(`[${roomName}] removed participant ${participantIdentity}`);
+			console.log(`[${roomName}] removed participant ${participantIdentity} [provider=${provider}]`);
 			return res.status(200).json({success: true, message: `${participantIdentity} has been removed from the room`});
 
 		} catch (err) {

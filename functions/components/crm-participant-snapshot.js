@@ -26,8 +26,9 @@ const CRM_PROJECT = { "starlabs-test": "salescrm-test-19", "fir-sample-aae4a": "
 const CRM_ORIGINS = CRM_PROJECT
   ? [new RegExp(`^https://${CRM_PROJECT}\\.(web\\.app|firebaseapp\\.com)$`), /^http:\/\/localhost:\d+$/]
   : false;
-// Production keeps one instance warm: a cold start loads every Breakthroughs function (~15 s) while a rep waits.
-const MIN_INSTANCES = process.env.GCLOUD_PROJECT === "fir-sample-aae4a" ? 1 : 0;
+// No warm instance (the user's call, 2026-11-13: ~$8/month idle). A cold start loads every Breakthroughs function
+// (~15 s); the CRM shows the saved data meanwhile and waits up to 30 s. 0 is explicit so a deploy resets it.
+const MIN_INSTANCES = 0;
 const PM = "participant metadata";
 
 const ids = (list) => (Array.isArray(list) ? list.filter((id) => typeof id === "string" && id) : []);
