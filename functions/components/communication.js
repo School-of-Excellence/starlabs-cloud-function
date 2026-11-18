@@ -167,8 +167,9 @@ exports.notifyMobileApp = onDocumentCreated({
         foundProfileIds.push(profileId);
 
         // Held profiles get no FCM push and no in-app log. Collected in a Set and
-        // filtered once below — new_user_data docs come through this same loop and
-        // carry no deliveryonhold field, so they must not un-hold a profile.
+        // filtered once below — profile_data and new_user_data docs both come
+        // through this loop (either can carry deliveryonhold), and a doc without
+        // the field must not un-hold the same id held by the other collection.
         if (profileData["deliveryonhold"] === true) {
           heldProfileIds.add(profileId);
           continue;
@@ -1999,14 +2000,13 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   const mapProfileEmail = {};
 
   // ── Delivery hold ────────────────────────────────────────────────────────
-  // This function loads `participant metadata` / `new_user_data`, neither of which
-  // carries deliveryonhold, so query the held profiles directly. Fail CLOSED: if the
-  // read throws we abort rather than send unfiltered — this is a retryable trigger.
-  const heldProfileIds = new Set();
+  // Held = deliveryonhold === true on the profile_data OR the new_user_data doc
+  // (commonService.getDeliveryHeldProfileIds). The metadata loaded below can't be
+  // used for this, so the held ids are queried directly. Fail CLOSED: if the read
+  // throws we abort rather than send unfiltered — this is a retryable trigger.
+  let heldProfileIds;
   try {
-    const heldSnap = await admin.firestore()
-      .collection("profile_data").where("deliveryonhold", "==", true).get();
-    heldSnap.docs.forEach(d => heldProfileIds.add(d.id));
+    heldProfileIds = await commonService.getDeliveryHeldProfileIds();
   } catch (err) {
     console.error("deliveryonhold check failed — aborting send so it can retry", err);
     throw err;
