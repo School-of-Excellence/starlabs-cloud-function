@@ -417,6 +417,18 @@ async function getProfileData(profileId) {
   console.log("loggg", profileId);
   return null;
 }
+/**
+ * A WhatsApp template variable value WATI will accept. WhatsApp rejects any
+ * value with a line break, a tab or more than 4 spaces in a row (WATI answers
+ * 400 and nothing is sent) — so CMS text written as paragraphs, like a
+ * workshop's `enrollwattimessage`, is joined into one line: every run of
+ * whitespace becomes a single space.
+ */
+function watiTemplateValue(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+exports.watiTemplateValue = watiTemplateValue;
+
 async function sendWatiWorkshopMessage({ profileID, profileName, workshopName, workshopId, message, message2 }) {
   var apikey = null;
   var serverid = null;
@@ -516,6 +528,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
         let workshopName = "Workshop";
         let messageText = "";
         let workshopurl = "";
+        let workshopId = "";
         let mailsubject = "";
         let maildescription = "";
         let mailliveCallText = "";
@@ -534,6 +547,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
             categorybased = workshopData?.categorybased || false;
             evergreenWorkshop = workshopData?.evergreenWorkshop || false;
             slackchannel = workshopData?.workshopactivitychannel || null;
+            workshopId = workshopData?.docid || workshopSnap.id;
             workshopurl = commonService.production
               ? `https://eiflix.com/web/workshop/${workshopData?.docid}`
               : `https://eiflix-workshop.web.app/workshop/${workshopData?.docid}`;
@@ -570,14 +584,16 @@ exports.workshopenrolledwatti = onDocumentCreated(
           'Content-Type': 'application/json',
         };
 
+        // Every value through watiTemplateValue: a line break in the
+        // workshop's enrollwattimessage made WATI refuse the whole message.
         const data = {
           template_name: 'eiflixworkshopv7',
           broadcast_name: 'Workshop Enrolled',
           parameters: [
-            { name: 'name', value: profile['name'] || '' },
-            { name: 'workshopname', value: workshopName },
-            { name: 'link', value: workshopurl },
-            { name: '1', value: messageText },
+            { name: 'name', value: watiTemplateValue(profile['name']) },
+            { name: 'workshopname', value: watiTemplateValue(workshopName) },
+            { name: 'link', value: watiTemplateValue(workshopurl) },
+            { name: '1', value: watiTemplateValue(messageText) },
           ]
         };
         try {
@@ -586,12 +602,14 @@ exports.workshopenrolledwatti = onDocumentCreated(
             ? "WorkshopEnrolledMessageEvergreen"
             : categorybased
               ? "WorkshopEnrolledMessage1"
-              : "WorkshopEnrolledMessage";
+              // : "WorkshopEnrolledMessage";
+              :"workshopenrollmail"
           const postmarktemplateId = evergreenWorkshop
             ? '45591602'
             : categorybased
               ? '43859890'
-              : '42135513';
+              // : '42135513';
+              :"48350274"
           // await commonService.postmarkClient.sendEmailWithTemplate({
           //   From: "starlabs@excellenceinstallation.com",
           //   To: profile['email'],
@@ -632,6 +650,29 @@ exports.workshopenrolledwatti = onDocumentCreated(
 
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
+        }
+
+        // Forward the enrolment to Customer.io. The webhook URL lives in
+        // `classify/eiflixcustomerio.api`; when it's missing or blank we skip.
+        // Failures are caught so they never block the WATI message below.
+        try {
+          const customerioSnap = await admin.firestore().collection("classify").doc("eiflixcustomerio").get();
+          const customerioUrl = customerioSnap.exists ? customerioSnap.data().api : null;
+          if (typeof customerioUrl === "string" && customerioUrl.trim() !== "") {
+            // profile_data uses `countrycode`, new_user_data uses `countryCode`.
+            const countrycode = String(profile['countrycode'] || profile['countryCode'] || '+91').replace(/\+/g, '').trim();
+            await axios.post(customerioUrl.trim(), {
+              name: profile['name'] || '',
+              email: profile['email'] || '',
+              phone: phonenumber ? `+${countrycode}${String(phonenumber).trim()}` : '',
+              workshopid: workshopId,
+            });
+            console.log(`workshopenrolledwatti: customer.io notified for ${snapshot.id}`);
+          } else {
+            console.log("workshopenrolledwatti: customer.io URL not configured, skipping.");
+          }
+        } catch (error) {
+          console.error("workshopenrolledwatti: customer.io notify failed", error.response?.data || error.message);
         }
         console.log("endpoint", endpoint);
         console.log("data", data);
@@ -846,6 +887,79 @@ exports.eiflixadscommunicationschedule = onSchedule({schedule : "00 19 * * *", r
     }
   } catch (error) {
     console.error(error,'Error')
+  }
+})
+
+// `content analytics`.totaltimespend is in seconds (the players add their timer tick: 2, 3 or 15 s).
+const NEW_USER_AI_CALL_MIN_SECONDS = 2 * 60 * 60;
+const NEW_USER_AI_CALL_FIELDS = [['Name', 'name'], ['Email', 'email'], ['Phone', 'phone']];
+
+//schedule new user AI call — every 3 hours between 11 AM and 9 PM IST: 11 AM, 2 PM, 5 PM, 8 PM
+// New users (new_user_data, movedtoexist not true, not deleted/blocked/disabled, not already in classify/newuseraicall.triggeredprofiles)
+// whose content analytics totaltimespend adds up to more than 2 hours are posted to the EiFlix hot-leads
+// Slack channel (the one eiflixtouchpointslack posts to), then added to triggeredprofiles so they're
+// never posted twice. Users under 2 hours aren't added, so they're checked again on the next run.
+exports.newuseraicall = onSchedule({schedule : "00 11,14,17,20 * * *", region: "asia-south1", timeZone: "Asia/Kolkata", timeoutSeconds: 540},async (context)=>{
+  try {
+    console.log('newuseraicall started');
+    const db = admin.firestore();
+    const triggeredRef = db.collection('classify').doc('newuseraicall');
+    const triggeredSnap = await triggeredRef.get();
+    const triggered = new Set(triggeredSnap.exists ? (triggeredSnap.data().triggeredprofiles || []) : []);
+
+    // Not `where('movedtoexist', '!=', true)`: Firestore leaves out documents that don't have the field,
+    // and most of the users we want don't have it. So read the collection and filter here.
+    // Deleted, blocked and not-enabled accounts are skipped too (same rule as isNotifiableNewUser in communication.js).
+    const usersSnap = await db.collection('new_user_data')
+      .select('name', 'email', 'phonenumber', 'countryCode', 'movedtoexist', 'accountdeleted', 'block', 'enable').get();
+    const candidates = usersSnap.docs.filter((doc) => doc.get('movedtoexist') !== true &&
+      doc.get('accountdeleted') !== true &&
+      doc.get('block') !== true &&
+      doc.get('enable') === true &&
+      !triggered.has(doc.id));
+    console.log('newuseraicall candidates', candidates.length, 'of', usersSnap.size, 'new users');
+
+    const qualified = [];
+    for (const batch of commonService.chunkArray(candidates, 20)) {
+      const totals = await Promise.all(batch.map((doc) =>
+        db.collection('content analytics').where('profileid', '==', doc.id).select('totaltimespend').get()
+          .then((snap) => snap.docs.reduce((sum, d) => sum + (Number(d.get('totaltimespend')) || 0), 0))
+          .catch((error) => {
+            // Skip this profile for this run only; it's checked again next run.
+            console.error('newuseraicall content analytics read failed', doc.id, error.message);
+            return 0;
+          })));
+      batch.forEach((doc, i) => {
+        if (totals[i] > NEW_USER_AI_CALL_MIN_SECONDS) qualified.push(doc);
+      });
+    }
+    console.log('newuseraicall over 2 hours', qualified.length);
+    if (!qualified.length) return;
+
+    const hookDoc = commonService.production === true ? 'eiflixhotleads' : 'slackDevTest';
+    const hookSnap = await db.collection('slack webhookurls').doc(hookDoc).get();
+    const hook = hookSnap.exists ? hookSnap.data() : {};
+    if (!hook.webhookurl) {
+      console.error('newuseraicall: no Slack webhook set up', hookDoc);
+      return;
+    }
+
+    const people = qualified.map((doc) => {
+      const phonenumber = String(doc.get('phonenumber') ?? '').trim();
+      const countrycode = String(doc.get('countryCode') || '+91').replace(/\+/g, '').trim();
+      return { name: doc.get('name'), email: doc.get('email'), phone: phonenumber ? `+${countrycode}${phonenumber}` : '' };
+    });
+    const messages = eiflixTouchpointSlackMessages(people, 'New users for AI call', 'Watched more than 2 hours', NEW_USER_AI_CALL_FIELDS);
+    const chunks = commonService.chunkArray(qualified, TOUCHPOINT_PEOPLE_PER_MESSAGE);
+    // Record each message's profiles only after Slack accepts it: if a post fails, the rest stay
+    // out of triggeredprofiles and go out on the next run.
+    for (let i = 0; i < messages.length; i++) {
+      await axios.post(hook.webhookurl, messages[i]);
+      await triggeredRef.set({ triggeredprofiles: FieldValue.arrayUnion(...chunks[i].map((doc) => doc.id)) }, { merge: true });
+    }
+    console.log('newuseraicall sent', qualified.length, 'profiles to', hookDoc);
+  } catch (error) {
+    console.error('newuseraicall failed', error?.response?.data || error?.message || error);
   }
 })
 
@@ -3481,10 +3595,6 @@ exports.createTvCastGrant = onCall(
     const db = getFirestore();
     const col = db.collection(TV_LOGIN_COLLECTION);
     const now = Date.now();
-
-    // 2. The approver's profile, by email, as approveTvLogin records it.
-    //    Best-effort: a failure logs a warning and stores nulls; the grant
-    //    itself never waits on it (the TV's gate resolves the account again).
     let profileId = null;
     let profileCollection = null;
     try {
@@ -3503,12 +3613,6 @@ exports.createTvCastGrant = onCall(
         `createTvCastGrant: profile lookup failed for uid ${uid}: ${error.message}`
       );
     }
-
-    // 3. The grant: 32 CSPRNG bytes → base64url (43 chars), stored as its
-    //    SHA-256 only — redeemTvLogin's lookup key. Born approved for the
-    //    caller, with every field the three lookups key on present (a null
-    //    userCodeHash can never match a code) and the request kind's whole
-    //    field set, so the Console shows one schema.
     const secret = base64url(crypto.randomBytes(32));
     const secretHash = sha256hex(secret);
     const docRef = col.doc();
@@ -3535,11 +3639,6 @@ exports.createTvCastGrant = onCall(
       throw new HttpsError("internal", "Could not prepare the cast. Please try again.");
     }
 
-    // 4. Best-effort cleanup, the same ONE query createTvLoginRequest runs
-    //    (expiresAt more than an hour past, any kind, limit 20): a phone
-    //    casts far more often than a TV asks for a code, so the sweep has
-    //    to ride on this call too or spent grants would only ever be swept
-    //    by a signed-out TV. Errors are swallowed.
     try {
       const stale = await col
         .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
@@ -3567,3 +3666,91 @@ exports.createTvCastGrant = onCall(
     };
   }
 );
+
+/**
+ * EiFlix touchpoints -> Slack (operator 2026-10-28).
+ *
+ * The EiFlix operations dashboard's "Send to Slack" (Hot Leads Today) writes ONE `eiflixtouchpoints`
+ * document per send:
+ *   { docid, webhookdoc, heading, subheading, people: [{ name, email, phone, journey }], count, sentby,
+ *     senton, status: 'pending' }
+ * `heading` / `subheading` are whatever the screen that opened the dialog shows (e.g. the Hot Leads
+ * side panel's title and caption) — nothing in the Slack message is fixed text, because the same
+ * dialog is used from many screens.
+ * This posts it to the webhook named by `webhookdoc` in `slack webhookurls` — in production only;
+ * anywhere else it goes to `slackDevTest`, like every other Slack function here — and writes the
+ * outcome back onto the same document, which the dashboard is watching:
+ *   status 'sent' (+ channel, messages, webhookused) | 'failed' (+ error), processedon.
+ * The webhook URL stays server-side. Each person is a label | value block (Name / Email / Phone /
+ * Journey), easy to read and copy; 48 people per message (Slack caps a message at 50 blocks).
+ */
+exports.eiflixtouchpointslack = onDocumentCreated("eiflixtouchpoints/{docid}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+  const data = snap.data() || {};
+  if (data.status && data.status !== 'pending') return;
+  const finish = (fields) => snap.ref.update({ ...fields, processedon: FieldValue.serverTimestamp() });
+
+  const people = Array.isArray(data.people) ? data.people : [];
+  if (!people.length) return finish({ status: 'failed', error: 'Nobody to send' });
+
+  const hookDoc = commonService.production === true ? (data.webhookdoc || 'eiflixhotleads') : 'slackDevTest';
+  try {
+    const hookSnap = await admin.firestore().collection('slack webhookurls').doc(hookDoc).get();
+    const hook = hookSnap.exists ? hookSnap.data() : {};
+    if (!hook.webhookurl) return finish({ status: 'failed', error: `No Slack webhook set up (${hookDoc})` });
+
+    const messages = eiflixTouchpointSlackMessages(people, data.heading, data.subheading);
+    for (const message of messages) await axios.post(hook.webhookurl, message);
+    return finish({ status: 'sent', channel: hook.channel || '', messages: messages.length, webhookused: hookDoc });
+  } catch (err) {
+    const detail = err?.response?.data || err?.message || String(err);
+    console.log('[eiflixtouchpointslack] failed', docidOf(event), detail);
+    return finish({ status: 'failed', error: String(detail).slice(0, 300) });
+  }
+});
+
+function docidOf(event) {
+  return event?.params?.docid || '';
+}
+
+const TOUCHPOINT_FIELDS = [['Name', 'name'], ['Email', 'email'], ['Phone', 'phone'], ['Journey', 'journey']];
+const TOUCHPOINT_PEOPLE_PER_MESSAGE = 48;
+const slackEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The Slack payloads for one touchpoint send — pure, so it can be checked without Slack.
+ * The caller's heading, the summary (subheading · head-count) in bold, then one block per person laid
+ * out as two columns, label | value, one field per row:
+ *   Name     Manoj Mm
+ *   Email    mmmanoj@gmail.com
+ *   Phone    +91 9980581119
+ *   Journey  CPM upgrade
+ * (section fields fill left-to-right, so alternating label/value gives exactly that). Nothing in the
+ * message is fixed text. 48 people per message: header + summary + 48 sections = Slack's 50-block cap.
+ * `fields` picks the rows per person (default Name / Email / Phone / Journey).
+ */
+function eiflixTouchpointSlackMessages(people, heading, subheading, fields = TOUCHPOINT_FIELDS) {
+  const chunks = commonService.chunkArray(people, TOUCHPOINT_PEOPLE_PER_MESSAGE);
+  const total = `${people.length} ${people.length === 1 ? 'person' : 'people'}`;
+  const sub = String(subheading ?? '').trim();
+  const summary = sub ? `${sub} · ${total}` : total;
+  return chunks.map((chunk, i) => {
+    const title = `${String(heading ?? '').trim() || 'Touchpoint'}${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ''}`;
+    return {
+      text: `${title} — ${summary}`,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150), emoji: true } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*${slackEsc(summary)}*` } },
+        ...chunk.map((p) => ({
+          type: 'section',
+          fields: fields.flatMap(([label, key]) => [
+            { type: 'mrkdwn', text: `*${label}*` },
+            { type: 'mrkdwn', text: slackEsc(String(p[key] ?? '').trim()) || '—' },
+          ]),
+        })),
+      ],
+    };
+  });
+}
+exports.eiflixTouchpointSlackMessages = eiflixTouchpointSlackMessages;

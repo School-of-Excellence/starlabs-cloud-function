@@ -96,7 +96,10 @@ function chunkArray(array, chunkSize) {
 }
 
 // Save Notification Record
-async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = []}){
+// receivingapp (optional) routes the push in notifyMobileApp: "breakthroughsapp"
+// (the default when the field is absent), "eiflixapp" or "all". Left off the
+// record unless a caller passes it, so every other caller's records are unchanged.
+async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = [], receivingapp = null}){
     console.log('Save notification runnning');
 	var docid = admin.firestore().collection("notificationrecord").doc().id
     var notificationRecordData = {
@@ -113,6 +116,7 @@ async function saveNotificationRecord({title = "", message = "", subtitle = null
     profileid: profileid,
     success: false
   }
+  if (receivingapp) notificationRecordData.receivingapp = receivingapp;
   await admin.firestore().collection("notificationrecord").doc(docid).set(notificationRecordData).then(() =>{
     console.log("Notification Record Saved");
   }).catch(err =>{

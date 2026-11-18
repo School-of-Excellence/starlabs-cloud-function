@@ -262,6 +262,7 @@
       "name": "createTvCastGrant",
       "type": "onCall",
       "file": "components/workshop.js",
+      "triggerPath": "eiflixtouchpoints/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -328,6 +329,14 @@
       "name": "eiflixadscommunicationschedule",
       "type": "onSchedule",
       "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "eiflixtouchpointslack",
+      "type": "onDocumentCreated",
+      "file": "components/workshop.js",
+      "triggerPath": "eiflixtouchpoints/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -462,6 +471,13 @@
       "type": "onRequest",
       "file": "components/communication.js",
       "triggerPath": "email templates/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "newuseraicall",
+      "type": "onSchedule",
+      "file": "components/workshop.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },

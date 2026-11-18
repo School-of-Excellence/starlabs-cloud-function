@@ -248,7 +248,9 @@ exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
 exports.eiflixadscommunicationschedule = workshop.eiflixadscommunicationschedule
+exports.newuseraicall = workshop.newuseraicall
 exports.discoverpagelog = workshop.discoverpagelog
+exports.eiflixtouchpointslack = workshop.eiflixtouchpointslack // c - "eiflixtouchpoints/{docid}" -> Slack (Hot Leads "Send to Slack")
 
 //tvlogin
 exports.authorizeTvDevice = workshop.authorizeTvDevice
