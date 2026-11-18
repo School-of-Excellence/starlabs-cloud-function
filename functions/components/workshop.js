@@ -674,6 +674,21 @@ exports.workshopenrolledwatti = onDocumentCreated(
         } catch (error) {
           console.error("workshopenrolledwatti: customer.io notify failed", error.response?.data || error.message);
         }
+        // Delivery hold — no WhatsApp for a profile whose profile_data or
+        // new_user_data doc has deliveryonhold === true. (The enrolment email above
+        // goes through the email archive, whose sender skips held profiles itself.)
+        // Fail CLOSED: if the hold can't be read, the WhatsApp isn't sent.
+        let heldIds;
+        try {
+          heldIds = await commonService.getDeliveryHeldProfileIds();
+        } catch (error) {
+          console.error("workshopenrolledwatti: could not check delivery hold — WhatsApp not sent", newData.profileid, error.message);
+          return;
+        }
+        if (heldIds.has(String(newData.profileid))) {
+          console.log("workshopenrolledwatti: delivery on hold — WhatsApp skipped", newData.profileid);
+          return;
+        }
         console.log("endpoint", endpoint);
         console.log("data", data);
 
@@ -710,6 +725,16 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
     }
     if (activeWorkshops.length === 0) return null;
     console.log(activeWorkshops,'activeWorkshops console');
+    // Delivery hold — no WhatsApp for a profile whose profile_data or new_user_data
+    // doc has deliveryonhold === true. Read once per run. Fail CLOSED: if it can't
+    // be read, nothing is sent tonight.
+    let heldIds;
+    try {
+      heldIds = await commonService.getDeliveryHeldProfileIds();
+    } catch (error) {
+      console.error('workshopautocommunicationschedule: could not check delivery hold — nothing sent', error.message);
+      return null;
+    }
     for (let i = 0; i < activeWorkshops.length; i++) {
       const workshop = activeWorkshops[i];
       const workshopName = workshop.workshopName ?? '';
@@ -726,6 +751,10 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
         if(!created) continue;
         const profileID = participantData['profileid'];
         if (!profileID) continue;
+        if (heldIds.has(String(profileID))) {
+          console.log('workshopautocommunicationschedule: delivery on hold — skipping', profileID);
+          continue;
+        }
         // Completion gate — mirror the participant completion page
         // (`_showCompletion`): a participant who has COMPLETED the workshop gets
         // no further daily communication. Two of the page's three signals are
@@ -814,6 +843,8 @@ exports.eiflixadscommunicationschedule = onSchedule({schedule : "00 19 * * *", r
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
     const istDayIndex = (date) => Math.floor((date.getTime() + IST_OFFSET_MS) / (24 * 60 * 60 * 1000));
     const now = new Date();
+    // Delivery hold ids, read the first time an ad sends WhatsApp (see below).
+    let heldIds = null;
     for (let i = 0; i < eiflisads.length; i++) {
       const ads = eiflisads[i];
       const notifyto = ads['notifyto'] ?? [];
@@ -880,9 +911,28 @@ exports.eiflixadscommunicationschedule = onSchedule({schedule : "00 19 * * *", r
         });
       }
       if (dayWati) {
-        const contacts = await resolveEiflixAdsContacts(audience, profileIds);
-        const result = await sendEiflixAdsWatiMessages({ dayWati, profileIds, contacts });
-        console.log('wati result', adsId, adsName, 'template', dayWati.templateName, 'sent:', result.sent, 'failed:', result.failed);
+        // Delivery hold — no WhatsApp for a profile whose profile_data or
+        // new_user_data doc has deliveryonhold === true. Fail CLOSED: if the hold
+        // can't be read, this ad's WhatsApp isn't sent (the app notification above
+        // is unaffected; notifyMobileApp applies the hold to pushes itself).
+        if (!heldIds) {
+          try {
+            heldIds = await commonService.getDeliveryHeldProfileIds();
+          } catch (error) {
+            console.error('could not check delivery hold — wati not sent', adsId, adsName, error.message);
+          }
+        }
+        if (heldIds) {
+          const watiProfileIds = profileIds.filter((profileId) => !heldIds.has(String(profileId)));
+          if (watiProfileIds.length < profileIds.length) {
+            console.log('delivery on hold — wati skipped for', profileIds.length - watiProfileIds.length, 'profiles', adsId, adsName);
+          }
+          if (watiProfileIds.length > 0) {
+            const contacts = await resolveEiflixAdsContacts(audience, watiProfileIds);
+            const result = await sendEiflixAdsWatiMessages({ dayWati, profileIds: watiProfileIds, contacts });
+            console.log('wati result', adsId, adsName, 'template', dayWati.templateName, 'sent:', result.sent, 'failed:', result.failed);
+          }
+        }
       }
     }
   } catch (error) {

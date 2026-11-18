@@ -166,8 +166,9 @@ exports.notifyMobileApp = onDocumentCreated({
         foundProfileIds.push(profileId);
 
         // Held profiles get no FCM push and no in-app log. Collected in a Set and
-        // filtered once below — new_user_data docs come through this same loop and
-        // carry no deliveryonhold field, so they must not un-hold a profile.
+        // filtered once below — profile_data and new_user_data docs both come
+        // through this loop (either can carry deliveryonhold), and a doc without
+        // the field must not un-hold the same id held by the other collection.
         if (profileData["deliveryonhold"] === true) {
           heldProfileIds.add(profileId);
           continue;
@@ -1998,14 +1999,13 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   const mapProfileEmail = {};
 
   // ── Delivery hold ────────────────────────────────────────────────────────
-  // This function loads `participant metadata` / `new_user_data`, neither of which
-  // carries deliveryonhold, so query the held profiles directly. Fail CLOSED: if the
-  // read throws we abort rather than send unfiltered — this is a retryable trigger.
-  const heldProfileIds = new Set();
+  // Held = deliveryonhold === true on the profile_data OR the new_user_data doc
+  // (commonService.getDeliveryHeldProfileIds). The metadata loaded below can't be
+  // used for this, so the held ids are queried directly. Fail CLOSED: if the read
+  // throws we abort rather than send unfiltered — this is a retryable trigger.
+  let heldProfileIds;
   try {
-    const heldSnap = await admin.firestore()
-      .collection("profile_data").where("deliveryonhold", "==", true).get();
-    heldSnap.docs.forEach(d => heldProfileIds.add(d.id));
+    heldProfileIds = await commonService.getDeliveryHeldProfileIds();
   } catch (err) {
     console.error("deliveryonhold check failed — aborting send so it can retry", err);
     throw err;
@@ -5491,17 +5491,17 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
   const { type } = req.body;
   console.log("Request type:", type);
 
-  // Delivery on hold (operator 2026-10-13): nobody whose profile_data has
-  // deliveryonhold == true is sent this communication — mail or WhatsApp.
-  // The profile_data document id IS the profileid the screens send with each
-  // recipient. A recipient that arrives without a profileid (an older caller)
-  // cannot be checked and is sent as before.
+  // Delivery on hold (operator 2026-10-13): nobody whose profile_data or
+  // new_user_data doc has deliveryonhold == true is sent this communication —
+  // mail or WhatsApp. false or no field means send as normal. The document id
+  // IS the profileid the screens send with each recipient (the New Users screen
+  // sends new_user_data people here). A recipient that arrives without a
+  // profileid (an older caller) cannot be checked and is sent as before.
   // If the lookup itself fails, send NOTHING: messaging someone on hold is the
   // worse mistake, and the screens already report a failed send.
-  const heldProfileIds = [];
+  let heldSet;
   try {
-    const heldSnap = await admin.firestore().collection('profile_data').where('deliveryonhold', '==', true).get();
-    heldSnap.forEach((doc) => heldProfileIds.push(doc.id));
+    heldSet = await commonService.getDeliveryHeldProfileIds();
   } catch (error) {
     console.error('Could not read delivery-on-hold profiles; nothing sent:', error);
     res.status(500).json({
@@ -5512,9 +5512,8 @@ exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonServic
     });
     return;
   }
-  const heldSet = new Set(heldProfileIds);
   const isHeld = (entry) => !!(entry && entry.profileid && heldSet.has(String(entry.profileid)));
-  console.log("Delivery-on-hold profiles:", heldProfileIds.length);
+  console.log("Delivery-on-hold profiles:", heldSet.size);
 
   // Email - BULK 
   if (type === 'mail') {
