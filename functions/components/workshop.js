@@ -1,5 +1,5 @@
 const commonService = require('./service');
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require('firebase-admin');
 const { Buffer } = require('buffer');
@@ -7,7 +7,7 @@ const axios = require('axios');
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getAuth } = require("firebase-admin/auth");
 const { defineSecret } = require("firebase-functions/params");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, Filter } = require("firebase-admin/firestore");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
@@ -417,6 +417,18 @@ async function getProfileData(profileId) {
   console.log("loggg", profileId);
   return null;
 }
+/**
+ * A WhatsApp template variable value WATI will accept. WhatsApp rejects any
+ * value with a line break, a tab or more than 4 spaces in a row (WATI answers
+ * 400 and nothing is sent) — so CMS text written as paragraphs, like a
+ * workshop's `enrollwattimessage`, is joined into one line: every run of
+ * whitespace becomes a single space.
+ */
+function watiTemplateValue(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+exports.watiTemplateValue = watiTemplateValue;
+
 async function sendWatiWorkshopMessage({ profileID, profileName, workshopName, workshopId, message, message2 }) {
   var apikey = null;
   var serverid = null;
@@ -516,6 +528,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
         let workshopName = "Workshop";
         let messageText = "";
         let workshopurl = "";
+        let workshopId = "";
         let mailsubject = "";
         let maildescription = "";
         let mailliveCallText = "";
@@ -534,6 +547,7 @@ exports.workshopenrolledwatti = onDocumentCreated(
             categorybased = workshopData?.categorybased || false;
             evergreenWorkshop = workshopData?.evergreenWorkshop || false;
             slackchannel = workshopData?.workshopactivitychannel || null;
+            workshopId = workshopData?.docid || workshopSnap.id;
             workshopurl = commonService.production
               ? `https://eiflix.com/web/workshop/${workshopData?.docid}`
               : `https://eiflix-workshop.web.app/workshop/${workshopData?.docid}`;
@@ -570,14 +584,16 @@ exports.workshopenrolledwatti = onDocumentCreated(
           'Content-Type': 'application/json',
         };
 
+        // Every value through watiTemplateValue: a line break in the
+        // workshop's enrollwattimessage made WATI refuse the whole message.
         const data = {
           template_name: 'eiflixworkshopv7',
           broadcast_name: 'Workshop Enrolled',
           parameters: [
-            { name: 'name', value: profile['name'] || '' },
-            { name: 'workshopname', value: workshopName },
-            { name: 'link', value: workshopurl },
-            { name: '1', value: messageText },
+            { name: 'name', value: watiTemplateValue(profile['name']) },
+            { name: 'workshopname', value: watiTemplateValue(workshopName) },
+            { name: 'link', value: watiTemplateValue(workshopurl) },
+            { name: '1', value: watiTemplateValue(messageText) },
           ]
         };
         try {
@@ -586,12 +602,14 @@ exports.workshopenrolledwatti = onDocumentCreated(
             ? "WorkshopEnrolledMessageEvergreen"
             : categorybased
               ? "WorkshopEnrolledMessage1"
-              : "WorkshopEnrolledMessage";
+              // : "WorkshopEnrolledMessage";
+              :"workshopenrollmail"
           const postmarktemplateId = evergreenWorkshop
             ? '45591602'
             : categorybased
               ? '43859890'
-              : '42135513';
+              // : '42135513';
+              :"48350274"
           // await commonService.postmarkClient.sendEmailWithTemplate({
           //   From: "starlabs@excellenceinstallation.com",
           //   To: profile['email'],
@@ -633,6 +651,44 @@ exports.workshopenrolledwatti = onDocumentCreated(
         } catch (emailError) {
           console.error('Error sending welcome email:', emailError);
         }
+
+        // Forward the enrolment to Customer.io. The webhook URL lives in
+        // `classify/eiflixcustomerio.api`; when it's missing or blank we skip.
+        // Failures are caught so they never block the WATI message below.
+        try {
+          const customerioSnap = await admin.firestore().collection("classify").doc("eiflixcustomerio").get();
+          const customerioUrl = customerioSnap.exists ? customerioSnap.data().api : null;
+          if (typeof customerioUrl === "string" && customerioUrl.trim() !== "") {
+            // profile_data uses `countrycode`, new_user_data uses `countryCode`.
+            const countrycode = String(profile['countrycode'] || profile['countryCode'] || '+91').replace(/\+/g, '').trim();
+            await axios.post(customerioUrl.trim(), {
+              name: profile['name'] || '',
+              email: profile['email'] || '',
+              phone: phonenumber ? `+${countrycode}${String(phonenumber).trim()}` : '',
+              workshopid: workshopId,
+            });
+            console.log(`workshopenrolledwatti: customer.io notified for ${snapshot.id}`);
+          } else {
+            console.log("workshopenrolledwatti: customer.io URL not configured, skipping.");
+          }
+        } catch (error) {
+          console.error("workshopenrolledwatti: customer.io notify failed", error.response?.data || error.message);
+        }
+        // Delivery hold — no WhatsApp for a profile whose profile_data or
+        // new_user_data doc has deliveryonhold === true. (The enrolment email above
+        // goes through the email archive, whose sender skips held profiles itself.)
+        // Fail CLOSED: if the hold can't be read, the WhatsApp isn't sent.
+        let heldIds;
+        try {
+          heldIds = await commonService.getDeliveryHeldProfileIds();
+        } catch (error) {
+          console.error("workshopenrolledwatti: could not check delivery hold — WhatsApp not sent", newData.profileid, error.message);
+          return;
+        }
+        if (heldIds.has(String(newData.profileid))) {
+          console.log("workshopenrolledwatti: delivery on hold — WhatsApp skipped", newData.profileid);
+          return;
+        }
         console.log("endpoint", endpoint);
         console.log("data", data);
 
@@ -669,6 +725,16 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
     }
     if (activeWorkshops.length === 0) return null;
     console.log(activeWorkshops,'activeWorkshops console');
+    // Delivery hold — no WhatsApp for a profile whose profile_data or new_user_data
+    // doc has deliveryonhold === true. Read once per run. Fail CLOSED: if it can't
+    // be read, nothing is sent tonight.
+    let heldIds;
+    try {
+      heldIds = await commonService.getDeliveryHeldProfileIds();
+    } catch (error) {
+      console.error('workshopautocommunicationschedule: could not check delivery hold — nothing sent', error.message);
+      return null;
+    }
     for (let i = 0; i < activeWorkshops.length; i++) {
       const workshop = activeWorkshops[i];
       const workshopName = workshop.workshopName ?? '';
@@ -685,6 +751,10 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
         if(!created) continue;
         const profileID = participantData['profileid'];
         if (!profileID) continue;
+        if (heldIds.has(String(profileID))) {
+          console.log('workshopautocommunicationschedule: delivery on hold — skipping', profileID);
+          continue;
+        }
         // Completion gate — mirror the participant completion page
         // (`_showCompletion`): a participant who has COMPLETED the workshop gets
         // no further daily communication. Two of the page's three signals are
@@ -749,6 +819,382 @@ exports.workshopautocommunicationschedule = onSchedule({schedule : "00 21 * * *"
     console.error(error,'Error')
   }
 })
+
+//schedule eiflix ads auto communication
+exports.eiflixadscommunicationschedule = onSchedule({schedule : "00 19 * * *", region: "asia-south1", timeZone: "Asia/Kolkata", timeoutSeconds: 540},async (context)=>{
+  try {
+    console.log('started');
+    const snapshot = await admin.firestore().collection("eiflixhomewidgets").where('widgettype','==','ads').get();
+    let eiflisads = [];
+    for (let i = 0; i < snapshot.docs.length; i++) {
+      const doc = snapshot.docs[i];
+      const data = doc.data()
+      if (data['show'] == true && data['autonotification'] == true) {
+        eiflisads.push ({
+          id:doc.id,
+          ref:doc.ref,
+          ...data
+        });
+      }
+    }
+    if (eiflisads.length === 0) return null;
+    console.log(eiflisads,'eiflisads console');
+    // Ads run on IST calendar days: the startdate's own day is day 1.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const istDayIndex = (date) => Math.floor((date.getTime() + IST_OFFSET_MS) / (24 * 60 * 60 * 1000));
+    const now = new Date();
+    // Delivery hold ids, read the first time an ad sends WhatsApp (see below).
+    let heldIds = null;
+    for (let i = 0; i < eiflisads.length; i++) {
+      const ads = eiflisads[i];
+      const notifyto = ads['notifyto'] ?? [];
+      const selectedjourneys = ads['selectedjourneys'] ?? [];
+      const selectedfunnels = ads['selectedfunnels'] ?? [];
+      const adsName = ads.title ?? '';
+      const adsId = ads.id ?? '';
+      const startDate = ads.startdate?.toDate?.();
+      const endDate = ads.enddate?.toDate?.();
+      if (!startDate || !endDate) {
+        console.log('missing startdate/enddate', adsId, adsName);
+        continue;
+      }
+      if (now < startDate) {
+        console.log('not started', adsId, adsName, startDate);
+        continue;
+      }
+      if (now > endDate) {
+        console.log('ended', adsId, adsName, endDate);
+        continue;
+      }
+      const dayNumber = istDayIndex(now) - istDayIndex(startDate) + 1;
+      console.log('running day', dayNumber, adsId, adsName);
+      // Each channel is opt-in and reads the day's entry from its own array.
+      const enableAppNotification = ads['enableappnotification'] === true;
+      const enableWati = ads['enablewati'] === true;
+      const appNotificationMap = Array.isArray(ads.appnotificationmap) ? ads.appnotificationmap : [];
+      const watiMap = Array.isArray(ads.watimap) ? ads.watimap : [];
+      const dayNotification = enableAppNotification ? appNotificationMap[dayNumber - 1] : null;
+      const dayWati = enableWati ? watiMap[dayNumber - 1] : null;
+      if (!dayNotification && !dayWati) {
+        console.log('nothing to send for day', dayNumber, adsId, adsName, 'appnotification:', enableAppNotification, 'wati:', enableWati);
+        continue;
+      }
+      console.log(dayNotification,'dayNotification console');
+      console.log(dayWati,'dayWati console');
+      const audience = await getEiflixAdsAudience(notifyto, selectedjourneys, selectedfunnels);
+      console.log('audience', adsId, adsName, 'participants:', audience.participants.length, 'newusers:', audience.newUsers.length, 'funnelenrolled:', audience.funnelEnrolled.length);
+      const profileIds = Array.from(new Set([
+        ...[...audience.participants, ...audience.newUsers].map((profile) => profile.profileid ?? profile.id),
+        ...audience.funnelEnrolled.map((enrolled) => enrolled.profileid)
+      ].filter(Boolean)));
+      if (profileIds.length === 0) {
+        console.log('no audience for', adsId, adsName, notifyto);
+        continue;
+      }
+      console.log('profileIds count', profileIds.length, adsId, adsName);
+      if (dayNotification) {
+        await commonService.saveNotificationRecord({
+          title: adsName || "EiFlix Ads",
+          message: dayNotification.message || '',
+          subtitle: dayNotification.subtitle || null,
+          date: admin.firestore.FieldValue.serverTimestamp(),
+          landingpage: dayNotification.landingPage ?? null,
+          logged: dayNotification.logged === true,
+          profileid: profileIds,
+          sticky: dayNotification.sticky === true,
+          notificationtype: "ahupdate",
+          notificationimage: null,
+          metadata: {
+            adsId: adsId,
+            day: dayNumber
+          }
+        });
+      }
+      if (dayWati) {
+        // Delivery hold — no WhatsApp for a profile whose profile_data or
+        // new_user_data doc has deliveryonhold === true. Fail CLOSED: if the hold
+        // can't be read, this ad's WhatsApp isn't sent (the app notification above
+        // is unaffected; notifyMobileApp applies the hold to pushes itself).
+        if (!heldIds) {
+          try {
+            heldIds = await commonService.getDeliveryHeldProfileIds();
+          } catch (error) {
+            console.error('could not check delivery hold — wati not sent', adsId, adsName, error.message);
+          }
+        }
+        if (heldIds) {
+          const watiProfileIds = profileIds.filter((profileId) => !heldIds.has(String(profileId)));
+          if (watiProfileIds.length < profileIds.length) {
+            console.log('delivery on hold — wati skipped for', profileIds.length - watiProfileIds.length, 'profiles', adsId, adsName);
+          }
+          if (watiProfileIds.length > 0) {
+            const contacts = await resolveEiflixAdsContacts(audience, watiProfileIds);
+            const result = await sendEiflixAdsWatiMessages({ dayWati, profileIds: watiProfileIds, contacts });
+            console.log('wati result', adsId, adsName, 'template', dayWati.templateName, 'sent:', result.sent, 'failed:', result.failed);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error(error,'Error')
+  }
+})
+
+// `content analytics`.totaltimespend is in seconds (the players add their timer tick: 2, 3 or 15 s).
+const NEW_USER_AI_CALL_MIN_SECONDS = 2 * 60 * 60;
+const NEW_USER_AI_CALL_FIELDS = [['Name', 'name'], ['Email', 'email'], ['Phone', 'phone']];
+
+//schedule new user AI call — every 3 hours between 11 AM and 9 PM IST: 11 AM, 2 PM, 5 PM, 8 PM
+// New users (new_user_data, movedtoexist not true, not deleted/blocked/disabled, not already in classify/newuseraicall.triggeredprofiles)
+// whose content analytics totaltimespend adds up to more than 2 hours are posted to the EiFlix hot-leads
+// Slack channel (the one eiflixtouchpointslack posts to), then added to triggeredprofiles so they're
+// never posted twice. Users under 2 hours aren't added, so they're checked again on the next run.
+exports.newuseraicall = onSchedule({schedule : "00 11,14,17,20 * * *", region: "asia-south1", timeZone: "Asia/Kolkata", timeoutSeconds: 540},async (context)=>{
+  try {
+    console.log('newuseraicall started');
+    const db = admin.firestore();
+    const triggeredRef = db.collection('classify').doc('newuseraicall');
+    const triggeredSnap = await triggeredRef.get();
+    const triggered = new Set(triggeredSnap.exists ? (triggeredSnap.data().triggeredprofiles || []) : []);
+
+    // Not `where('movedtoexist', '!=', true)`: Firestore leaves out documents that don't have the field,
+    // and most of the users we want don't have it. So read the collection and filter here.
+    // Deleted, blocked and not-enabled accounts are skipped too (same rule as isNotifiableNewUser in communication.js).
+    const usersSnap = await db.collection('new_user_data')
+      .select('name', 'email', 'phonenumber', 'countryCode', 'movedtoexist', 'accountdeleted', 'block', 'enable').get();
+    const candidates = usersSnap.docs.filter((doc) => doc.get('movedtoexist') !== true &&
+      doc.get('accountdeleted') !== true &&
+      doc.get('block') !== true &&
+      doc.get('enable') === true &&
+      !triggered.has(doc.id));
+    console.log('newuseraicall candidates', candidates.length, 'of', usersSnap.size, 'new users');
+
+    const qualified = [];
+    for (const batch of commonService.chunkArray(candidates, 20)) {
+      const totals = await Promise.all(batch.map((doc) =>
+        db.collection('content analytics').where('profileid', '==', doc.id).select('totaltimespend').get()
+          .then((snap) => snap.docs.reduce((sum, d) => sum + (Number(d.get('totaltimespend')) || 0), 0))
+          .catch((error) => {
+            // Skip this profile for this run only; it's checked again next run.
+            console.error('newuseraicall content analytics read failed', doc.id, error.message);
+            return 0;
+          })));
+      batch.forEach((doc, i) => {
+        if (totals[i] > NEW_USER_AI_CALL_MIN_SECONDS) qualified.push(doc);
+      });
+    }
+    console.log('newuseraicall over 2 hours', qualified.length);
+    if (!qualified.length) return;
+
+    const hookDoc = commonService.production === true ? 'eiflixhotleads' : 'slackDevTest';
+    const hookSnap = await db.collection('slack webhookurls').doc(hookDoc).get();
+    const hook = hookSnap.exists ? hookSnap.data() : {};
+    if (!hook.webhookurl) {
+      console.error('newuseraicall: no Slack webhook set up', hookDoc);
+      return;
+    }
+
+    const people = qualified.map((doc) => {
+      const phonenumber = String(doc.get('phonenumber') ?? '').trim();
+      const countrycode = String(doc.get('countryCode') || '+91').replace(/\+/g, '').trim();
+      return { name: doc.get('name'), email: doc.get('email'), phone: phonenumber ? `+${countrycode}${phonenumber}` : '' };
+    });
+    const messages = eiflixTouchpointSlackMessages(people, 'New users for AI call', 'Watched more than 2 hours', NEW_USER_AI_CALL_FIELDS);
+    const chunks = commonService.chunkArray(qualified, TOUCHPOINT_PEOPLE_PER_MESSAGE);
+    // Record each message's profiles only after Slack accepts it: if a post fails, the rest stay
+    // out of triggeredprofiles and go out on the next run.
+    for (let i = 0; i < messages.length; i++) {
+      await axios.post(hook.webhookurl, messages[i]);
+      await triggeredRef.set({ triggeredprofiles: FieldValue.arrayUnion(...chunks[i].map((doc) => doc.id)) }, { merge: true });
+    }
+    console.log('newuseraicall sent', qualified.length, 'profiles to', hookDoc);
+  } catch (error) {
+    console.error('newuseraicall failed', error?.response?.data || error?.message || error);
+  }
+})
+
+async function resolveEiflixAdsContacts(audience, profileIds) {
+  const CHUNK = 30;
+  const contacts = new Map();
+  const remember = (profileId, data) => {
+    if (!profileId || !data || contacts.has(profileId)) return;
+    const phone = data['phonenumber'];
+    if (!phone) return;
+    const rawCode = data['countrycode'] || data['countryCode'] || '+91';
+    const countrycode = String(rawCode).replace(/\+/g, '').trim();
+    contacts.set(profileId, {
+      whatsappNumber: `${countrycode}${String(phone).trim()}`,
+      data: data
+    });
+  };
+  const known = [...audience.participants, ...audience.newUsers];
+  for (let i = 0; i < known.length; i++) remember(known[i].profileid ?? known[i].id, known[i]);
+
+  const missing = profileIds.filter((profileId) => !contacts.has(profileId));
+  for (let s = 0; s < missing.length; s += CHUNK) {
+    const chunk = missing.slice(s, s + CHUNK);
+    const [metadataSnap, newUserSnap] = await Promise.all([
+      admin.firestore().collection('participant metadata')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk).get(),
+      admin.firestore().collection('new_user_data')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk).get()
+    ]);
+    metadataSnap.docs.forEach((doc) => remember(doc.id, doc.data()));
+    newUserSnap.docs.forEach((doc) => remember(doc.id, doc.data()));
+  }
+  return contacts;
+}
+
+async function sendEiflixAdsWatiMessages({ dayWati, profileIds, contacts }) {
+  var apikey = null;
+  var serverid = null;
+
+  await admin.firestore().collection("classify").doc("eventwati").get().then((wati) => {
+    if (wati.exists) {
+      const watiData = wati.data();
+      apikey = watiData['apikey'];
+      serverid = watiData['serverid'];
+    }
+  });
+
+  const templateName = dayWati.templateName;
+  if (!apikey || !serverid || !templateName) {
+    console.log('wati not configured', 'apikey:', !!apikey, 'serverid:', !!serverid, 'template:', templateName);
+    return { sent: 0, failed: profileIds.length };
+  }
+
+  const headers = {
+    'Authorization': `Bearer ${apikey}`,
+    'Content-Type': 'application/json',
+  };
+  const variables = Array.isArray(dayWati.variables) ? dayWati.variables : [];
+  const alreadySent = new Set();
+  let sent = 0;
+  let failed = 0;
+
+  for (let p = 0; p < profileIds.length; p++) {
+    const profileId = profileIds[p];
+    const contact = contacts.get(profileId);
+    if (!contact || alreadySent.has(contact.whatsappNumber)) {
+      if (!contact) {
+        console.log('no phone number for profile', profileId);
+        failed++;
+      }
+      continue;
+    }
+    alreadySent.add(contact.whatsappNumber);
+
+    const parameters = variables.map((variable) => ({
+      name: variable.name,
+      value: String((variable.type === 'metadata'
+        ? contact.data[variable.value]
+        : variable.value) ?? '')
+    }));
+
+    const endpoint = `https://live-mt-server.wati.io/${serverid}/api/v1/sendTemplateMessage?whatsappNumber=${contact.whatsappNumber}`;
+    const data = {
+      template_name: templateName,
+      broadcast_name: 'EiflixAds',
+      parameters: parameters
+    };
+
+    try {
+      const response = await axios.post(endpoint, data, { headers });
+      if (response.data?.result === false) {
+        console.log('wati rejected', contact.whatsappNumber, JSON.stringify(response.data));
+        failed++;
+      } else {
+        sent++;
+      }
+    } catch (error) {
+      console.error('wati send failed', contact.whatsappNumber, error.response?.data || error.message);
+      failed++;
+    }
+  }
+
+  return { sent, failed };
+}
+
+async function getEiflixAdsAudience(notifyto, selectedjourneys, selectedfunnels) {
+  const DISJUNCTION_LIMIT = 30;
+  const options = Array.isArray(notifyto) ? notifyto : [];
+  const result = { participants: [], newUsers: [], funnelEnrolled: [] };
+  if (options.length === 0) return result;
+
+  const statusFilters = [];
+  if (options.includes('active participants')) statusFilters.push(Filter.where('customerstatus', '==', 'active'));
+  if (options.includes('non active participants')) statusFilters.push(Filter.where('customerstatus', '==', 'non active'));
+
+  // `activejourney` is stored as the journey doc id (string) — accept ids or refs.
+  const journeyIds = options.includes('journey')
+    ? (Array.isArray(selectedjourneys) ? selectedjourneys : [])
+        .map((journey) => (typeof journey === 'string' ? journey : journey?.id))
+        .filter(Boolean)
+    : [];
+
+  const journeyFilters = [];
+  const chunkSize = Math.max(1, DISJUNCTION_LIMIT - statusFilters.length);
+  for (let s = 0; s < journeyIds.length; s += chunkSize) {
+    journeyFilters.push(Filter.where('activejourney', 'in', journeyIds.slice(s, s + chunkSize)));
+  }
+
+  // First group carries the statuses + first journey chunk (the usual single-query case).
+  const filterGroups = [];
+  if (journeyFilters.length > 0) {
+    filterGroups.push([...statusFilters, journeyFilters[0]]);
+    for (let g = 1; g < journeyFilters.length; g++) filterGroups.push([journeyFilters[g]]);
+  } else if (statusFilters.length > 0) {
+    filterGroups.push(statusFilters);
+  }
+
+  const participantsById = new Map();
+  for (let g = 0; g < filterGroups.length; g++) {
+    const group = filterGroups[g];
+    const filter = group.length === 1 ? group[0] : Filter.or(...group);
+    const snap = await admin.firestore().collection('participant metadata').where(filter).get();
+    for (let d = 0; d < snap.docs.length; d++) {
+      const participantDoc = snap.docs[d];
+      participantsById.set(participantDoc.id, {
+        id: participantDoc.id,
+        ref: participantDoc.ref,
+        ...participantDoc.data()
+      });
+    }
+  }
+  result.participants = Array.from(participantsById.values());
+
+  if (options.includes('new users')) {
+    const newUserSnap = await admin.firestore().collection('new_user_data').get();
+    result.newUsers = newUserSnap.docs.map((newUserDoc) => ({
+      id: newUserDoc.id,
+      ref: newUserDoc.ref,
+      ...newUserDoc.data()
+    }));
+  }
+
+  if (options.includes('funnel only')) {
+    const funnelRefs = (Array.isArray(selectedfunnels) ? selectedfunnels : [])
+      .map((funnel) => (typeof funnel === 'string'
+        ? admin.firestore().collection(WS_WORKSHOP_COLLECTION).doc(funnel)
+        : funnel))
+      .filter(Boolean);
+    for (let s = 0; s < funnelRefs.length; s += DISJUNCTION_LIMIT) {
+      const enrolledSnap = await admin.firestore().collection(WS_ENROLLED_COLLECTION)
+        .where('workshopref', 'in', funnelRefs.slice(s, s + DISJUNCTION_LIMIT)).get();
+      for (let d = 0; d < enrolledSnap.docs.length; d++) {
+        const enrolledDoc = enrolledSnap.docs[d];
+        result.funnelEnrolled.push({
+          id: enrolledDoc.id,
+          ref: enrolledDoc.ref,
+          ...enrolledDoc.data()
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
 
 function requireAuth(request) {
   if (!request.auth || !request.auth.uid) {
@@ -995,6 +1441,7 @@ async function loadWorkshopPaymentConfig(db, workshopId) {
   let keySecret = "";
   const secretSnap =
     await db.collection(WS_SECRET_COLLECTION).doc(workshopId).get();
+    // await db.collection(WS_SECRET_COLLECTION).doc('XSPpA2JWhCDik508cdQC').get();
   if (secretSnap.exists) {
     keySecret = String(secretSnap.get("keySecret") || "").trim();
   }
@@ -1032,7 +1479,7 @@ async function loadWorkshopPaymentConfig(db, workshopId) {
  * @returns {Promise<{email: (string|null), phonenumber: (string|null), countrycode: (string|null)}>}
  */
 async function resolveWorkshopUserContact(db, profileId) {
-  const empty = { email: null, phonenumber: null, countrycode: null };
+  const empty = { email: null, phonenumber: null, countrycode: null, name: null };
   if (!profileId) {
     return empty;
   }
@@ -1045,6 +1492,7 @@ async function resolveWorkshopUserContact(db, profileId) {
         email: str(d.email),
         phonenumber: str(d.phonenumber),
         countrycode: str(d.countrycode),
+        name: str(d.name),
       };
     }
     const nu = await db.collection("new_user_data").doc(profileId).get();
@@ -1054,6 +1502,7 @@ async function resolveWorkshopUserContact(db, profileId) {
         email: str(d.email),
         phonenumber: str(d.phonenumber),
         countrycode: str(d.countryCode), // capital C in new_user_data
+        name: str(d.name),
       };
     }
   } catch (error) {
@@ -1497,17 +1946,21 @@ async function settleWorkshopPayment(
   if (outcome.newlyCredited) {
     try {
       const url = commonService.production
-        ? await commonService.getWebhookUrl("slackeiflixrefferals")
+        // ? await commonService.getWebhookUrl("slackeiflixrefferals")
+        ? await commonService.getWebhookUrl("slackWorkshopsubscribersactivity")
         : await commonService.getWebhookUrl("slackDevTest");
       if (url) {
         const webhook = new commonService.IncomingWebhook(url);
         const workshopTitle = detail.title || "Workshop";
         const buyer = contact.email || contact.phonenumber || profileId;
+        const buyername = contact.name;
+        const buyermail = contact.email;
+        const buyerphone = contact.phonenumber;
         const amountText = payment && payment.amount != null
           ? `₹${payment.amount / 100}`
           : "payment";
         const message =
-          `💰 *Payment credited* — *${buyer}* paid *${amountText}* for ` +
+          `💰 *Payment credited* — *${buyername}* - *${buyermail}* - *${buyerphone}* paid *${amountText}* for ` +
           `*${workshopTitle}* 🎉`;
         await webhook.send(message);
         console.log(`settleWorkshopPayment: slack notified for ${paymentId}`);
@@ -1516,6 +1969,34 @@ async function settleWorkshopPayment(
       }
     } catch (error) {
       console.error("settleWorkshopPayment: slack notify failed", error);
+    }
+  }
+
+  // Forward the buyer to Customer.io, only on a fresh credit. The destination
+  // URL lives in `classify/eiflixwebapp.customerio`; when that field is missing
+  // or blank we skip silently. Failures are caught and never break settlement.
+  if (outcome.newlyCredited) {
+    try {
+      const classifySnap = await db
+        .collection("classify")
+        .doc("eiflixwebapp")
+        .get();
+      const customerioUrl = classifySnap.exists
+        ? classifySnap.data().customerio
+        : null;
+      if (typeof customerioUrl === "string" && customerioUrl.trim() !== "") {
+        await axios.post(customerioUrl.trim(), {
+          email: contact.email,
+          phonenumber: contact.phonenumber,
+          workshopid: workshopRef.id,
+          name: contact.name,
+        });
+        console.log(`settleWorkshopPayment: customer.io notified for ${paymentId}`);
+      } else {
+        console.log("settleWorkshopPayment: customer.io URL not configured, skipping.");
+      }
+    } catch (error) {
+      console.error("settleWorkshopPayment: customer.io notify failed", error);
     }
   }
 
@@ -2099,6 +2580,1227 @@ exports.authorizeTvDevice = onCall(
   }
 );
 
-function sendwatitonewusers(){
-  
+// Discover-page activity → Slack. The web app writes one doc per Discover
+// visit (create = "entered", debounced merges append to `events`). Every new
+// index in `events` becomes its own Slack message; merges that only bump
+// lastactiveat / leftat send nothing.
+const DISCOVER_SECTION_NAMES = {
+  orientation: "Orientation",
+  scienceinaction: "The Science In Action",
+  ahexperience: "The A&H Experience",
+  eit: "Understand EIT",
+  livearena: "Live From The Arena",
+  prodigies: "Antano & Prodigies",
+};
+
+exports.discoverpagelog = onDocumentWritten("discoverpagelogs/{docid}",async (snapshot)=>{
+  let oldData = snapshot.data.before.data();
+  let newData = snapshot.data.after.data();
+
+  try {
+    if (!newData) return null; // doc deleted — nothing to report
+
+    const name = newData.name || "Unknown";
+    const email = newData.email || "-";
+    const phonenumber = newData.phonenumber || "-";
+    const who = `*${name}* (${email}, ${phonenumber})`;
+
+    const messages = [];
+
+    // Doc created → the user just entered /discover.
+    if (!oldData) {
+      messages.push(`${who} entered the Discover page`);
+    }
+
+    // Every index newly appended to `events` gets its own message. The app
+    // always rewrites the full array, so new entries are exactly the tail.
+    const oldEvents = Array.isArray(oldData?.events) ? oldData.events : [];
+    const newEvents = Array.isArray(newData.events) ? newData.events : [];
+    for (let i = oldEvents.length; i < newEvents.length; i++) {
+      const event = newEvents[i] || {};
+      if (event.type === "buttonclick") {
+        messages.push(`${who} clicked *${event.button || ""}*`);
+      } else if (event.type === "videoplay") {
+        // Embedded link: videoname as the label when present, else the
+        // literal label "videourl" — never the raw URL as text.
+        const label = event.videoname || "videourl";
+        const link = event.videourl ? `<${event.videourl}|${label}>` : label;
+        const section = DISCOVER_SECTION_NAMES[event.section] || event.section || "";
+        messages.push(
+          section
+            ? `${who} played ${link} in *${section}* section`
+            : `${who} played ${link}`
+        );
+      }
+    }
+
+    if (messages.length === 0) return null; // lastactiveat / leftat merge only
+
+    const url = commonService.production
+      ? await commonService.getWebhookUrl("eiflixuseractivity")
+      : await commonService.getWebhookUrl("slackDevTest");
+
+    const webhook = new commonService.IncomingWebhook(url);
+
+    for (const message of messages) {
+      await webhook.send(message, (err, header, statusCode, body) => {
+        if (err) {
+          console.error("Error", err);
+        } else {
+          console.log("Message sent", statusCode);
+        }
+      });
+    }
+    return null;
+  } catch (error){
+    console.error('Error discoverpagelog', error.response?.data || error.message);
+    throw error;
+  }
+})
+
+// ── TV login (phone approval, RFC 8628 device-flow shape) ─────────────────
+//
+// "Sign in with your phone" for the Android TV app (com.eiflix.tv). The TV
+// asks for a code (`createTvLoginRequest`, no Firebase user) and shows it; the
+// viewer's already-signed-in phone approves it (`approveTvLogin`, Firebase
+// Auth required); the TV learns of the approval in real time from a snapshot
+// listener on its OWN request document tvLoginRequests/{requestId}
+// (2026-09-21 pass 5 — there is no status mirror any more) and then calls
+// `redeemTvLogin` ONCE (no Firebase user) with its device secret and receives
+// a custom token minted for the APPROVER's uid — `approvedUid` is always
+// `request.auth.uid`, never client input. The TV has NO polling path and NO
+// silent fallback (owner rule, 2026-09-21): when the listener cannot attach
+// (rule not deployed, any Firestore error) the TV shows the failure on screen
+// and the phone path stops for that screen — email/password sign-in stays.
+// `intervalSeconds` is still returned because it is the unchanged RFC 8628
+// wire shape; the TV does not use it. Nothing here reuses `pendingAuth` /
+// `authorizeTvDevice`. A fourth callable, `createTvCastGrant`, lets the
+// signed-in phone hand its identity to the TV over Google Cast instead of a
+// code (the kind "castgrant" document below) — the redemption is the same
+// `redeemTvLogin`.
+//
+// SELF-CONTAINED handlers: the gen-2 bundling quirk described in
+// authorizeTvDevice dropped a module-level *function* from a deployed
+// handler, so every helper (sha256hex, base64url, code normalise/format,
+// sanitising) is a closure inside each handler and deliberately duplicated.
+// Module-level CONSTANTS are fine (WS_ORDER_COLLECTION works the same way).
+//
+// TWO COLLECTIONS, that's it (owner decision, 2026-09-21 pass 5): everything
+// about login lives in tvLoginRequests, the app-open log in tvuserlogs. The
+// former tvLoginStatus (status mirror) and tvLoginApprovers (per-uid lockout
+// docs) collections are REMOVED — nothing here reads, writes or deletes them,
+// and the TV no longer knows their names.
+//
+// tvLoginRequests/{autoId} (Firestore auto ids) holds documents of two kinds,
+// told apart by `kind`:
+//
+// kind "request" — one per code issued (its auto id is returned to the TV as
+// `requestId`; the TV listens to this very document while SIGNED OUT):
+//   kind          "request"
+//   secretHash    string     sha256hex(secret) — redeemTvLogin's lookup key; the secret
+//                            itself is stored nowhere
+//   userCodeHash  string     sha256hex(TV_LOGIN_CODE_PEPPER + userCode) — raw code never stored
+//   status        "pending" | "approved" | "redeemed"   ← what the TV's listener reads
+//   tvlabel       string     server-derived "<manufacturer> <model>", else "Android TV".
+//                            Always a single line (control / format characters are
+//                            stripped in sanitiseDevice — see the logging note below).
+//                            The phone receives it as `tvName` (2026-09-18: it used to be
+//                            the Settings device name, which is a person's name as often
+//                            as not — that value now lives in device.settingsdevicename)
+//   device        map        the TV's metadata, sanitised flat to TV_LOGIN_DEVICE_KEYS —
+//                            every key present, null when the TV did not send it
+//   createdAt     Timestamp  (server)
+//   expiresAt     Timestamp  createdAt + 10 min (Timestamp.fromMillis(Date.now() + TTL))
+//   approvedUid   string | null      approvedAt  Timestamp | null
+//   profileId     string | null      the approver's profile doc id, resolved server-side
+//                                    by email at approval (best-effort: null when nothing
+//                                    matched or the lookup failed — never blocks approval)
+//   profileCollection  "profile_data" | "new_user_data" | null
+//   redeemedAt    Timestamp | null
+//   updatedAt     Timestamp  (server) — stamped by the approve and redeem flips
+//                            (absent while pending)
+//
+// kind "failure" — one per WRONG code (`wrong_code` only: a malformed code is
+// invalid-argument before any lookup, an already-used and an expired code are
+// not counted), the per-approver lockout (auto id, no client access):
+//   kind          "failure"
+//   approverUid   string     request.auth.uid of the phone that guessed
+//   at            Timestamp  (server)
+//   expiresAt     Timestamp  now + TV_LOGIN_LOCKOUT_WINDOW_MS (15 min) — the record
+//                            counts while expiresAt > now, then it is dead weight
+//                            until the cleanup sweeps it
+// approveTvLogin counts the caller's live failure records INSIDE its
+// transaction, before the code lookup, with the equality-only query
+// kind == "failure" && approverUid == uid, limit 30 (no composite index):
+// TV_LOGIN_LOCKOUT_MAX or more live → resource-exhausted; a miss tx.create()s
+// the new record in the same commit. PHANTOM INSERTS: a Firestore transaction
+// locks the documents it READ, not a query's result set, so two concurrent
+// guesses from the same uid can each count N and both create their record —
+// a couple of extra guesses can slip through around the threshold. Against a
+// 23^8 (≈ 7.8 × 10^10) code space that is acceptable. The limit(30) can only
+// under-count once one uid has piled up more than 30 records inside the
+// ~1 h 15 min before the cleanup sweeps them — same verdict. A failure record
+// carries neither secretHash nor userCodeHash, so the code lookup
+// (userCodeHash ==) and the redeem lookup (secretHash ==) never see one.
+//
+// kind "castgrant" — one per Cast from the phone app (2026-09-22, Cast pass
+// 2): the sign-in hand-over for Google Cast Connect. The SIGNED-IN phone
+// calls `createTvCastGrant` (Firebase Auth required, no input) right before
+// it launches the TV app over Cast, and puts the returned `credentials`
+// string — `eiflix-cast/1:<uid>:<secret>` — into the Cast launch's
+// CredentialsData. The TV app reads it at launch: already signed in as that
+// uid → nothing to do; otherwise it calls the UNCHANGED `redeemTvLogin`
+// with the secret, runs its account gate on the token, signs the previous
+// viewer out and itself in as the caster, and only then plays. Born
+// `approved` — there is no code and nobody to approve it, the caller IS the
+// approver — so `redeemTvLogin` finds it by secretHash and treats it exactly
+// like an approved request (its +30 s grace applies to the 5-minute expiry):
+//   kind          "castgrant"
+//   secretHash    string     sha256hex(secret) — the secret itself is stored nowhere
+//   userCodeHash  null       so approveTvLogin's code lookup (userCodeHash ==) can never match it
+//   status        "approved" | "redeemed"
+//   tvlabel       null       no TV asked; the phone does not know which TV yet
+//   device        null
+//   createdAt     Timestamp  (server)       approvedAt  Timestamp (server) — same instant
+//   expiresAt     Timestamp  createdAt + TV_CAST_GRANT_TTL_MS (5 min — long enough for the
+//                            Cast dialog and the TV app's cold start, short enough that a
+//                            grant left in a phone's memory is soon worthless)
+//   approvedUid   string     request.auth.uid of the phone — never client input
+//   profileId / profileCollection   resolved from the caller's email exactly as approveTvLogin
+//                            does (best-effort, null when nothing matched)
+//   redeemedAt    Timestamp | null      updatedAt  Timestamp (server)
+// The uid rides in the credentials string only so the TV can skip a redeem
+// when it is already that viewer; the secret is the proof. Every field the
+// three lookups key on is present, so a grant and a request never collide.
+// createTvLoginRequest's cleanup sweeps grants too (same expiresAt query);
+// createTvCastGrant runs the same best-effort sweep, so phones that cast
+// every day keep the collection tidy without a TV ever asking for a code.
+//
+// Production rule (owner deploys by hand in the Console, inside the existing
+// documents match) — REQUIRED for the phone path:
+//   match /tvLoginRequests/{id} {
+//     allow get: if true;            // the signed-out TV listens to its own request by id
+//     allow list, write: if false;
+//   }
+// (Firestore evaluates a single-document listener as `get`.) What a `get`
+// exposes to whoever holds an id: the two hashes (never the secret or the
+// code), the TV's own device object, tvlabel, and approvedUid / profileId /
+// profileCollection after approval. The id is a 20-character random string
+// returned only to the requesting TV; `list` is denied, so ids cannot be
+// discovered (a failure record's id is never handed out at all). Until the
+// rule is live the TV's listener fails PERMISSION_DENIED, every TV shows
+// "Sign in with your phone" as unavailable and stops that path
+// (email/password stays). There is no polling fallback — deploying the
+// functions without this rule disables phone sign-in on every TV in the
+// field. createTvLoginRequest's best-effort cleanup is ONE query,
+// expiresAt < now − 1 h, limit 20, and sweeps requests and failure records
+// alike (there is no scheduled job).
+//
+// App-open log tvuserlogs/{autoId}: NOT written by this file. Since 2026-09-18
+// pass 3 the TV client adds one document per Activity ON_START straight into
+// Firestore with the client SDK (auto id via add(); `uid` = the signed-in
+// Firebase uid; flat fields email, profileid, profilecollection, datetime
+// (server), clientdatetime, opentype, signinmethod, sessionid, platform_name
+// and every TV_LOGIN_DEVICE_KEYS key). The former `logTvAppOpen` callable is
+// gone, so the production ruleset must carry this rule (owner deploys it by
+// hand in the Console, inside the existing documents match):
+//   match /tvuserlogs/{logid} {
+//     allow create: if request.auth != null
+//                   && request.resource.data.uid == request.auth.uid;
+//     allow read, update, delete: if false;
+//   }
+// Create-only, own-uid-only: a TV may add its own open, never read or rewrite
+// any. Until that rule is live the TV's write is PERMISSION_DENIED.
+//
+// The device secret and the custom token are NEVER logged, nor is the device
+// object, nor the secret's hash — log lines carry states, the formatted user
+// code, uids, the tvlabel and a request's auto doc id (`req <id>`). The
+// tvlabel is the only TV-controlled text that reaches a log line (and the
+// phone's dialog, as `tvName`); it is single-line by construction —
+// `sanitiseDevice` strips every control / format character (Unicode Cc and
+// Cf: newlines, tabs, NUL, C1 controls, zero-width and bidi overrides) before
+// capping, so an unauthenticated createTvLoginRequest caller cannot forge a
+// second log line (CWE-117) or a multi-line / reversed label on the phone.
+
+const { Timestamp } = require("firebase-admin/firestore");
+
+const TV_LOGIN_COLLECTION = "tvLoginRequests"; // kind "request" AND kind "failure" documents (2026-09-21 pass 5 — the only login collection)
+const TV_LOGIN_ALPHABET = "CDFHJKMNPQRTVWX23456789"; // 23 symbols, no vowels, no look-alikes
+const TV_LOGIN_CODE_LENGTH = 8;
+const TV_LOGIN_TTL_MS = 10 * 60 * 1000;
+const TV_LOGIN_POLL_INTERVAL_S = 5; // `intervalSeconds` in the create / redeem responses — the unchanged RFC 8628 wire shape only; the TV does not poll (2026-09-21)
+const TV_LOGIN_LOCKOUT_MAX = 10;
+const TV_LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // a kind "failure" record's expiresAt = now + this
+const TV_LOGIN_LOCKOUT_QUERY_LIMIT = 30; // failure records read per approve attempt (equality-only query, no composite index)
+const TV_LOGIN_REDEEM_GRACE_MS = 30 * 1000; // an approval made just before expiresAt must still be collectable by the TV's redeem after the listener reports approved (its countdown lags the server by the create latency)
+const TV_CAST_GRANT_TTL_MS = 5 * 60 * 1000; // a kind "castgrant" document's expiresAt = now + this (2026-09-22): the Cast dialog plus the TV app's cold start, with room to spare
+const TV_LOGIN_VERIFICATION_URL = "https://eiflix.com/tv";
+const TV_LOGIN_CODE_PEPPER = "eiflix-tv-login:";
+const TV_LOGIN_ENFORCE_APP_CHECK = false; // flip once com.eiflix.tv is registered with Play Integrity AND the TV ships App Check
+
+// 2026-09-18: device metadata and profileId. Constants only — the
+// sanitising / lookup helpers that use them are closures per handler.
+const TV_LOGIN_PROFILE_COLLECTIONS = ["profile_data", "new_user_data"]; // queried in this order, first hit wins (the TV's gate does the same)
+// The device metadata schema (spec §2), in Console order. `sanitiseDevice`
+// keeps exactly these keys — unknown ones are dropped, missing ones stored as
+// null — so every stored object shows the whole schema. Keys not listed in
+// the NUMBER / BOOLEAN sets are strings: control / format characters
+// (Unicode Cc, Cf) stripped, trimmed, then capped at
+// TV_LOGIN_DEVICE_STRING_MAX code points (the two LONG ones at 160) — code
+// points, not UTF-16 units, so a cap never splits a surrogate pair.
+const TV_LOGIN_DEVICE_KEYS = [
+  "ostype",
+  "osversion",
+  "sdkint",
+  "securitypatch",
+  "manufacturer",
+  "brand",
+  "model",
+  "device",
+  "product",
+  "hardware",
+  "board",
+  "buildid",
+  "fingerprint",
+  "settingsdevicename",
+  "istv",
+  "isemulator",
+  "hasgms",
+  "gmsversion",
+  "screenwidthpx",
+  "screenheightpx",
+  "densitydpi",
+  "screenwidthdp",
+  "screenheightdp",
+  "refreshratehz",
+  "totalmemorymb",
+  "lowram",
+  "supportedabis",
+  "androidid",
+  "installid",
+  "locale",
+  "timezone",
+  "appversion",
+  "appversioncode",
+  "apppackage",
+  "appbuildtype",
+  "networktype",
+  "networkmetered",
+];
+const TV_LOGIN_DEVICE_NUMBER_KEYS = [
+  "sdkint",
+  "screenwidthpx",
+  "screenheightpx",
+  "densitydpi",
+  "screenwidthdp",
+  "screenheightdp",
+  "refreshratehz",
+  "totalmemorymb",
+  "appversioncode",
+];
+const TV_LOGIN_DEVICE_BOOLEAN_KEYS = ["istv", "isemulator", "hasgms", "lowram", "networkmetered"];
+const TV_LOGIN_DEVICE_LONG_STRING_KEYS = ["fingerprint", "supportedabis"];
+const TV_LOGIN_DEVICE_STRING_MAX = 64;
+const TV_LOGIN_DEVICE_LONG_STRING_MAX = 160;
+
+/**
+ * TV → issues a { userCode, secret } pair. No Firebase user required (the TV
+ * is signed out); App Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips.
+ * Input:  { device?: { …TV_LOGIN_DEVICE_KEYS… } } — the TV's metadata (section
+ *         note), stored flat and sanitised; the source of the `tvlabel` the
+ *         phone later sees as `tvName`. Nothing of it is echoed back.
+ * Output: { userCode "KX7M-4PQD", secret (base64url, 43 chars), expiresInSeconds,
+ *           intervalSeconds (RFC 8628 wire shape only — the TV does not poll),
+ *           verificationUrl, verificationUrlComplete,
+ *           requestId (the auto id of tvLoginRequests/{id} — the TV listens to
+ *           that document itself; 2026-09-21 pass 5, no status mirror) }
+ * Writes one kind "request" document; a failed write throws `internal` so the
+ * TV retries with backoff.
+ */
+exports.createTvLoginRequest = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const base64url = (buf) =>
+      buf
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    const formatCode = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    // The TV's metadata, flattened to the spec §2 schema: exactly the
+    // TV_LOGIN_DEVICE_KEYS, every one present. A string has its control /
+    // format characters stripped, is trimmed and capped (64 code points;
+    // fingerprint / supportedabis 160), a number must be finite, a boolean
+    // must be a boolean; anything else — missing, wrong type, empty — is
+    // stored as null. Unknown keys are dropped. Nothing is coerced across
+    // types, so a Console row always reads the way the TV meant it.
+    const sanitiseDevice = (raw) => {
+      const source =
+        raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+      const clean = {};
+      for (const key of TV_LOGIN_DEVICE_KEYS) {
+        const value = source[key];
+        if (TV_LOGIN_DEVICE_NUMBER_KEYS.includes(key)) {
+          clean[key] =
+            typeof value === "number" && Number.isFinite(value) ? value : null;
+        } else if (TV_LOGIN_DEVICE_BOOLEAN_KEYS.includes(key)) {
+          clean[key] = typeof value === "boolean" ? value : null;
+        } else {
+          const max = TV_LOGIN_DEVICE_LONG_STRING_KEYS.includes(key)
+            ? TV_LOGIN_DEVICE_LONG_STRING_MAX
+            : TV_LOGIN_DEVICE_STRING_MAX;
+          // Control / format characters (Unicode Cc: NUL, \t, \n, \r, DEL,
+          // the C1 range; Cf: zero-width joiners / spaces, bidi marks and
+          // overrides, BOM) are stripped FIRST — the caller is unauthenticated
+          // and `manufacturer` + `model` become the tvlabel that is quoted in
+          // the "issued" log line and shown on the phone as `tvName`, so a
+          // newline would let a TV forge a second log line and a bidi
+          // override would let it reverse the label on screen. Nothing the
+          // TV legitimately reports (Build.*, the Settings device name)
+          // contains them. Strip, then trim — trim() does not know the
+          // zero-width characters, so a leading one would otherwise shield
+          // a leading space.
+          // Capped by code point, not UTF-16 unit: a cut between the two
+          // halves of an emoji / astral character would store a lone
+          // surrogate, which Firestore rejects (a proto3 string must be
+          // valid UTF-8) — and this TV could then never be issued a code.
+          // toWellFormed() turns a lone surrogate the client itself sent
+          // into U+FFFD for the same reason (a lone surrogate is Cs, not
+          // Cc / Cf, so the strip leaves it for toWellFormed()).
+          const text =
+            typeof value === "string"
+              ? Array.from(value.replace(/[\p{Cc}\p{Cf}]/gu, "").trim())
+                  .slice(0, max)
+                  .join("")
+                  .toWellFormed()
+              : "";
+          clean[key] = text || null;
+        }
+      }
+      return clean;
+    };
+    // The label the phone shows: manufacturer + model from the sanitised
+    // metadata, "Android TV" when the TV reported neither. Single-line by
+    // construction — both parts went through sanitiseDevice's strip.
+    const tvLabelOf = (device) =>
+      [device.manufacturer, device.model]
+        .filter((part) => typeof part === "string" && part.length > 0)
+        .join(" ") || "Android TV";
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips: a replayed limited-use
+    // App Check token is refused (the design's replay control).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const device = sanitiseDevice(data.device);
+    const tvlabel = tvLabelOf(device);
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+
+    // Device secret: 32 CSPRNG bytes → base64url (43 chars, no padding). Its
+    // SHA-256 is stored as `secretHash` — redeemTvLogin's lookup key; the
+    // secret itself goes to the TV and is stored nowhere. The document id is
+    // a Firestore auto id (it used to be the hash).
+    const secret = base64url(crypto.randomBytes(32));
+    const secretHash = sha256hex(secret);
+    const docRef = col.doc();
+
+    // User code: 8 symbols from the alphabet, unique among LIVE requests
+    // (pending and unexpired). Five tries, then give up.
+    let userCode = null;
+    let userCodeHash = null;
+    for (let attempt = 0; attempt < 5 && !userCode; attempt++) {
+      let candidate = "";
+      for (let i = 0; i < TV_LOGIN_CODE_LENGTH; i++) {
+        candidate += TV_LOGIN_ALPHABET[crypto.randomInt(TV_LOGIN_ALPHABET.length)];
+      }
+      const candidateHash = sha256hex(TV_LOGIN_CODE_PEPPER + candidate);
+      const clash = await col.where("userCodeHash", "==", candidateHash).get();
+      const live = clash.docs.some(
+        (d) =>
+          d.get("status") === "pending" &&
+          timestampMillis(d.get("expiresAt")) > now
+      );
+      if (!live) {
+        userCode = candidate;
+        userCodeHash = candidateHash;
+      }
+    }
+    if (!userCode) {
+      console.error(
+        "createTvLoginRequest: no unique user code in 5 tries"
+      );
+      throw new HttpsError("internal", "Could not issue a code. Please try again.");
+    }
+
+    // create() fails if the auto id already exists (never). This is the
+    // document the signed-out TV listens to (readable by id under the rule in
+    // the section note), so `kind` tells it apart from the failure records
+    // that share the collection (2026-09-21 pass 5).
+    const expiresAt = Timestamp.fromMillis(now + TV_LOGIN_TTL_MS);
+    try {
+      await docRef.create({
+        kind: "request",
+        secretHash,
+        userCodeHash,
+        status: "pending",
+        tvlabel,
+        device,
+        createdAt: FieldValue.serverTimestamp(),
+        expiresAt,
+        approvedUid: null,
+        approvedAt: null,
+        profileId: null,
+        profileCollection: null,
+        redeemedAt: null,
+      });
+    } catch (error) {
+      console.error(`createTvLoginRequest: create failed: ${error.message}`);
+      throw new HttpsError("internal", "Could not issue a code. Please try again.");
+    }
+
+    // Best-effort cleanup of documents more than an hour past their expiresAt
+    // (there is no scheduled job): ONE query over the collection, so it
+    // sweeps stale requests and dead failure records alike (2026-09-21 pass
+    // 5 — both kinds carry expiresAt; nothing needs skipping and there is no
+    // second collection to mirror the deletes into). 20 docs → 20 ops, well
+    // under the batch limit. Errors are swallowed.
+    try {
+      const stale = await col
+        .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
+        .limit(20)
+        .get();
+      if (!stale.empty) {
+        const batch = db.batch();
+        stale.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        console.log(
+          `createTvLoginRequest: cleaned up ${stale.size} stale document(s)`
+        );
+      }
+    } catch (error) {
+      console.warn(`createTvLoginRequest: cleanup skipped: ${error.message}`);
+    }
+
+    const formatted = formatCode(userCode);
+    console.log(`createTvLoginRequest: issued ${formatted} for "${tvlabel}"`);
+    return {
+      userCode: formatted,
+      secret,
+      expiresInSeconds: Math.round(TV_LOGIN_TTL_MS / 1000),
+      intervalSeconds: TV_LOGIN_POLL_INTERVAL_S,
+      verificationUrl: TV_LOGIN_VERIFICATION_URL,
+      verificationUrlComplete: `${TV_LOGIN_VERIFICATION_URL}?code=${userCode}`,
+      requestId: docRef.id, // the TV listens to tvLoginRequests/{requestId} — this very document (2026-09-21 pass 5)
+    };
+  }
+);
+
+/**
+ * Phone → looks up / approves a code shown on a TV. Firebase Auth required.
+ * `approvedUid` is ALWAYS request.auth.uid — the client sends a code and a
+ * yes, never an account.
+ * Input:  { userCode, action?: "lookup" | "approve" (default "approve") }
+ * Output: lookup  → { status: "pending", userCode, tvName, expiresAtMillis }
+ *         approve → { ok: true, userCode, tvName }
+ * `tvName` is the stored `tvlabel` (manufacturer + model reported by the TV,
+ * else "Android TV") — the wire name is unchanged, its meaning is not.
+ * An approval also records the approver's profile (`profileId`,
+ * `profileCollection`), resolved server-side from the account email the way
+ * the TV's gate does; a failed lookup stores nulls and never blocks.
+ * Business rejections are failed-precondition + details.reason
+ * ("wrong_code" | "already_used" | "expired") so the phone can tell them from
+ * a not-found that means "function not deployed"; lockout is
+ * resource-exhausted; a malformed code is invalid-argument (not counted).
+ */
+exports.approveTvLogin = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const formatCode = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+    const normaliseCode = (raw) =>
+      String(raw == null ? "" : raw).toUpperCase().replace(/[-\s]/g, "");
+    const isValidCode = (c) =>
+      c.length === TV_LOGIN_CODE_LENGTH &&
+      [...c].every((ch) => TV_LOGIN_ALPHABET.includes(ch));
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    const REJECT = {
+      wrong_code: "That code doesn't match. Check the TV and try again.",
+      already_used:
+        "This code has already been used. If you didn't approve this, check your TV.",
+      expired: "That code has expired. Your TV shows a new one.",
+    };
+    const rejection = (reason) =>
+      new HttpsError("failed-precondition", REJECT[reason], { reason });
+    // The caller's account email: the ID-token claim, else the Auth user
+    // record (a custom-token session may carry no claim). Trimmed and
+    // lowercased — the profile collections hold emails in that form and the
+    // TV's gate matches on it. "" when the account has none. Throws on an
+    // Auth error; the caller decides whether that matters.
+    const resolveEmail = async (uid, token) => {
+      let email = token && typeof token.email === "string" ? token.email : "";
+      if (!email.trim()) {
+        const user = await getAuth().getUser(uid);
+        email = user && typeof user.email === "string" ? user.email : "";
+      }
+      return email.trim().toLowerCase();
+    };
+    // The TV gate's lookup, server-side: `email ==` in profile_data, then
+    // new_user_data, first hit wins. { profileId: null, profileCollection:
+    // null } when nothing matches; throws on a Firestore error.
+    const findProfile = async (db, email) => {
+      for (const collection of TV_LOGIN_PROFILE_COLLECTIONS) {
+        const hit = await db
+          .collection(collection)
+          .where("email", "==", email)
+          .limit(1)
+          .get();
+        if (!hit.empty) {
+          return { profileId: hit.docs[0].id, profileCollection: collection };
+        }
+      }
+      return { profileId: null, profileCollection: null };
+    };
+
+    // 1. A signed-in phone.
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError("unauthenticated", "Sign in to the EiFlix app first.");
+    }
+    const uid = request.auth.uid;
+
+    // 2. Normalise + validate. A malformed code never reaches the lockout.
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const userCode = normaliseCode(data.userCode);
+    if (!isValidCode(userCode)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Enter the 8-character code shown on your TV."
+      );
+    }
+    const action =
+      data.action == null || data.action === "" ? "approve" : String(data.action);
+    if (action !== "lookup" && action !== "approve") {
+      throw new HttpsError(
+        "invalid-argument",
+        'Unknown "action" — expected "lookup" or "approve".'
+      );
+    }
+    const formatted = formatCode(userCode);
+    const userCodeHash = sha256hex(TV_LOGIN_CODE_PEPPER + userCode);
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+
+    // 3+4. Lockout check and lookup in ONE transaction. The lockout is the
+    //    caller's kind "failure" records in this same collection (2026-09-21
+    //    pass 5 — the separate lockout collection is gone): the equality-only query
+    //    kind == "failure" && approverUid == uid (no composite index) is
+    //    read INSIDE the transaction before the code lookup, and only the
+    //    records whose expiresAt is still ahead of now count; a miss
+    //    tx.create()s its own record in the same commit, so about
+    //    TV_LOGIN_LOCKOUT_MAX not-found codes are evaluated per window. A
+    //    transaction locks the documents it read, not the query's result
+    //    set, so two concurrent guesses can each count N and both insert
+    //    (phantom insert) — a couple of extra guesses around the threshold,
+    //    acceptable against a 23^8 code space (section note). Verdicts are
+    //    RETURNED, not thrown, so the recorded failure is committed before
+    //    the HttpsError goes out. A live code, an already-used one and an
+    //    expired one write nothing.
+    const failureQuery = col
+      .where("kind", "==", "failure")
+      .where("approverUid", "==", uid)
+      .limit(TV_LOGIN_LOCKOUT_QUERY_LIMIT);
+    const codeQuery = col.where("userCodeHash", "==", userCodeHash);
+    const verdict = await db.runTransaction(async (tx) => {
+      const failureSnap = await tx.get(failureQuery);
+      const liveFailures = failureSnap.docs.filter(
+        (d) => timestampMillis(d.get("expiresAt")) > now
+      ).length;
+      if (liveFailures >= TV_LOGIN_LOCKOUT_MAX) {
+        return { kind: "locked_out", count: liveFailures };
+      }
+      // Lookup by the peppered hash; a live (pending, unexpired) doc wins.
+      const matches = await tx.get(codeQuery);
+      const target =
+        matches.docs.find(
+          (d) =>
+            d.get("status") === "pending" &&
+            timestampMillis(d.get("expiresAt")) > now
+        ) || null;
+      if (target) {
+        return { kind: "live", target };
+      }
+      if (matches.empty) {
+        // Not a code we issued: this one counts, in this very commit — a new
+        // kind "failure" record with an auto id (create, never set: an auto
+        // id clash is impossible and a silent overwrite would be a bug).
+        tx.create(col.doc(), {
+          kind: "failure",
+          approverUid: uid,
+          at: FieldValue.serverTimestamp(),
+          expiresAt: Timestamp.fromMillis(now + TV_LOGIN_LOCKOUT_WINDOW_MS),
+        });
+        return { kind: "wrong_code", count: liveFailures + 1 };
+      }
+      // Best match: the most recently created request for this code.
+      const best = [...matches.docs].sort(
+        (a, b) =>
+          timestampMillis(b.get("createdAt")) - timestampMillis(a.get("createdAt"))
+      )[0];
+      const status = best.get("status");
+      if (status === "approved" || status === "redeemed") {
+        return { kind: "already_used", status };
+      }
+      return { kind: "expired" };
+    });
+
+    if (verdict.kind === "locked_out") {
+      console.warn(
+        `approveTvLogin: uid ${uid} locked out (${verdict.count} failures in window)`
+      );
+      throw new HttpsError(
+        "resource-exhausted",
+        "Too many wrong codes. Try again in 15 minutes, or sign in on the TV with your email and password."
+      );
+    }
+    if (verdict.kind === "wrong_code") {
+      console.log(
+        `approveTvLogin: ${formatted} not found (uid ${uid}, ` +
+          `${verdict.count} failure(s) in window)`
+      );
+      throw rejection("wrong_code");
+    }
+    if (verdict.kind === "already_used") {
+      console.log(`approveTvLogin: ${formatted} already ${verdict.status} (uid ${uid})`);
+      throw rejection("already_used");
+    }
+    if (verdict.kind === "expired") {
+      console.log(`approveTvLogin: ${formatted} expired (uid ${uid})`);
+      throw rejection("expired");
+    }
+    const target = verdict.target;
+
+    // What the phone shows: the server-derived label (model), never the
+    // Settings device name.
+    const tvName = String(target.get("tvlabel") || "Android TV");
+
+    // 5. Lookup only — nothing changes.
+    if (action === "lookup") {
+      console.log(`approveTvLogin: ${formatted} looked up by uid ${uid}`);
+      return {
+        status: "pending",
+        userCode: formatted,
+        tvName,
+        expiresAtMillis: timestampMillis(target.get("expiresAt")),
+      };
+    }
+
+    // 6. Approve — first the approver's profile, by email, BEFORE the
+    //    transaction (an Auth call cannot run inside one, and the queries
+    //    need not). Best-effort: a failure of either step logs a warning and
+    //    stores nulls; the approval itself never waits on it.
+    let profileId = null;
+    let profileCollection = null;
+    try {
+      const email = await resolveEmail(uid, request.auth.token);
+      if (email) {
+        const hit = await findProfile(db, email);
+        profileId = hit.profileId;
+        profileCollection = hit.profileCollection;
+      }
+      if (!profileId) {
+        console.warn(`approveTvLogin: ${formatted}: no profile matched for uid ${uid}`);
+      }
+    } catch (error) {
+      // SDK error text only.
+      console.warn(
+        `approveTvLogin: ${formatted}: profile lookup failed for uid ${uid}: ${error.message}`
+      );
+    }
+
+    // 7. Then the write: re-read inside a transaction with a status ==
+    //    "pending" precondition; approvedUid is the caller's uid, full stop,
+    //    and the profile lands in the same commit. This request document IS
+    //    what the TV is listening to (2026-09-21 pass 5 — no status mirror),
+    //    so the flip to `approved` plus updatedAt is its real-time signal.
+    const targetRef = target.ref;
+    await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(targetRef);
+      if (!fresh.exists) {
+        throw rejection("wrong_code");
+      }
+      const status = fresh.get("status");
+      if (status === "approved" || status === "redeemed") {
+        throw rejection("already_used");
+      }
+      if (
+        status !== "pending" ||
+        timestampMillis(fresh.get("expiresAt")) <= Date.now()
+      ) {
+        throw rejection("expired");
+      }
+      tx.update(targetRef, {
+        status: "approved",
+        approvedUid: uid,
+        approvedAt: FieldValue.serverTimestamp(),
+        profileId,
+        profileCollection,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+
+    console.log(`approveTvLogin: ${formatted} approved by uid ${uid}`);
+    return { ok: true, userCode: formatted, tvName };
+  }
+);
+
+/**
+ * TV → redeems with its device secret: called ONCE per approval, when its
+ * listener on tvLoginRequests/{requestId} reports `approved` (2026-09-21
+ * pass 5 — the request document itself, no status mirror), and retried
+ * with backoff (2/4/8 s, visibly) on an `internal` or network failure. There
+ * is no polling path: if the listener cannot attach the TV shows the failure
+ * and stops the phone path (owner rule, 2026-09-21). No Firebase user; App
+ * Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips. The approver's email
+ * lookup and the custom token mint both run INSIDE the redeem transaction,
+ * before the writes: a failure of either aborts the transaction, the request
+ * stays `approved`, and the TV's backoff retry redeems it. The flip to
+ * `redeemed` stamps updatedAt on the same request document. An approval is
+ * collectable only until expiresAt (+ TV_LOGIN_REDEEM_GRACE_MS); after that
+ * the secret answers "expired" for good (the request is left as is — the TV
+ * handles expiry by its own countdown). The token is returned exactly once
+ * and never logged.
+ * Input:  { secret }
+ * Output: { status: "pending" | "expired" | "invalid", intervalSeconds }
+ *         (intervalSeconds is the unchanged RFC 8628 wire shape; the TV ignores it)
+ *      or { status: "approved", customToken, uid, email, profileId, profileCollection }
+ *         (profileId / profileCollection are what approveTvLogin recorded — may
+ *         be null; the TV's gate resolves the profile itself and stays authoritative)
+ */
+exports.redeemTvLogin = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const timestampMillis = (t) =>
+      t && typeof t.toMillis === "function" ? t.toMillis() : 0;
+    const poll = (status) => ({ status, intervalSeconds: TV_LOGIN_POLL_INTERVAL_S }); // RFC 8628 wire shape; the TV does not poll
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips (see createTvLoginRequest).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    // 1. Shape only — never echoed, never logged.
+    const data =
+      request.data && typeof request.data === "object" ? request.data : {};
+    const secret = typeof data.secret === "string" ? data.secret : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) {
+      throw new HttpsError("invalid-argument", "A device secret is required.");
+    }
+
+    // 2. The request is found by `secretHash` (the SHA-256 of the secret) —
+    //    the document id is a Firestore auto id, so this is a query, both
+    //    here and again inside the transaction below. No match → "invalid".
+    const db = getFirestore();
+    const bySecret = db
+      .collection(TV_LOGIN_COLLECTION)
+      .where("secretHash", "==", sha256hex(secret))
+      .limit(1);
+
+    const found = await bySecret.get();
+    if (found.empty) {
+      return poll("invalid");
+    }
+    const snap = found.docs[0];
+    const docRef = snap.ref;
+    const idTag = `req ${docRef.id}`; // the auto id — never the secret or its hash
+
+    // 3. Not yet approved, or spent. An approved request is collectable only
+    //    for the code's lifetime plus a short grace (the TV's countdown starts
+    //    when the create response ARRIVES, so its redeem after the listener
+    //    reports approved can land a few seconds after the server's
+    //    expiresAt): the design's "approved, not expired, not redeemed". Past
+    //    that the secret answers "expired" for good — nothing legitimate
+    //    redeems that late, the TV has already rotated — and
+    //    createTvLoginRequest's cleanup removes the doc later.
+    const status = snap.get("status");
+    const expiresAtMillis = timestampMillis(snap.get("expiresAt"));
+    if (status === "pending") {
+      if (expiresAtMillis <= Date.now()) {
+        return poll("expired");
+      }
+      return poll("pending");
+    }
+    if (status !== "approved") {
+      // "redeemed" (or anything unexpected): this secret is finished.
+      return poll("invalid");
+    }
+    if (expiresAtMillis + TV_LOGIN_REDEEM_GRACE_MS <= Date.now()) {
+      console.log(`redeemTvLogin: ${idTag} approved but expired before redeem`);
+      return poll("expired");
+    }
+
+    // 4. Approved → redeem exactly once. Reads first (the request again, by
+    //    secretHash through tx.get(query), then the approver's email), then
+    //    the mint, then the one write (the request itself). The email
+    //    lookup runs INSIDE the transaction next to the mint so a transient
+    //    Identity Toolkit failure throws HttpsError("internal") — not a
+    //    retryable Firestore code, so runTransaction rolls back and rethrows —
+    //    and the request stays `approved` for the TV's backoff retry. Only a
+    //    MISSING approver (deleted after approving) yields email: null; the
+    //    TV treats a null email as "no account", which is final, so a failed
+    //    lookup must never be reported that way.
+    const outcome = await db.runTransaction(async (tx) => {
+      const again = await tx.get(bySecret);
+      const fresh = again.empty ? null : again.docs[0];
+      if (!fresh || fresh.get("status") !== "approved") {
+        return { verdict: "invalid" };
+      }
+      if (
+        timestampMillis(fresh.get("expiresAt")) + TV_LOGIN_REDEEM_GRACE_MS <=
+        Date.now()
+      ) {
+        return { verdict: "expired" };
+      }
+      const approvedUid = fresh.get("approvedUid");
+      if (typeof approvedUid !== "string" || !approvedUid) {
+        console.error(`redeemTvLogin: ${idTag} is approved without an approvedUid`);
+        return { verdict: "invalid" };
+      }
+      // The profile approveTvLogin recorded next to the uid (null when it
+      // matched nothing or the lookup failed). Passed through, never trusted
+      // for access: the TV's gate resolves the account itself.
+      const storedProfileId = fresh.get("profileId");
+      const storedProfileCollection = fresh.get("profileCollection");
+      const profileId =
+        typeof storedProfileId === "string" && storedProfileId
+          ? storedProfileId
+          : null;
+      const profileCollection =
+        typeof storedProfileCollection === "string" && storedProfileCollection
+          ? storedProfileCollection
+          : null;
+      let email = null;
+      try {
+        const user = await getAuth().getUser(approvedUid);
+        email = user && user.email ? user.email : null;
+      } catch (error) {
+        if (error && error.code === "auth/user-not-found") {
+          console.warn(
+            `redeemTvLogin: ${idTag} approver uid ${approvedUid} no longer exists`
+          );
+        } else {
+          // SDK error text only.
+          console.error(
+            `redeemTvLogin: ${idTag} getUser failed for uid ${approvedUid}: ${error.message}`
+          );
+          throw new HttpsError("internal", "Could not sign the TV in. Trying again.");
+        }
+      }
+      let customToken;
+      try {
+        customToken = await getAuth().createCustomToken(approvedUid);
+      } catch (error) {
+        // SDK error text only — the token does not exist at this point.
+        console.error(
+          `redeemTvLogin: ${idTag} createCustomToken failed for uid ${approvedUid}: ${error.message}`
+        );
+        throw new HttpsError("internal", "Could not sign the TV in. Trying again.");
+      }
+      // The TV's listener sees this `redeemed` on the same document and
+      // ignores it (its own redeem is under way) — 2026-09-21 pass 5.
+      tx.update(fresh.ref, {
+        status: "redeemed",
+        redeemedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return {
+        verdict: "redeemed",
+        customToken,
+        uid: approvedUid,
+        email,
+        profileId,
+        profileCollection,
+      };
+    });
+
+    if (outcome.verdict === "expired") {
+      console.log(`redeemTvLogin: ${idTag} approved but expired before redeem`);
+      return poll("expired");
+    }
+    if (outcome.verdict !== "redeemed") {
+      return poll("invalid");
+    }
+
+    console.log(`redeemTvLogin: ${idTag} redeemed for uid ${outcome.uid}`);
+    return {
+      status: "approved",
+      customToken: outcome.customToken,
+      uid: outcome.uid,
+      email: outcome.email,
+      profileId: outcome.profileId,
+      profileCollection: outcome.profileCollection,
+    };
+  }
+);
+
+/**
+ * Phone → mints a Cast sign-in grant for ITSELF (2026-09-22, Cast pass 2).
+ * Firebase Auth required; no input. The caller is the approver, so the
+ * document is born `approved` with `approvedUid` = request.auth.uid — never
+ * client input — and the phone hands the returned `credentials` string to the
+ * TV inside the Cast launch. The TV redeems the secret through the unchanged
+ * `redeemTvLogin`. App Check gates it once TV_LOGIN_ENFORCE_APP_CHECK flips,
+ * like the other three. The approver's profile is resolved from the account
+ * email exactly as approveTvLogin does (best-effort, nulls on a miss).
+ * Input:  {} (ignored)
+ * Output: { secret (base64url, 43 chars), uid, expiresInSeconds (300),
+ *           credentials: "eiflix-cast/1:<uid>:<secret>" }
+ * Writes one kind "castgrant" document; a failed write throws `internal`.
+ * The secret is never logged — the log line names the grant's auto id and
+ * the uid.
+ */
+exports.createTvCastGrant = onCall(
+  {
+    region: "us-central1",
+    enforceAppCheck: TV_LOGIN_ENFORCE_APP_CHECK,
+    consumeAppCheckToken: TV_LOGIN_ENFORCE_APP_CHECK,
+  },
+  async (request) => {
+    // Self-contained helpers (see the section note) — duplicated on purpose.
+    const sha256hex = (s) =>
+      crypto.createHash("sha256").update(String(s), "utf8").digest("hex");
+    const base64url = (buf) =>
+      buf
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    // The caller's account email: the ID-token claim, else the Auth user
+    // record (a custom-token session may carry no claim). Trimmed and
+    // lowercased — the profile collections hold emails in that form and the
+    // TV's gate matches on it. "" when the account has none. Throws on an
+    // Auth error; the caller decides whether that matters.
+    const resolveEmail = async (uid, token) => {
+      let email = token && typeof token.email === "string" ? token.email : "";
+      if (!email.trim()) {
+        const user = await getAuth().getUser(uid);
+        email = user && typeof user.email === "string" ? user.email : "";
+      }
+      return email.trim().toLowerCase();
+    };
+    // The TV gate's lookup, server-side: `email ==` in profile_data, then
+    // new_user_data, first hit wins. { profileId: null, profileCollection:
+    // null } when nothing matches; throws on a Firestore error.
+    const findProfile = async (db, email) => {
+      for (const collection of TV_LOGIN_PROFILE_COLLECTIONS) {
+        const hit = await db
+          .collection(collection)
+          .where("email", "==", email)
+          .limit(1)
+          .get();
+        if (!hit.empty) {
+          return { profileId: hit.docs[0].id, profileCollection: collection };
+        }
+      }
+      return { profileId: null, profileCollection: null };
+    };
+
+    // Inert until TV_LOGIN_ENFORCE_APP_CHECK flips (see createTvLoginRequest).
+    if (TV_LOGIN_ENFORCE_APP_CHECK && request.app && request.app.alreadyConsumed) {
+      throw new HttpsError("permission-denied", "App Check token already used.");
+    }
+
+    // 1. A signed-in phone. Nothing is read from request.data.
+    if (!request.auth || !request.auth.uid) {
+      throw new HttpsError("unauthenticated", "Sign in to the EiFlix app first.");
+    }
+    const uid = request.auth.uid;
+
+    const db = getFirestore();
+    const col = db.collection(TV_LOGIN_COLLECTION);
+    const now = Date.now();
+    let profileId = null;
+    let profileCollection = null;
+    try {
+      const email = await resolveEmail(uid, request.auth.token);
+      if (email) {
+        const hit = await findProfile(db, email);
+        profileId = hit.profileId;
+        profileCollection = hit.profileCollection;
+      }
+      if (!profileId) {
+        console.warn(`createTvCastGrant: no profile matched for uid ${uid}`);
+      }
+    } catch (error) {
+      // SDK error text only.
+      console.warn(
+        `createTvCastGrant: profile lookup failed for uid ${uid}: ${error.message}`
+      );
+    }
+    const secret = base64url(crypto.randomBytes(32));
+    const secretHash = sha256hex(secret);
+    const docRef = col.doc();
+    const expiresAt = Timestamp.fromMillis(now + TV_CAST_GRANT_TTL_MS);
+    try {
+      await docRef.create({
+        kind: "castgrant",
+        secretHash,
+        userCodeHash: null,
+        status: "approved",
+        tvlabel: null,
+        device: null,
+        createdAt: FieldValue.serverTimestamp(),
+        expiresAt,
+        approvedUid: uid,
+        approvedAt: FieldValue.serverTimestamp(),
+        profileId,
+        profileCollection,
+        redeemedAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(`createTvCastGrant: create failed for uid ${uid}: ${error.message}`);
+      throw new HttpsError("internal", "Could not prepare the cast. Please try again.");
+    }
+
+    try {
+      const stale = await col
+        .where("expiresAt", "<", Timestamp.fromMillis(now - 3600000))
+        .limit(20)
+        .get();
+      if (!stale.empty) {
+        const batch = db.batch();
+        stale.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        console.log(
+          `createTvCastGrant: cleaned up ${stale.size} stale document(s)`
+        );
+      }
+    } catch (error) {
+      console.warn(`createTvCastGrant: cleanup skipped: ${error.message}`);
+    }
+
+    // The auto id and the uid — never the secret or its hash.
+    console.log(`createTvCastGrant: grant ${docRef.id} issued for uid ${uid}`);
+    return {
+      secret,
+      uid,
+      expiresInSeconds: Math.round(TV_CAST_GRANT_TTL_MS / 1000),
+      credentials: `eiflix-cast/1:${uid}:${secret}`,
+    };
+  }
+);
+
+/**
+ * EiFlix touchpoints -> Slack (operator 2026-10-28).
+ *
+ * The EiFlix operations dashboard's "Send to Slack" (Hot Leads Today) writes ONE `eiflixtouchpoints`
+ * document per send:
+ *   { docid, webhookdoc, heading, subheading, people: [{ name, email, phone, journey }], count, sentby,
+ *     senton, status: 'pending' }
+ * `heading` / `subheading` are whatever the screen that opened the dialog shows (e.g. the Hot Leads
+ * side panel's title and caption) — nothing in the Slack message is fixed text, because the same
+ * dialog is used from many screens.
+ * This posts it to the webhook named by `webhookdoc` in `slack webhookurls` — in production only;
+ * anywhere else it goes to `slackDevTest`, like every other Slack function here — and writes the
+ * outcome back onto the same document, which the dashboard is watching:
+ *   status 'sent' (+ channel, messages, webhookused) | 'failed' (+ error), processedon.
+ * The webhook URL stays server-side. Each person is a label | value block (Name / Email / Phone /
+ * Journey), easy to read and copy; 48 people per message (Slack caps a message at 50 blocks).
+ */
+exports.eiflixtouchpointslack = onDocumentCreated("eiflixtouchpoints/{docid}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+  const data = snap.data() || {};
+  if (data.status && data.status !== 'pending') return;
+  const finish = (fields) => snap.ref.update({ ...fields, processedon: FieldValue.serverTimestamp() });
+
+  const people = Array.isArray(data.people) ? data.people : [];
+  if (!people.length) return finish({ status: 'failed', error: 'Nobody to send' });
+
+  const hookDoc = commonService.production === true ? (data.webhookdoc || 'eiflixhotleads') : 'slackDevTest';
+  try {
+    const hookSnap = await admin.firestore().collection('slack webhookurls').doc(hookDoc).get();
+    const hook = hookSnap.exists ? hookSnap.data() : {};
+    if (!hook.webhookurl) return finish({ status: 'failed', error: `No Slack webhook set up (${hookDoc})` });
+
+    const messages = eiflixTouchpointSlackMessages(people, data.heading, data.subheading);
+    for (const message of messages) await axios.post(hook.webhookurl, message);
+    return finish({ status: 'sent', channel: hook.channel || '', messages: messages.length, webhookused: hookDoc });
+  } catch (err) {
+    const detail = err?.response?.data || err?.message || String(err);
+    console.log('[eiflixtouchpointslack] failed', docidOf(event), detail);
+    return finish({ status: 'failed', error: String(detail).slice(0, 300) });
+  }
+});
+
+function docidOf(event) {
+  return event?.params?.docid || '';
 }
+
+const TOUCHPOINT_FIELDS = [['Name', 'name'], ['Email', 'email'], ['Phone', 'phone'], ['Journey', 'journey']];
+const TOUCHPOINT_PEOPLE_PER_MESSAGE = 48;
+const slackEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The Slack payloads for one touchpoint send — pure, so it can be checked without Slack.
+ * The caller's heading, the summary (subheading · head-count) in bold, then one block per person laid
+ * out as two columns, label | value, one field per row:
+ *   Name     Manoj Mm
+ *   Email    mmmanoj@gmail.com
+ *   Phone    +91 9980581119
+ *   Journey  CPM upgrade
+ * (section fields fill left-to-right, so alternating label/value gives exactly that). Nothing in the
+ * message is fixed text. 48 people per message: header + summary + 48 sections = Slack's 50-block cap.
+ * `fields` picks the rows per person (default Name / Email / Phone / Journey).
+ */
+function eiflixTouchpointSlackMessages(people, heading, subheading, fields = TOUCHPOINT_FIELDS) {
+  const chunks = commonService.chunkArray(people, TOUCHPOINT_PEOPLE_PER_MESSAGE);
+  const total = `${people.length} ${people.length === 1 ? 'person' : 'people'}`;
+  const sub = String(subheading ?? '').trim();
+  const summary = sub ? `${sub} · ${total}` : total;
+  return chunks.map((chunk, i) => {
+    const title = `${String(heading ?? '').trim() || 'Touchpoint'}${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ''}`;
+    return {
+      text: `${title} — ${summary}`,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: title.slice(0, 150), emoji: true } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*${slackEsc(summary)}*` } },
+        ...chunk.map((p) => ({
+          type: 'section',
+          fields: fields.flatMap(([label, key]) => [
+            { type: 'mrkdwn', text: `*${label}*` },
+            { type: 'mrkdwn', text: slackEsc(String(p[key] ?? '').trim()) || '—' },
+          ]),
+        })),
+      ],
+    };
+  });
+}
+exports.eiflixTouchpointSlackMessages = eiflixTouchpointSlackMessages;

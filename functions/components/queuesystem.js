@@ -61,45 +61,28 @@ exports.onQueueStageChange = onDocumentWritten({
     });
   }
 
-  // get slot title if variation id exists
-  let getSlotTitle = () => null;
-
-  if (afterData['variationid']) {
-    const queuePlanningSnap = await admin.firestore()
-      .collection('queue planning')
-      .where('queueref', '==', afterData['queueref'])
-      .where('variationlist', 'array-contains', afterData['variationid'])
-      .get();
-
-    const planDoc = queuePlanningSnap.docs[0];
-
-    if (planDoc) {
-      const planning = planDoc.data()['planning'] || [];
-      
-      const slots = planning.flatMap(plan =>
-        (plan['segments'] || []).flatMap(segment =>
-          (segment['slots'] || []).map(slot => ({
-            ...slot,
-            segmentid: segment['segmentid']  
-          }))
-        )
-      );
-
-      getSlotTitle = (slotValue, stageName) => {
-        const matchedSlot = slots.find(slot =>
-          slot['segmentid'] === slotValue['segmentid'] &&
-          slot['stagename'] === stageName &&
-          slot['startdate']?.seconds === slotValue['startdate']?.seconds &&
-          slot['enddate']?.seconds === slotValue['enddate']?.seconds
-        );
-        return matchedSlot?.['title'];
-      };
+  // get slot title from the queue availability doc 
+  const getSlotTitle = async (slotValue) => {
+    let title = slotValue ? slotValue['title'] : null;
+    try {
+      if (slotValue && slotValue['docid']) {
+        const slotSnap = await admin.firestore().collection('queue availability').doc(slotValue['docid']).get();
+        if (slotSnap.exists) title = slotSnap.data()['title'];
+      }
+    } catch (err) {
+      console.log('getSlotTitle error', err.toString());
     }
-  }
+    if (title && `${title}`.trim()) return title;
+
+    const start = slotValue?.['startdate'];
+    if (!start) return null;
+    const d = start.toDate ? start.toDate() : start._seconds ? new Date(start._seconds * 1000) : new Date(start);
+    return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
+  };
 
   try {
-      let beforeSelectedSlots = Object.keys(beforeData['selectedstageslot'] || {});
-      let afterSelectedSlots = Object.keys(afterData['selectedstageslot'] || {});
+      let beforeSelectedSlots = Object.keys(beforeData['bookedslot'] || {});
+      let afterSelectedSlots = Object.keys(afterData['bookedslot'] || {});
 
       const addedKeys = afterSelectedSlots.filter(key => !beforeSelectedSlots.includes(key));
       const removedKeys = beforeSelectedSlots.filter(key => !afterSelectedSlots.includes(key));
@@ -108,7 +91,7 @@ exports.onQueueStageChange = onDocumentWritten({
 
       // Process added keys
       for (const key of addedKeys) {
-        const addedValue = afterData['selectedstageslot'][key];
+        const addedValue = afterData['bookedslot'][key];
 
         try {
           commonService.sendSlotConfirmationToSlackChannel(addedValue, 'Confirmed', afterData);
@@ -122,7 +105,7 @@ exports.onQueueStageChange = onDocumentWritten({
         const isScopeEnhancement = key === 'Scope Enhancement';
         const isGuidedOrientation = key === 'Guided Pre ATC Orientation' || key === 'Guided Self ATC Orientation';
         const isDiagnostics = key === 'Diagnostics';
-        const formattedTitle = getSlotTitle(addedValue, key);
+        const formattedTitle = await getSlotTitle(addedValue);
 
         try {
           await commonService.saveNotificationRecord({
@@ -143,8 +126,31 @@ exports.onQueueStageChange = onDocumentWritten({
           console.error(`Push notification failed for key ${key}:`, pushError.message);
         }
 
+        // Appointment slots have a specialist (hostref); queue slots do not
+        if (addedValue['slottype'] === 'appointment' && addedValue['hostref']) {
+          try {
+            await commonService.saveNotificationRecord({
+              title: 'Your slot is confirmed ✅',
+              message: `${profiledata['name']} has booked a slot with you for ${key} on ${formattedTitle}`,
+              subtitle: null,
+              date: admin.firestore.FieldValue.serverTimestamp(),
+              landingpage: null,
+              logged: true,
+              profileid: [addedValue['hostref'].id],
+              sticky: false,
+              notificationtype: 'appointment',
+              notificationimage: null,
+              metadata: { appointmentid: addedValue['appointmentref']?.id ?? null }
+            });
+            console.log(`Specialist notification sent | key: ${key}`);
+          } catch (hostPushError) {
+            console.error(`Specialist notification failed for key ${key}:`, hostPushError.message);
+          }
+        }
+
         // if (!isPrepStage && !isScopeEnhancement && !isGuidedOrientation && !isDiagnostics) {
-        if (!isPrepStage && !isGuidedOrientation) {
+        //if (!isPrepStage && !isGuidedOrientation) {
+        if (!isScopeEnhancement) {
           console.log(`Skipping WATI — key "${key}" is not a confirmable stage`);
           continue;
         }
@@ -193,8 +199,8 @@ exports.onQueueStageChange = onDocumentWritten({
           }));
           console.log('Triggered Wati Archive Creation');
 
-          const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
-
+          // const templateId = isPrepStage ? 'ep_slot_confirmed_msg_after2ndjuly' : isScopeEnhancement ? 'se_slot_confirmed_msg_until2ndjuly' : isGuidedOrientation ? 'guided_slot_confirmed_msg_after2ndjuly': 'diag_slot_confirmed_msg_until2ndjuly';
+          const templateId = 'se_slot_confirmed_msg_current_version';
           var map = {
             numbers: [parseInt(waticontent['phonenumber'])],
             numbermap: { [`${waticontent['phonenumber']}`]: profileid },
@@ -221,7 +227,7 @@ exports.onQueueStageChange = onDocumentWritten({
 
       // Process removed keys
       for (const key of removedKeys) {
-        const removedValue = beforeData['selectedstageslot'][key];
+        const removedValue = beforeData['bookedslot'][key];
         try {
           commonService.sendSlotConfirmationToSlackChannel(removedValue, 'Reverted', afterData);
         } catch (slackError) {
@@ -237,26 +243,28 @@ exports.onQueueStageChange = onDocumentWritten({
             timeZone: 'Asia/Kolkata'
           }) : startDate.toDate ? startDate.toDate().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) : String(startDate);
 
-          const formattedTitle = getSlotTitle(removedValue, key);
+          const formattedTitle = await getSlotTitle(removedValue);
 
-          // push notification for revert slot
-          try {
-            await commonService.saveNotificationRecord({
-              title: 'Slot Reverted',
-              message: `Your ${key} slot has been reverted for ${formattedTitle}`,
-              subtitle: null,
-              date: admin.firestore.FieldValue.serverTimestamp(),
-              landingpage: null,
-              logged: true,
-              profileid: [profileid],
-              sticky: false,
-              notificationtype: 'queue',
-              notificationimage: null,
-              metadata: { ...afterData }
-            });
-            console.log(`Push notification sent for reverted slot | key: ${key}`);
-          } catch (pushError) {
-            console.error(`Push notification failed for key ${key}:`, pushError.message);
+          // push notification for revert slot (appointment slots already get "Appointment cancelled" from appointment.js)
+          if (removedValue['slottype'] !== 'appointment') {
+            try {
+              await commonService.saveNotificationRecord({
+                title: 'Slot Reverted',
+                message: `Your ${key} slot has been reverted for ${formattedTitle}`,
+                subtitle: null,
+                date: admin.firestore.FieldValue.serverTimestamp(),
+                landingpage: null,
+                logged: true,
+                profileid: [profileid],
+                sticky: false,
+                notificationtype: 'queue',
+                notificationimage: null,
+                metadata: { ...afterData }
+              });
+              console.log(`Push notification sent for reverted slot | key: ${key}`);
+            } catch (pushError) {
+              console.error(`Push notification failed for key ${key}:`, pushError.message);
+            }
           }
 
           const phoneNumber = `${profiledata['number']}`;
@@ -2698,6 +2706,18 @@ exports.zoomActivitylog = onRequest({ memory: '2GiB',
         patch.specialists = { [key]: spec };
       }
 
+      // Fast "call ended" signal. When the host ends the meeting for everyone, the
+      // disconnect arrives here as a participant_left whose `leave_reason` reads like
+      // "Host ended the meeting" — and it fires well before the separate
+      // meeting.ended webhook (which Zoom is slow to emit for a host-only/empty
+      // meeting, ~10s). Stamp meetingEndedAt from this fast event so the studio flips
+      // to "ended" immediately even when no participant ever joined. A plain leave
+      // (specialist stepping out) has a different reason, so this never mis-fires.
+      if (!joined && /ended the meeting/i.test(p.leave_reason || '')) {
+        patch.meetingEndedAt = now;
+        patch.endedMeetingId = meetingId != null ? Number(meetingId) : null;
+      }
+
       await admin.firestore().collection('live assignment log').doc(la.id).set(patch, { merge: true });
       response.status(200).json(null);
       return;
@@ -3575,8 +3595,8 @@ exports.queueParticipantTransfer = onDocumentCreated("queue participant transfer
             tags: mapQueueTokenNotesTagsInfo[tokenelement['docid']]?.tags ?? [],
           }
           if (participantProductData["requestedslot"]) {
-            queueData["selectedstageslot"] = {}
-            queueData["selectedstageslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"]
+            queueData["bookedslot"] = {}
+            queueData["bookedslot"][participantProductData["requestedslot"]["stagename"]] = participantProductData["requestedslot"]
           }
           batch.set(admin.firestore().collection("queue_token").doc(queuedocid),queueData)
           n++

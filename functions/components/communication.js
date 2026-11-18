@@ -17,6 +17,7 @@ const { defineSecret } = require("firebase-functions/params");
 
 //components imports
 const commonService = require('./service');
+const unreadBadge = require('./unreadbadge');
 const bucket = admin.storage().bucket();
 
 //slack
@@ -32,7 +33,6 @@ const { Buffer } = require('buffer');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { v4: uuidv4 } = require("uuid"); // To generate unique file names
 const XLSX = require('xlsx');
 
 // Apple APN
@@ -44,11 +44,39 @@ const APPLE_TEAMID = defineSecret("APPLE_TEAMID");
 const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 const postmark = require("postmark");
-const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
-const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
-const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
-const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
-const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
+// Postmark server tokens come from Cloud Secret Manager, declared once in service.js. Functions that
+// pick a server by a doc's `servername` field bind all five (`secrets: POSTMARK_SECRETS`); the field
+// must equal one of the secret names.
+const POSTMARK_SECRETS = Object.values(commonService.postmarkSecrets);
+function postmarkServersMap() {
+  const map = {};
+  for (const [name, secret] of Object.entries(commonService.postmarkSecrets)) {
+    const token = secret.value();
+    if (token) map[name] = token;
+  }
+  return map;
+}
+
+// TEMP DEBUG: postmark.js discards the raw error response — log status/headers/body (plus this
+// instance's public egress IP on a 403) so Postmark can trace blocks in their WAF logs.
+function logPostmarkRawErrors(postmarkClient, context) {
+  postmarkClient.httpClient.client.interceptors.response.use(null, async (err) => {
+    const r = err.response;
+    const egressIp = r?.status === 403
+      ? await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(3000) }).then(res => res.text()).catch(() => null)
+      : undefined;
+    console.error("POSTMARK_RAW_ERROR", JSON.stringify({
+      ...context,
+      request: `${err.config?.method?.toUpperCase()} ${err.config?.url}`,
+      egressIp,
+      time: new Date().toISOString(),
+      status: r?.status,
+      headers: r?.headers,
+      data: typeof r?.data === "string" ? r.data.slice(0, 2000) : r?.data,
+    }));
+    return Promise.reject(err);
+  });
+}
 
 // Send Push Notification
 const INVALID_TOKEN_ERRORS = [
@@ -76,7 +104,7 @@ exports.notifyMobileApp = onDocumentCreated({
   const notificationType = notificationData["notificationtype"] || "ahupdate";
   const notificationImage = notificationData["notificationimage"] || null;
   const metaData = notificationData["metadata"] || {};
-  const profileID = notificationData["profileid"] || [];
+  let profileID = notificationData["profileid"] || [];
 
   // receivingapp routing. Absent → current (breakthroughs) behaviour for
   // backward compatibility. "eiflixapp" → only EiFlix (EIFLIX_FCM_token, no
@@ -102,6 +130,9 @@ exports.notifyMobileApp = onDocumentCreated({
   const failedlist = {};
   const profilesWithUserRef = [];
   const profilesWithFCMToken = [];
+  const profileUidMap = {}; // profileid → uid, for the app-icon badge count
+  // Delivery hold — profile_data.deliveryonhold === true is never notified.
+  const heldProfileIds = new Set();
 
   try {
     // ============ STEP 1: FETCH PROFILES TO GET USER_REF FOR LOGS ============
@@ -134,6 +165,15 @@ exports.notifyMobileApp = onDocumentCreated({
         const profileId = profileDoc.id;
         foundProfileIds.push(profileId);
 
+        // Held profiles get no FCM push and no in-app log. Collected in a Set and
+        // filtered once below — profile_data and new_user_data docs both come
+        // through this loop (either can carry deliveryonhold), and a doc without
+        // the field must not un-hold the same id held by the other collection.
+        if (profileData["deliveryonhold"] === true) {
+          heldProfileIds.add(profileId);
+          continue;
+        }
+
         let userId = null;
         if (profileData["user_ref"]) {
           userId = profileData["user_ref"].id;
@@ -142,6 +182,7 @@ exports.notifyMobileApp = onDocumentCreated({
         }
 
         if (userId) {
+          if (!profileUidMap[profileId]) profileUidMap[profileId] = userId;
           if (!profilesWithUserRef.includes(profileId)) {
             profilesWithUserRef.push(profileId);
           }
@@ -160,6 +201,28 @@ exports.notifyMobileApp = onDocumentCreated({
         failedlist[pid] = "Profile not found in database";
       }
     });
+
+    // Drop held profiles before STEP 2 (writes in-app notification logs) and
+    // STEP 3 (fetches FCM tokens). Not added to failedlist — they are skipped,
+    // not failed, and nothing about the hold is persisted on the record.
+    if (heldProfileIds.size > 0) {
+      profileID = profileID.filter(pid => !heldProfileIds.has(pid));
+      heldProfileIds.forEach(pid => delete failedlist[pid]);
+      console.log(`Delivery on hold — skipping ${heldProfileIds.size} profile(s):`, [...heldProfileIds]);
+      if (profileID.length === 0) {
+        console.log("Every recipient is on delivery hold — nothing to send");
+        await snapshot.data.ref.update({
+          profilesuccess: [],
+          profilefailed: [],
+          // arrayUnion, never assignment — the composer may already have recorded
+          // holds on this doc, and overwriting would wipe them.
+          communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds),
+          failedlist: failedlist,
+          success: true
+        }).catch(e => console.error("Failed to record delivery holds:", e));
+        return;
+      }
+    }
 
     console.log("Users Found", allUsersForLogs);
     console.log(`Found ${allUsersForLogs.length} users with user_ref for logs`);
@@ -281,6 +344,27 @@ exports.notifyMobileApp = onDocumentCreated({
       console.log(`Found ${fcmTokens.length} FCM tokens for push notifications`);
     }
 
+    // ============ STEP 3B: APP-ICON BADGE COUNTS ============
+    // Badge = unread chats + (general notification unread ? 1 : 0) — see unreadbadge.js.
+    // Chat / channel / ticket pushes and logged general pushes only; others leave it as is.
+    // Only Breakthroughs app tokens (FCM_token) get a badge — not AHCRM / EiFlix tokens.
+    const isBreakthroughsToken = (tokenData) => String(tokenData?.["path"] || "").startsWith("FCM_token/");
+    const notificationLogged = notificationData["logged"] === true;
+    let badgeCounts = {};
+    if (sendBreakthroughs && unreadBadge.badgeApplies(notificationType, notificationLogged)) {
+      const badgeProfileIds = new Set();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        if (isBreakthroughsToken(tokenData) && tokenData["profile_ref"]?.id) badgeProfileIds.add(tokenData["profile_ref"].id);
+      });
+      const badgeRecipients = [...badgeProfileIds].map(pid => ({ profileid: pid, uid: profileUidMap[pid] || null }));
+      badgeCounts = await unreadBadge.getBadgeCounts(badgeRecipients, notificationType, metaData, notificationLogged).catch(err => {
+        console.error("Badge count failed:", err);
+        return {};
+      });
+      console.log(`Badge counts computed for ${Object.keys(badgeCounts).length}/${badgeRecipients.length} profiles`);
+    }
+
     // ============ STEP 4: SEND PUSH NOTIFICATIONS ============
     const successfullProfileid = [];
     const failedFCM = [];
@@ -292,10 +376,28 @@ exports.notifyMobileApp = onDocumentCreated({
     const voipResults = { success: [], failed: [], invalidTokens: [] }; 
 
     if (fcmTokens.length > 0) {
-      const splitToken = commonService.chunkArray(fcmTokens, 500);
+      // Tokens grouped by badge value, then chunked — one multicast per distinct badge.
+      // Without badge counts every token lands in the single null group (same as before).
+      const tokenGroups = new Map();
+      fcmTokens.forEach(token => {
+        const tokenData = mapTokenProfile[token];
+        const tokenProfileid = tokenData?.["profile_ref"]?.id;
+        const badge = isBreakthroughsToken(tokenData) && badgeCounts[tokenProfileid] !== undefined ? badgeCounts[tokenProfileid] : null;
+        if (!tokenGroups.has(badge)) tokenGroups.set(badge, []);
+        tokenGroups.get(badge).push(token);
+      });
+      const splitToken = [];
+      const splitBadge = [];
+      tokenGroups.forEach((tokens, badge) => {
+        commonService.chunkArray(tokens, 500).forEach(chunk => {
+          splitToken.push(chunk);
+          splitBadge.push(badge);
+        });
+      });
 
       for (let i = 0; i < splitToken.length; i++) {
         const tokenSet = splitToken[i];
+        const badge = splitBadge[i];
         if (i > 0) {
           await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay
         }
@@ -351,13 +453,13 @@ exports.notifyMobileApp = onDocumentCreated({
                 channel_id: "default_channel",
                 sound: "default",
                 color: '#ffffff',
-                tag: snapshot.data.id,
+                // chat_ / notif_ prefix lets the app clear these when its badge hits 0
+                tag: unreadBadge.notificationTag(notificationType, notificationLogged, snapshot.data.id),
               },
             },
             apns: {
               payload: {
                 aps: {
-                  badge: 1,
                   sound: "default",
                   "mutable-content": 1,
                   'content-available': 1,
@@ -369,6 +471,11 @@ exports.notifyMobileApp = onDocumentCreated({
             },
             tokens: tokenSet,
           };
+          // App-icon badge = exact unread total. No badge key → the badge is left as it is.
+          if (badge !== null && badge !== undefined) {
+            payload.apns.payload.aps.badge = badge;
+            if (badge > 0) payload.android.notification.notificationCount = badge;
+          }
         }
        
         // Old payload method
@@ -545,7 +652,7 @@ exports.notifyMobileApp = onDocumentCreated({
     // ============ STEP 6: UPDATE FINAL RESULT ============
     const failedProfile = profileID.filter(e => !successfullProfileid.includes(e));
 
-    await snapshot.data.ref.update({
+    const finalUpdate = {
       profilesuccess: successfullProfileid,
       profilefailed: failedProfile,
       appFCMSuccess: appFCMSuccess,
@@ -556,7 +663,13 @@ exports.notifyMobileApp = onDocumentCreated({
       webFCMFailed: webFCMFailed,
       failedlist: failedlist,
       success: true
-    });
+    };
+    // Only when non-empty: arrayUnion() with no arguments is rejected, and an
+    // assignment here would wipe holds the composer already recorded.
+    if (heldProfileIds.size > 0) {
+      finalUpdate.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+    }
+    await snapshot.data.ref.update(finalUpdate);
 
     console.log(`Completed: ${successfullProfileid.length} FCM success, ${failedProfile.length} FCM failed, ${invalidTokenPaths.length} tokens deactivated`);
 
@@ -569,11 +682,16 @@ exports.notifyMobileApp = onDocumentCreated({
       }
     });
 
-    await snapshot.data.ref.update({
+    const errorUpdate = {
       success: false,
       error: err.message || "Unknown error",
       failedlist: failedlist
-    }).catch(e => console.error("Failed to update error status:", e));
+    };
+    if (heldProfileIds.size > 0) {
+      errorUpdate.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+    }
+    await snapshot.data.ref.update(errorUpdate)
+      .catch(e => console.error("Failed to update error status:", e));
   }
 });
 
@@ -1710,13 +1828,8 @@ exports.sendBatchEmailTest = onDocumentCreated({
   document: "email archive/{docid}",
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },
   async (snap) => {
     const change = snap.data;
@@ -1725,14 +1838,7 @@ exports.sendBatchEmailTest = onDocumentCreated({
  
     if (change.data()['status'] != 'queued') {
  
-      // FIX: Use .value() to get the actual secret string, not the Secret object
-      const serversMap = {
-        POSTMARK_STARLABS_V1,
-        POSTMARK_STARLABS_V2,
-        POSTMARK_STARLABS_V3,
-        POSTMARK_STARLABS_V4,
-        POSTMARK_STARLABS_TEST,
-      };
+      const serversMap = postmarkServersMap();
  
       const result = await sendBatchEmailArchive(newDocId, serversMap);
       console.log('Finished sending to participants', result);
@@ -1745,25 +1851,14 @@ exports.sendBatchEmail = onRequest({
   cors:true,
   timeoutSeconds: 540,
   memory: "512MiB",
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (req, res) => {
   console.log("Function triggered");
   console.log("Archive ID", req.body);
   const archiveid = req.body.archiveid;
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
   const result = await sendBatchEmailArchive(archiveid,serversMap);
   console.log('Finished sending to participants', result);
@@ -1775,64 +1870,101 @@ exports.sendBatchEmail = onRequest({
 });
 
 //harish
-exports.postmarkResponseCapture = onRequest({region: "us-central1", cors:true, memory: "512MiB"},async (req, res) => {
+exports.postmarkResponseCapture = onRequest({region: "us-central1", cors: true, memory: "512MiB"}, async (req, res) => {
 
-  console.log("RESPONSEBODY",req.body);
-  let responseData = req.body
-  let mapProfileEmail = {};
-  await admin.firestore().collection("profile_data").orderBy("name","asc").get().then((profile)=>{
-    for (let i = 0; i < profile.docs.length; i++) {
-      const profileData = profile.docs[i].data();
-      mapProfileEmail[profileData['email']] = profileData;
+  console.log("RESPONSEBODY", req.body);
+  const responseData = req.body;
+
+  // TEMP DEBUG: identify the source/stream of the incoming webhook to diagnose MessageID mismatch per server
+  console.log("POSTMARK_WEBHOOK_DEBUG", JSON.stringify({
+    MessageID: responseData['MessageID'],
+    RecordType: responseData['RecordType'],
+    MessageStream: responseData['MessageStream'],
+    ServerID: responseData['ServerID'],
+    Recipient: responseData['Recipient'],
+    Email: responseData['Email'],
+  }));
+
+  const db = admin.firestore();
+
+  try {
+    const emailarchivedocs = await db.collection("email archive")
+      .where("postmark_msgid", "array-contains", responseData['MessageID'])
+      .limit(1)
+      .get();
+
+    if (emailarchivedocs.empty) {
+      // TEMP DEBUG: no email archive stored this MessageID — likely wrong server/stream/env or sent outside this code
+      console.log("POSTMARK_WEBHOOK_NO_MATCH", JSON.stringify({
+        MessageID: responseData['MessageID'],
+        RecordType: responseData['RecordType'],
+        MessageStream: responseData['MessageStream'],
+        ServerID: responseData['ServerID'],
+      }));
+      console.log("Doc Not Found", responseData['MessageID']);
+      return res.status(200).send({ message: "Doc Not Found" });
     }
-  });
 
-  await admin.firestore().collection("email archive").where("postmark_msgid","array-contains",responseData['MessageID']).limit(1).get().then(async(emailarchivedocs)=>{
-    if(emailarchivedocs.docs.length != 0){
-      const emailArchiveRef = emailarchivedocs.docs[0].ref;
-      let broadcastData = emailarchivedocs.docs[0].data();
+    console.log("Doc Found", responseData['MessageID']);
+    const emailArchiveRef = emailarchivedocs.docs[0].ref;
+    const broadcastData = emailarchivedocs.docs[0].data();
 
-      const docref  = admin.firestore().collection("email logs").doc();
+    // Delivery/Open/Click events carry "Recipient"; Bounce/SpamComplaint carry "Email"
+    const recipientEmail = [null, undefined, ""].includes(responseData['Recipient'])
+      ? responseData['Email']
+      : responseData['Recipient'];
+    responseData['email'] = recipientEmail;
 
-      if([null,undefined,""].includes(responseData['Recipient'])){
-
-        responseData['email'] = responseData['Email'];
-
-      }else if([null,undefined,""].includes(responseData['Email'])){
-
-        responseData['email'] = responseData['Recipient'];
-
+    // Fetch only the matching participant instead of the whole collection
+    let profileid = null;
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      const participantSnap = await db.collection("participant metadata")
+        .where("email", "==", recipientEmail)
+        .limit(1)
+        .get();
+      if (!participantSnap.empty) {
+        profileid = participantSnap.docs[0].data()['profileid'] ?? null;
       }
-
-      responseData['profileid'] = [null,undefined,""].includes(mapProfileEmail[responseData['Recipient']]) ? null : mapProfileEmail[responseData['Recipient']]['profileid'],
-      responseData['postmark_msgid'] = responseData['MessageID'],
-      responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim(),
-      responseData['templateid'] = broadcastData['templateid'],
-      responseData['emailarchiveid'] = broadcastData['docid'],
-      responseData['time'] = admin.firestore.FieldValue.serverTimestamp(),
-      
-      await docref.set(responseData).then(()=>{
-        console.log("Log Added SUCCESSFULLY");
-        return res.status(200).send({ message: "Success" });
-      }).catch((error)=>{
-        console.log("ERROR WHILE Adding Log",error);
-        return res.status(500).send({ message: "Internal Server Error" });
-      });
-
-      await emailArchiveRef.update({
-        [responseData['msgstatus']] : admin.firestore.FieldValue.arrayUnion(responseData['Recipient'])
-      }).then(()=>{
-        console.log("Archive Updated SUCCESSFULLY");
-        return res.status(200).send({ message: "Success" });
-      }).catch((error)=>{
-        console.log("ERROR WHILE Updating Archive",error);
-        return res.status(500).send({ message: "Internal Server Error" });
-      });;
-
     }
-  });
 
+    const docref = db.collection("email logs").doc();
+
+    responseData['profileid'] = profileid;
+    responseData['postmark_msgid'] = responseData['MessageID'];
+    responseData['msgstatus'] = responseData['RecordType'].toLowerCase().trim();
+    responseData['templateid'] = broadcastData['templateid'];
+    responseData['emailarchiveid'] = broadcastData['docid'];
+    responseData['time'] = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+      await docref.set(responseData);
+      console.log("Log Added SUCCESSFULLY");
+    } catch (error) {
+      console.log("ERROR WHILE Adding Log", error);
+      return res.status(500).send({ message: "Internal Server Error" });
+    }
+
+    // Log is saved — archive update is best-effort so Postmark won't retry
+    // (and duplicate the log) if only this step fails.
+    if (![null, undefined, ""].includes(recipientEmail)) {
+      try {
+        await emailArchiveRef.update({
+          [responseData['msgstatus']]: admin.firestore.FieldValue.arrayUnion(recipientEmail)
+        });
+        console.log("Archive Updated SUCCESSFULLY");
+      } catch (error) {
+        console.log("ERROR WHILE Updating Archive", error);
+      }
+    }
+
+    return res.status(200).send({ message: "Success" });
+
+  } catch (error) {
+    console.log("ERROR IN postmarkResponseCapture", error);
+    return res.status(500).send({ message: "Internal Server Error" });
+  }
 });
+
 async function sendBatchEmailArchive(emailArchiveId, serversMap) {
 
   // ── 1. Fetch archive doc ─────────────────────────────────────────────────
@@ -1851,7 +1983,7 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   // ── 2. Resolve Postmark server token ─────────────────────────────────────
-  const selectedSecret = serversMap[archiveData['servername']]?.value();
+  const selectedSecret = serversMap[archiveData['servername']];
 
   if (!selectedSecret) {
     console.error(`Invalid server name: "${archiveData['servername']}". Available: ${Object.keys(serversMap).join(', ')}`);
@@ -1860,29 +1992,58 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   }
 
   const postmarkClient = new postmark.ServerClient(selectedSecret);
+  logPostmarkRawErrors(postmarkClient, { servername: archiveData['servername'], archiveid: emailArchiveId });
 
   // ── 3. Load participant metadata ─────────────────────────────────────────
   const mapProfile      = {};
   const mapProfileEmail = {};
 
-  const profileIds = archiveData['profileid'] || [];
+  // ── Delivery hold ────────────────────────────────────────────────────────
+  // Held = deliveryonhold === true on the profile_data OR the new_user_data doc
+  // (commonService.getDeliveryHeldProfileIds). The metadata loaded below can't be
+  // used for this, so the held ids are queried directly. Fail CLOSED: if the read
+  // throws we abort rather than send unfiltered — this is a retryable trigger.
+  let heldProfileIds;
+  try {
+    heldProfileIds = await commonService.getDeliveryHeldProfileIds();
+  } catch (err) {
+    console.error("deliveryonhold check failed — aborting send so it can retry", err);
+    throw err;
+  }
 
-  const query = profileIds.length < 30
-    ? admin.firestore().collection("participant metadata").where('profileid', 'in', profileIds)
-    : admin.firestore().collection("participant metadata");
+  const allProfileIds     = archiveData['profileid'] || [];
+  const heldProfileIdList = allProfileIds.filter(id => heldProfileIds.has(id));
+  // Held recipients are skipped in the send loop below, so keep them out of the
+  // metadata lookups too — no point loading a profile we will not email. Only this
+  // local list is filtered: the send loop reads archiveData['profileid'][i], which
+  // must stay index-paired with archiveData['emailid'][i].
+  // const profileIds = allProfileIds.filter(id => !heldProfileIds.has(id));
+  const profileIds = allProfileIds.filter(id => id && !heldProfileIds.has(id))
 
-  await query.get().then((snap) => {
-    snap.docs.forEach((d) => {
-      const p = d.data();
-      if (profileIds.includes(p['profileid'])) {
-        mapProfile[p['profileid']] = p;
-        mapProfileEmail[p['email']] = p;
-      }
-    });
-  });
+  if (heldProfileIdList.length > 0) {
+    console.log(`Delivery on hold — ${heldProfileIdList.length} of ${allProfileIds.length} recipient(s) excluded`);
+  }
+
+  const query = profileIds.length === 0
+    ? null
+    : profileIds.length < 30
+      ? admin.firestore().collection("participant metadata").where('profileid', 'in', profileIds)
+      : admin.firestore().collection("participant metadata");
+
+  if (query) {
+    await query.get().then((snap) => {
+      snap.docs.forEach((d) => {
+        const p = d.data();
+        if (profileIds.includes(p['profileid'])) {
+          mapProfile[p['profileid']] = p;
+          mapProfileEmail[p['email']] = p;
+        }
+      });
+    });
+  }
 
   // ── 3b. Fallback: look up missing profiles in new_user_data ──────────────
-  let missingIds = profileIds.filter(id => !mapProfile[id]);
+  let missingIds = profileIds.filter(id => !mapProfile[id]);
 
   if (missingIds.length > 0) {
     console.log(`${missingIds.length} profile(s) not in participant metadata, checking new_user_data...`);
@@ -1951,6 +2112,13 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
   for (let i = 0; i < archiveData['emailid'].length; i++) {
     const profileId   = archiveData['profileid'][i];
     const emailId     = archiveData['emailid'][i];
+
+    // emailid[i] and profileid[i] are index-paired — skipping here drops the whole
+    // pair, which is safe. Pre-filtering the two arrays separately would not be.
+    if (heldProfileIds.has(profileId)) {
+      console.log(`Delivery on hold — skipping ${emailId} (profileId: ${profileId})`);
+      continue;
+    }
     const profileData = mapProfile[profileId] || {};
 
     // ── Build the templateModel for this recipient ──────────────────────
@@ -2001,12 +2169,25 @@ async function sendBatchEmailArchive(emailArchiveId, serversMap) {
 
     // Batch in groups of 400 (Postmark limit)
     if (i !== 0 && i % 400 === 0) {
-      batchEmailList.push(emailList);
+      if (emailList.length > 0) batchEmailList.push(emailList);
       emailList = [];
     }
     emailList.push(mailOptions);
   }
-  batchEmailList.push(emailList);
+  if (emailList.length > 0) batchEmailList.push(emailList);
+
+  // Delivery hold — recorded before sending so it survives a Postmark failure.
+  if (heldProfileIdList.length > 0) {
+    await newDocRef.update({ communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIdList) })
+      .catch(err => console.error("Error recording delivery holds:", err));
+  }
+
+  if (batchEmailList.length === 0) {
+    console.log("No sendable recipients — every recipient on this archive is on delivery hold");
+    await newDocRef.update({ status: "completed" })
+      .catch(err => console.error("Error marking completed:", err));
+    return 'No sendable recipients — all on delivery hold';
+  }
 
   // ── 7. Send batches via Postmark ─────────────────────────────────────────
   for (let i = 0; i < batchEmailList.length; i++) {
@@ -2676,22 +2857,21 @@ async function downloadAndUpload(recordingUrl,docRef) {
       writer.on('error', reject);
     });
     console.log('File downloaded successfully.');
-    const token = uuidv4();
     // Upload the file to Firebase Storage
     const firebaseFileName = `call_recordings/${Date.now()}-audio-file.mp3`; // Set the destination path in Firebase Storage
     console.log('Uploading to Firebase Storage...');
-    const bucketresponse = await bucket.upload(tempFilePath, {
+    // NO download token, and the stored value is the object PATH, not a URL (2026-11-18).
+    // A firebaseStorageDownloadTokens URL never expires and bypasses Storage Rules. The
+    // Calls tab resolves this path through getMediaUrls into a short-lived signed URL
+    // (duration + 20 min). Do not reintroduce getDownloadURL()/a token here.
+    await bucket.upload(tempFilePath, {
       destination: firebaseFileName,
       metadata: {
         contentType: 'audio/mpeg',
-        metadata: {
-          firebaseStorageDownloadTokens: token,
-        },
       },
     });
-    const bucketUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(firebaseFileName)}?alt=media&token=${token}`;
     await docRef.update({
-      recordingurl : bucketUrl
+      recordingurl : firebaseFileName
     }).then(()=>{
       console.log("Document Updated Successfully");
     }).catch((error)=>{
@@ -2709,25 +2889,14 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
   document:'email templates/{docid}',
   region: 'us-central1',
   cors: true,
-  secrets: [
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  ]
+  secrets: POSTMARK_SECRETS,
+  ...commonService.postmarkEgress,
 },async (change) => {
 
   let previousData = change.data?.before.data();
   let currentData = change.data?.after.data();
 
-  const serversMap = {
-    POSTMARK_STARLABS_V1,
-    POSTMARK_STARLABS_V2,
-    POSTMARK_STARLABS_V3,
-    POSTMARK_STARLABS_V4,
-    POSTMARK_STARLABS_TEST
-  };
+  const serversMap = postmarkServersMap();
 
     const selectedSecret = serversMap[currentData['servername']];
 
@@ -2735,7 +2904,8 @@ exports.createPostMarkEmailTemplate = onDocumentUpdated({
       throw new Error(`Invalid server name: ${currentData['servername']}`);
     }
 
-    const postmarkClient = new postmark.ServerClient(selectedSecret.value());
+    const postmarkClient = new postmark.ServerClient(selectedSecret);
+    logPostmarkRawErrors(postmarkClient, { servername: currentData['servername'], templatedocid: currentData['docid'], templatename: currentData['templatename'] });
 
   if(currentData['type'] == "email"){
 
@@ -2871,12 +3041,23 @@ async function sendWatiBroadCast(watiarchiveid) {
 
   let batchList = [];
   let numbersWithMissingCountryCode = [];
+  // Delivery hold — profile ids skipped by the guard below, stored alongside sent/failed.
+  let heldProfileIds = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    // Delivery hold — profile_data.deliveryonhold === true is never messaged.
+    // Not pushed to numbersWithMissingCountryCode: that array seeds failedNumbers,
+    // and a held profile is skipped, not failed. It lands in neither sent nor failed.
+    if (profile['deliveryonhold'] === true) {
+      console.log(`Delivery on hold — skipping ${number} (profileId: ${profileId})`);
+      if (profileId) heldProfileIds.push(profileId);
+      continue;
+    }
 
     let rawCountryCode = profile['countrycode'];
     if (!rawCountryCode) {
@@ -2975,6 +3156,11 @@ async function sendWatiBroadCast(watiarchiveid) {
     totalSent: sentNumbers.length,
     totalFailed: failedNumbers.length,
   };
+
+  // Append, never assign — the composer records holds on this doc at compose time.
+  if (heldProfileIds.length > 0) {
+    updatePayload.communicationhold = admin.firestore.FieldValue.arrayUnion(...heldProfileIds);
+  }
 
   if (sentNumbers.length > 0) {
     updatePayload.sent = sentNumbers;
@@ -3323,12 +3509,22 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
 
   // ── 6. Build receivers array ───────────────────────────────────────
   const receivers = [];
+  // Delivery hold — profile ids excluded from the scheduled payload.
+  const heldProfileIds = [];
 
   for (let i = 0; i < broadCastData['numbers'].length; i++) {
     const number    = broadCastData['numbers'][i];
     const profileId = broadCastData['numbermap'][number];
     const profile   = mapProfile[profileId] || {};
     const metadata  = mapMetadata[profileId] || {};
+
+    // Delivery hold — last chance to exclude: once the payload below is POSTed to
+    // WATI's scheduleBroadcast, WATI owns delivery and no code of ours runs again.
+    if (profile['deliveryonhold'] === true) {
+      console.log(`Delivery on hold — excluding ${number} (profileId: ${profileId}) from scheduled broadcast`);
+      if (profileId) heldProfileIds.push(profileId);
+      continue;
+    }
 
     const customParams = buildCustomParams(
       broadCastData['parameterConfig'] || [],
@@ -3388,8 +3584,11 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
       scheduleSentViaApi: true,
       scheduleUrl: SCHEDULE_URL,
       scheduledBroadcastName: schedulePayload.broadcastName,
-      totalSent: broadCastData['numbers'].length,
+      totalSent: receivers.length,
       totalFailed: 0,
+      ...(heldProfileIds.length > 0
+        ? { communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds) }
+        : {}),
     });
 
     console.log("=== SCHEDULE SUCCESS ===");
@@ -3421,6 +3620,9 @@ async function sendWatiScheduledBroadcast(watiarchiveid) {
         url: SCHEDULE_URL,
       },
       scheduleFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(heldProfileIds.length > 0
+        ? { communicationhold: admin.firestore.FieldValue.arrayUnion(...heldProfileIds) }
+        : {}),
     });
 
     throw new Error(`WATI Schedule API failed (${errStatus}): ${errMsg}`);
@@ -4122,6 +4324,74 @@ exports.slackLoginEvent = onDocumentCreated("loginlog/{docid}",async (change) =>
   }
 });
 
+// Group chat push text. Longest body sent, in characters — keeps the push well
+// inside the 4 KB APNs payload limit (the OS truncates the display anyway).
+const CHAT_PUSH_MAX_CHARS = 240;
+const CHAT_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp"];
+const CHAT_VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "avi", "mkv", "3gp"];
+const CHAT_AUDIO_EXTENSIONS = ["m4a", "mp3", "aac", "wav", "ogg", "opus", "amr", "caf", "flac"];
+// Voice notes are named voice-note-<seconds>s.m4a by the apps that record them.
+const CHAT_VOICE_NOTE_NAME = /^voice-note-\d{1,4}s\.m4a$/;
+// A MIME type standing in for a message's text (image/png, audio/webm;codecs=opus).
+const CHAT_MIME_TEXT = /^[a-z]+\/[a-z0-9.+-]+(;.*)?$/i;
+// The label for each media type word (the part of a MIME type before "/").
+const CHAT_KIND_LABELS = { image: "📷 Photo", video: "🎥 Video", audio: "🎵 Audio", voice: "🎵 Audio" };
+
+// The push body for a chat message: its text clipped to CHAT_PUSH_MAX_CHARS
+// (by code point, so an emoji is never cut in half), or — for an attachment
+// sent without words — a label for what was sent.
+function chatPushText(text, messageData) {
+  const trimmed = String(text || "").trim();
+  const body = trimmed === "" || isAttachmentStandIn(trimmed, messageData)
+    ? chatAttachmentLabel(messageData)
+    : trimmed;
+  const chars = Array.from(body);
+  if (chars.length <= CHAT_PUSH_MAX_CHARS) return body;
+  return chars.slice(0, CHAT_PUSH_MAX_CHARS - 1).join("").trimEnd() + "…";
+}
+
+// Whether a message's text only stands in for its attachment: the file's own
+// name (EiFlix and the web send each file as a message whose text is its name)
+// or a MIME type. Typed words are never treated as one.
+function isAttachmentStandIn(text, messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  const names = files
+    .map(file => (file && typeof file === "object") ? String(file["filename"] || "") : "")
+    .concat(String(messageData["fileName"] || ""))
+    .filter(name => name !== "");
+  return names.includes(text) || CHAT_MIME_TEXT.test(text);
+}
+
+// "🎤 Voice message", "📷 Photo", … from the message's files (or the legacy
+// single-file fields). The media type decides first and the extension only when
+// the type names no media, as the apps do. Reads only; never throws on missing
+// or odd fields.
+function chatAttachmentLabel(messageData) {
+  const files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  if (files.length > 1) return `📎 ${files.length} attachments`;
+  const file = (files[0] && typeof files[0] === "object") ? files[0] : {};
+  const name = String(file["filename"] || messageData["fileName"] || "");
+  if (CHAT_VOICE_NOTE_NAME.test(name)) return "🎤 Voice message";
+  const kind = String(file["mediatype"] || file["filetype"] || "").toLowerCase().split("/")[0];
+  if (CHAT_KIND_LABELS[kind]) return CHAT_KIND_LABELS[kind];
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  if (CHAT_IMAGE_EXTENSIONS.includes(extension)) return "📷 Photo";
+  if (CHAT_VIDEO_EXTENSIONS.includes(extension)) return "🎥 Video";
+  if (CHAT_AUDIO_EXTENSIONS.includes(extension)) return "🎵 Audio";
+  if (name) return `📄 ${name}`;
+  return "📎 Attachment";
+}
+
+// Whether a new_user_data profile may be notified: not moved to profile_data
+// (its profile_data record is used instead), deleted, blocked, or anything but
+// approved (enable must be exactly true) — the rules the apps sign in by.
+function isNotifiableNewUser(profile) {
+  return profile["movedtoexist"] !== true &&
+    profile["accountdeleted"] !== true &&
+    profile["block"] !== true &&
+    profile["enable"] === true;
+}
+
 // Group Chat Notification
 exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{msgid}", async (snapshot)=>{
   console.log(snapshot.data.ref.path);
@@ -4179,99 +4449,143 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
 
   console.log("Message Data", messageData);
 
-  var sender_name = null;
-  
-  await admin.firestore().collection("profile_data").where("user_ref", "==", admin.firestore().collection("user_data").doc(sender_uid)).get().then(userData =>{
-    if(userData.docs.length != 0){
-      sender_name = userData.docs[0].data()["name"]
-    }
-  });
-  // var sender_name = await (await admin.firestore().collection("profile_data").where("user_ref", "==", admin.firestore().collection("user_data").doc(sender_uid)).get()).docs[0].data().name
-  console.log(sender_name)
-  console.log(sender_uid)
-  var message = messageData["message"]
-  var pending_user = messageData["pending"]
-  var readby_user = messageData["read_by"]
-  var time = messageData["time"].toDate()
+  // ── Group / support chat message ──────────────────────────────────────────
+  // SPEED (QA, Nov 2026: pushes arrived 2–5 s after sending). Everything this needs is read at once
+  // instead of one read after another (sender, chat doc, mentions, recipients), the chat doc is read
+  // once instead of three times, and the last_* update runs alongside the push instead of before it.
+  //
+  // NAMES: the app shows an A&H team member (role doc chatxadmin or ahmember) to participants as
+  // "A&H Team" — as the sender and in @mentions. The push now says the same thing: team recipients get
+  // the real names, participants get "A&H Team", so a group push may be written as two records.
+  const db = admin.firestore();
+  const TEAM_NAME = "A&H Team";
+  const chatRef = db.collection("supportchat").doc(chatid);
+  const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+  // The profile ids among these profile docs that are A&H team — the app's rule, via each profile's role_ref.
+  const teamOf = async (profileDocs) => {
+    const refs = [...new Map(profileDocs.map(p => p.get("role_ref")).filter(r => r && r.path).map(r => [r.path, r])).values()];
+    const roles = refs.length ? await db.getAll(...refs) : [];
+    const byPath = new Map(roles.map(r => [r.ref.path, r.exists ? r.data() : null]));
+    return new Set(profileDocs.filter(p => {
+      const role = p.get("role_ref") && byPath.get(p.get("role_ref").path);
+      return !!role && (role.chatxadmin === true || role.ahmember === true);
+    }).map(p => p.id));
+  };
 
-  const mentions = message.match(/@\w+/g);
-  console.log("Mentions", mentions);
+  var rawMessage = messageData["message"] || "";
+  var pending_user = messageData["pending"] || [];
+  var readby_user = messageData["read_by"];
+  var time = messageData["time"].toDate();
+  const mentionIds = [...new Set((rawMessage.match(/@\w+/g) || []).map(m => m.slice(1)))];
 
-  if((mentions || []).length != 0){
-    var mentionMap = {}
-    var profileID = []
-    for (let i = 0; i < mentions.length; i++) {
-      const profilemention = mentions[i];
-      profileID.push(profilemention.slice(1))
-    }
-    console.log("Mentioned ProfileID", profileID);
-    for (let a = 0; a < profileID.length; a+=10) {
-      await admin.firestore().collection("profile_data").where("profileid", "in", profileID.slice(a, a+10)).get().then(list =>{
-        list.docs.forEach(doc =>{
-          var data = doc.data()
-          mentionMap["@"+doc.id] = "@"+data["name"]
-        })
-      })
-    }
-    console.log("Mention Map", mentionMap)
-    const replacedText = message.replace(/@\w+/g, match => {
-      return mentionMap[match] || match; // Replace if found, else keep original
-    });
-    message = replacedText
-  }
+  const [senderSnap, chatSnap, mentionSnaps, recipientSnaps, newUserSnaps] = await Promise.all([
+    db.collection("profile_data").where("user_ref", "==", db.collection("user_data").doc(sender_uid)).limit(1).get(),
+    chatRef.get(),
+    Promise.all(chunk(mentionIds, 30).map(ids => db.collection("profile_data").where("profileid", "in", ids).get())),
+    Promise.all(chunk(pending_user, 30).map(uids =>
+      db.collection("profile_data").where("user_ref", "in", uids.map(u => db.collection("user_data").doc(u))).get())),
+    // Members who signed up through EiFlix may only have a new_user_data
+    // profile (uid field; doc id = profile id, as notifyMobileApp looks it up).
+    // A failed batch only leaves out that batch's members.
+    Promise.all(chunk(pending_user, 30).map(uids => db.collection("new_user_data").where("uid", "in", uids).get()
+      .catch(e => {
+        console.log("new_user_data recipient lookup failed", e);
+        return { docs: [] };
+      }))),
+  ]);
+  const senderDoc = senderSnap.docs[0] || null;
+  var sender_name = senderDoc ? senderDoc.get("name") : null;
+  const mentionDocs = mentionSnaps.flatMap(s => s.docs);
+  const recipientDocs = [...new Map(recipientSnaps.flatMap(s => s.docs).map(d => [d.id, d])).values()];
+  // Moved, deleted, blocked or unapproved new_user_data accounts are left out, and so is anyone
+  // already found in profile_data.
+  const recipientIdSet = new Set(recipientDocs.map(d => d.id));
+  const newUserIds = [...new Set(newUserSnaps.flatMap(s => s.docs)
+    .filter(d => isNotifiableNewUser(d.data()) && !recipientIdSet.has(d.id))
+    .map(d => d.id))];
+  const chatData = chatSnap.exists ? (chatSnap.data() || {}) : {};
+  console.log(sender_name, sender_uid);
 
-  console.log("message", message)
+  // @<profileid> → @Name; ids in `asTeam` become "@A&H Team" (what participants see in the app).
+  const mentionName = {};
+  mentionDocs.forEach(d => { mentionName["@" + d.id] = "@" + d.get("name"); });
+  const withNames = (text, asTeam) => text.replace(/@\w+/g, m =>
+    asTeam && asTeam.has(m.slice(1)) ? "@" + TEAM_NAME : (mentionName[m] || m));
+  var message = withNames(rawMessage);
+  console.log("message", message);
 
   // Update Last Chat data
+  // A media-only message has no text, so the chat lists would show nothing. Use the first file's kind
+  // ("image") as both apps do. The web sends files with the message; the Flutter app's files land after
+  // this runs and set last_message to the kind themselves (AppService.uploadMedia).
+  var files = Array.isArray(messageData["files"]) ? messageData["files"] : [];
+  var last_message = message;
+  if (!String(message || "").trim() && files.length && files[0] && files[0]["mediatype"]) {
+    last_message = String(files[0]["mediatype"]);
+  }
   var chatMeta = {
-    last_message: message,
+    last_message: last_message,
     last_pending: pending_user,
     last_read_by: readby_user,
     last_sender_uid: sender_uid,
     last_modification: time,
   }
-
-  await admin.firestore().collection("supportchat").doc(chatid).update(chatMeta).catch(e =>{
+  // Not awaited here: the push does not depend on it, so it runs alongside (awaited before returning).
+  const metaWrite = chatRef.update(chatMeta).catch(e => {
     console.log("Chat meta Error", e)
   });
-  var chat_type = (await admin.firestore().collection("supportchat").doc(chatid).get()).data().type
 
-  if(chat_type == "group"){
-    var supportChatDocSnap = await admin.firestore().collection("supportchat").doc(chatid).get();
-    var supportChatData = supportChatDocSnap.data();
-    var group_name = supportChatData.group_name;
-    var profileToSend = []
-    for (let i = 0; i < pending_user.length; i+=10) {
-      var userRef = pending_user.slice(i, i+10).map(e => admin.firestore().collection("user_data").doc(e))
-      await admin.firestore().collection("profile_data").where("user_ref", "in", userRef).get().then(async (profile)=>{
-        profile.forEach(doc=>{
-          if(!profileToSend.includes(doc.id)) profileToSend.push(doc.id)
-        })
-      })
-    }
-
-    await commonService.saveNotificationRecord({
-      title: `New message in ${group_name}`,
-      message: `${sender_name}: ${message}`,
-      subtitle: null,
-      date: admin.firestore.FieldValue.serverTimestamp(),
-      landingpage: null,
-      logged: false,
-      profileid: profileToSend,
-      sticky: false,
-      notificationtype: "groupchat",
-      notificationimage: null,
-      metadata: {
-        "type" : "chatx",
-        "chatType": "group",
-        "groupname":group_name,
-        "groupprofile":supportChatData.group_profile,
-        "click_action": "FLUTTER_NOTIFICATION_CLICK",
-        "messageRef": supportChatData.id,
-        "groupref": supportChatData.id,
-      }
-    });
+  if (chatData.type != "group") {
+    await metaWrite;
+    return;
   }
+
+  var group_name = chatData.group_name;
+  const [senderTeam, recipientTeam, mentionTeam] = await Promise.all([
+    senderDoc ? teamOf([senderDoc]) : Promise.resolve(new Set()),
+    teamOf(recipientDocs),
+    teamOf(mentionDocs),
+  ]);
+  const senderIsTeam = !!senderDoc && senderTeam.has(senderDoc.id);
+  const teamIds = recipientDocs.filter(d => recipientTeam.has(d.id)).map(d => d.id);
+  // new_user_data members have no role_ref, so they're never A&H team.
+  const participantIds = [...recipientDocs.filter(d => !recipientTeam.has(d.id)).map(d => d.id), ...newUserIds];
+  // The sender's name as the message stores it when no profile_data name was found.
+  var pushSender = sender_name || messageData["sendername"] || "Someone";
+
+  const record = (text, profileid) => commonService.saveNotificationRecord({
+    title: `New message in ${group_name}`,
+    message: text,
+    subtitle: null,
+    date: admin.firestore.FieldValue.serverTimestamp(),
+    landingpage: null,
+    logged: false,
+    profileid: profileid,
+    sticky: false,
+    notificationtype: "groupchat",
+    notificationimage: null,
+    metadata: {
+      "type" : "chatx",
+      "chatType": "group",
+      "groupname":group_name,
+      "groupprofile":chatData.group_profile,
+      "click_action": "FLUTTER_NOTIFICATION_CLICK",
+      "messageRef": chatData.id,
+      "groupref": chatData.id,
+      "messageid": snapshot.params.msgid, // badge timing guard (unreadbadge.js)
+    },
+    // Group chats are shared by Breakthroughs and EiFlix — notify both apps.
+    receivingapp: "all",
+  });
+
+  const writes = [metaWrite];
+  // The A&H team sees real names, as in the app.
+  if (teamIds.length) writes.push(record(`${pushSender}: ${chatPushText(message, messageData)}`, teamIds));
+  // Participants see "A&H Team" for a team sender and for team members tagged in the message.
+  if (participantIds.length) {
+    writes.push(record(`${senderIsTeam ? TEAM_NAME : pushSender}: ${chatPushText(withNames(rawMessage, mentionTeam), messageData)}`, participantIds));
+  }
+  await Promise.all(writes);
 });
 
 // exports.createTwilioWhatsAppTemplate = onDocumentCreated('twilio_templates/{docid}',async (event) => {
@@ -4753,7 +5067,9 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
 exports.workshopprogressmessagev2 = onRequest({ 
   cors: true,
   timeoutSeconds: 300,
-  memory: '512MiB'
+  memory: '512MiB',
+  secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1],
+  ...commonService.postmarkEgress,
 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
@@ -4883,9 +5199,10 @@ exports.workshopprogressmessagev2 = onRequest({
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()[commonService.eventWatiServerId]
+        const watiServerId = commonService.eventWatiServerId || '101723';
+        const watiData = wati.data()[watiServerId]
         apikey = watiData['watitoken'];
-        serverid = commonService.eventWatiServerId;
+        serverid = watiServerId;
       }
     })
 
@@ -5165,7 +5482,7 @@ exports.workshopprogressmessagev2 = onRequest({
   }
 });
 
-exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => {
+exports.workshopprogressmessage = onRequest({ cors: true, secrets: [commonService.postmarkSecrets.POSTMARK_STARLABS_V1], ...commonService.postmarkEgress }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
     return;
@@ -5173,6 +5490,30 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
 
   const { type } = req.body;
   console.log("Request type:", type);
+
+  // Delivery on hold (operator 2026-10-13): nobody whose profile_data or
+  // new_user_data doc has deliveryonhold == true is sent this communication —
+  // mail or WhatsApp. false or no field means send as normal. The document id
+  // IS the profileid the screens send with each recipient (the New Users screen
+  // sends new_user_data people here). A recipient that arrives without a
+  // profileid (an older caller) cannot be checked and is sent as before.
+  // If the lookup itself fails, send NOTHING: messaging someone on hold is the
+  // worse mistake, and the screens already report a failed send.
+  let heldSet;
+  try {
+    heldSet = await commonService.getDeliveryHeldProfileIds();
+  } catch (error) {
+    console.error('Could not read delivery-on-hold profiles; nothing sent:', error);
+    res.status(500).json({
+      message: "Could not check delivery-on-hold profiles; nothing was sent",
+      error: error.message || 'Unknown error',
+      successCount: 0,
+      failureCount: 0
+    });
+    return;
+  }
+  const isHeld = (entry) => !!(entry && entry.profileid && heldSet.has(String(entry.profileid)));
+  console.log("Delivery-on-hold profiles:", heldSet.size);
 
   // Email - BULK 
   if (type === 'mail') {
@@ -5183,10 +5524,27 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       res.status(400).send("Missing required fields for bulk email send");
       return;
     }
+    const heldRecipients = recipients.filter(isHeld);
+    const sendableRecipients = recipients.filter((r) => !isHeld(r));
+    if (heldRecipients.length) {
+      console.log(`Skipping ${heldRecipients.length} delivery-on-hold recipient(s):`, heldRecipients.map((r) => r.profileid));
+    }
+    if (sendableRecipients.length === 0) {
+      res.status(200).json({
+        message: "All recipients are on delivery hold — nothing sent",
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldRecipients.length,
+        heldProfileIds: heldRecipients.map((r) => r.profileid),
+        totalProcessed: recipients.length,
+        results: []
+      });
+      return;
+    }
     let successCount = 0;
     let failureCount = 0;
     const results = [];
-    const sendEmailBulk = recipients.map(async (recipient) => {
+    const sendEmailBulk = sendableRecipients.map(async (recipient) => {
       const { email, name } = recipient;
 
       if (!email || !name) {
@@ -5258,6 +5616,8 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       message: "Bulk email send completed",
       successCount,
       failureCount,
+      heldCount: heldRecipients.length,
+      heldProfileIds: heldRecipients.map((r) => r.profileid),
       totalProcessed: recipients.length,
       results: results
     });
@@ -5271,13 +5631,33 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
       return;
     }
 
+    const heldParticipants = participants.filter(isHeld);
+    const sendableParticipants = participants.filter((p) => !isHeld(p));
+    if (heldParticipants.length) {
+      console.log(`Skipping ${heldParticipants.length} delivery-on-hold participant(s):`, heldParticipants.map((p) => p.profileid));
+    }
+    // Nobody left: return before fetching the WATI token or calling WATI with an empty broadcast.
+    if (sendableParticipants.length === 0) {
+      res.status(200).json({
+        message: "All participants are on delivery hold — nothing sent",
+        templateName: templateName,
+        successCount: 0,
+        failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
+        totalProcessed: participants.length
+      });
+      return;
+    }
+
     var apikey = null;
     var serverid = null;
     await admin.firestore().collection("classify").doc("wati").get().then((wati) => {
       if(wati.exists) {
-        const watiData = wati.data()[commonService.eventWatiServerId]
+        const watiServerId = commonService.eventWatiServerId || '101723';
+        const watiData = wati.data()[watiServerId]
         apikey = watiData['watitoken'];
-        serverid = commonService.eventWatiServerId;
+        serverid = watiServerId;
       }
     })
 
@@ -5293,7 +5673,7 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
         'Content-Type': 'application/json-patch+json', 
       };
 
-      const receivers = participants.map(participant => ({
+      const receivers = sendableParticipants.map(participant => ({
         whatsappNumber: participant.phonenumber,
         customParams: participant.customParams.map(param => ({
           name: param.name,
@@ -5342,6 +5722,8 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
         templateName: templateName,
         successCount: receivers.length,
         failureCount: 0,
+        heldCount: heldParticipants.length,
+        heldProfileIds: heldParticipants.map((p) => p.profileid),
         totalProcessed: participants.length,
         broadcastDetails: response.data
       });
@@ -5359,7 +5741,8 @@ exports.workshopprogressmessage = onRequest({ cors: true }, async (req, res) => 
         error: error.response?.data || error.message,
         errorStatus: error.response?.status,
         successCount: 0,
-        failureCount: participants.length,
+        failureCount: sendableParticipants.length,
+        heldCount: heldParticipants.length,
         totalProcessed: participants.length
       });
     }

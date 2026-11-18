@@ -31,7 +31,34 @@ const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "July", "Aug", "Sep
 
 // Post Mark
 const postmark = require("postmark");
-const postmarkClient = new postmark.ServerClient(production ? "67d8b50e-1208-4913-8265-695f57e43939" : '70e65ec0-ddd4-49fe-908b-24838ff4a8f7'); // Postmark email:
+// Postmark server tokens live in Cloud Secret Manager (firebase functions:secrets:set <NAME>) and are
+// declared ONCE here, shared by every component. A function that sends mail must list the secret(s)
+// it uses in its `secrets: [...]` option, otherwise `.value()` is empty at runtime.
+// The shared client below uses the StarLabs V1 server. Built lazily because `.value()` is only
+// available inside a bound function, never at module load.
+const { defineSecret } = require("firebase-functions/params");
+const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
+const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
+const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
+const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
+const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
+const postmarkSecrets = { POSTMARK_STARLABS_V1, POSTMARK_STARLABS_V2, POSTMARK_STARLABS_V3, POSTMARK_STARLABS_V4, POSTMARK_STARLABS_TEST };
+// Postmark's edge blocks some shared Google egress IPs, so functions that call Postmark spread this
+// into their options to leave via Cloud NAT's static IP (35.226.111.222). The connector exists on production
+// only. Keyed off `production` rather than .env: firebase deploy evaluates function options with only
+// GCLOUD_PROJECT/FIREBASE_CONFIG set, so .env.<project> values are undefined at that point.
+const postmarkEgress = production
+	? { vpcConnector: "functions-egress", vpcConnectorEgressSettings: "ALL_TRAFFIC" }
+	: {};
+let _postmarkClient = null;
+function getPostmarkClient() {
+	if (!_postmarkClient) {
+		const token = POSTMARK_STARLABS_V1.value();
+		if (!token) throw new Error("POSTMARK_STARLABS_V1 secret is empty — add commonService.postmarkSecrets.POSTMARK_STARLABS_V1 to this function's `secrets` option");
+		_postmarkClient = new postmark.ServerClient(token);
+	}
+	return _postmarkClient;
+}
 
 // Event wati Server ID
 const eventWatiServerId = '101723';
@@ -68,8 +95,34 @@ function chunkArray(array, chunkSize) {
   return chunks;
 }
 
+// Delivery hold — the profile ids that must not be sent email or WhatsApp.
+// A profile is on hold when its profile_data doc OR its new_user_data doc has
+// deliveryonhold === true. false, or no deliveryonhold field at all, means send
+// as normal. A new_user_data doc adds both its doc id and its `profileid` field
+// (they're the same for sign-ups, but older docs may differ).
+// Throws if either read fails, so each caller can choose to send nothing rather
+// than message someone who is on hold.
+async function getDeliveryHeldProfileIds() {
+  const db = admin.firestore();
+  const [profileSnap, newUserSnap] = await Promise.all([
+    db.collection('profile_data').where('deliveryonhold', '==', true).select().get(),
+    db.collection('new_user_data').where('deliveryonhold', '==', true).select('profileid').get(),
+  ]);
+  const held = new Set();
+  profileSnap.docs.forEach((doc) => held.add(doc.id));
+  newUserSnap.docs.forEach((doc) => {
+    held.add(doc.id);
+    const profileid = doc.get('profileid');
+    if (profileid) held.add(String(profileid));
+  });
+  return held;
+}
+
 // Save Notification Record
-async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = []}){
+// receivingapp (optional) routes the push in notifyMobileApp: "breakthroughsapp"
+// (the default when the field is absent), "eiflixapp" or "all". Left off the
+// record unless a caller passes it, so every other caller's records are unchanged.
+async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = [], receivingapp = null}){
     console.log('Save notification runnning');
 	var docid = admin.firestore().collection("notificationrecord").doc().id
     var notificationRecordData = {
@@ -86,6 +139,7 @@ async function saveNotificationRecord({title = "", message = "", subtitle = null
     profileid: profileid,
     success: false
   }
+  if (receivingapp) notificationRecordData.receivingapp = receivingapp;
   await admin.firestore().collection("notificationrecord").doc(docid).set(notificationRecordData).then(() =>{
     console.log("Notification Record Saved");
   }).catch(err =>{
@@ -669,7 +723,7 @@ async function sendSalesCaptureToSalesChannel(value) {
 
 	let addonarray = [];
 	for (let i = 0; i < leaddata['addons'].length; i++) {
-		addonarray.push(mapProduct[leaddata['addons'][i]['addons']])
+		addonarray.push(mapProduct[leaddata['addons'][i]])
 	}
 
 	let arraybonus = [];
@@ -781,6 +835,13 @@ async function sendSalesCaptureToSalesChannel(value) {
 				"text": {
 					"type": "mrkdwn",
 					"text": `*Purchase Date* : ${leaddata['purchasedate'].toDate ? leaddata['purchasedate'].toDate().toLocaleDateString('en-CA') : new Date(leaddata['purchasedate']).toLocaleDateString('en-CA')}`,
+				}
+			},
+			{
+				"type": "section",
+				"text": {
+					"type": "mrkdwn",
+					"text": `*Installment Start Date* : ${leaddata['installmentstartdate'].toDate ? leaddata['installmentstartdate'].toDate().toLocaleDateString('en-CA') : new Date(leaddata['installmentstartdate']).toLocaleDateString('en-CA')}`,
 				}
 			},
 			{
@@ -979,9 +1040,12 @@ async function updateParticipantTouchPoint({label = "", notes = "", touchpoint =
 module.exports = {
 	// slackDevTest, slackLogSupport, slackLogVideoWatch, slackAppLogin, slackTicketingSystem, slackEvent, slackSaleCapture, slackSaleRejection, slackEvolutionProgress, slackLoveLetter, slackAskAH, slackFirebaseBilling, slackLogScheduling, slackWorkshopQandA,slackWorkshopsubscribers,slackWorkshopsubscribersactivity,
 	production,
-	postmarkClient,
+	get postmarkClient() { return getPostmarkClient(); },
+	postmarkSecrets,
+	postmarkEgress,
 	monthName,
 	chunkArray,
+	getDeliveryHeldProfileIds,
 	saveNotificationRecord,
 	convertDate,
 	uploadImageFromUrl,
@@ -998,7 +1062,8 @@ module.exports = {
 	generateZoomMeeting,
 	createEmailArchiveDocument,
 	createWatiArchiveDocument,
-	getWebhookUrl
+	getWebhookUrl,
+	eventWatiServerId,
 }
 
 async function createEmailArchiveDocument({
