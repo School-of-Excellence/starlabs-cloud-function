@@ -1,6 +1,6 @@
 # deploy-functions — deploy Cloud Functions from GitHub Actions.
 #
-# Postmark server tokens (POSTMARK_STARLABS_V1..V4, _TEST) live in Cloud Secret Manager on each Firebase
+# Postmark server tokens (POSTMARK_STARLABS_V1..V5, _TEST) live in Cloud Secret Manager on each Firebase
 # project and are bound to functions with `defineSecret` (see functions/components/service.js). Nothing
 # about them is injected here — rotate a token with:
 #   firebase functions:secrets:set POSTMARK_STARLABS_V1 --project <project>
@@ -74,7 +74,7 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
       - name: Install Firebase CLI
-        run: npm install -g firebase-tools
+        run: npm install -g firebase-tools@15.36.0
 
       - name: Deploy
         env:

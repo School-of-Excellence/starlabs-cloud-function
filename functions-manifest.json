@@ -262,6 +262,7 @@
       "name": "createTvCastGrant",
       "type": "onCall",
       "file": "components/workshop.js",
+      "triggerPath": "eiflixtouchpoints/{docid}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -276,6 +277,13 @@
       "name": "createWorkshopPaymentOrder",
       "type": "onCall",
       "file": "components/workshop.js",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "crmParticipantSnapshot",
+      "type": "onRequest",
+      "file": "components/crm-participant-snapshot.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },
@@ -325,6 +333,14 @@
       "codebase": "default"
     },
     {
+      "name": "eiflixtouchpointslack",
+      "type": "onDocumentCreated",
+      "file": "components/workshop.js",
+      "triggerPath": "eiflixtouchpoints/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
       "name": "eventparticipationdata_to_pmd",
       "type": "onDocumentWritten",
       "file": "components/participantmetadata.js",
@@ -346,6 +362,13 @@
       "type": "onRequest",
       "file": "components/content.js",
       "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "getMediaUrls",
+      "type": "onCall",
+      "file": "components/media_signed_url.js",
+      "emulatorLoaded": true,
       "codebase": "default"
     },
     {
@@ -448,6 +471,13 @@
       "type": "onRequest",
       "file": "components/communication.js",
       "triggerPath": "email templates/{docid}",
+      "emulatorLoaded": false,
+      "codebase": "default"
+    },
+    {
+      "name": "newuseraicall",
+      "type": "onSchedule",
+      "file": "components/workshop.js",
       "emulatorLoaded": false,
       "codebase": "default"
     },

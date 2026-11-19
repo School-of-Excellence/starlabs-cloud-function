@@ -1,0 +1,4268 @@
+{
+  "project": "starlabs-test",
+  "generatedAt": "2026-09-21T12:48:41.651Z",
+  "filters": {
+    "email": null,
+    "profileid": null,
+    "ticket": null,
+    "status": null,
+    "category": null,
+    "since": null,
+    "limit": 100
+  },
+  "counts": {
+    "people": 23,
+    "tickets": 100,
+    "open": 44
+  },
+  "people": [
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Charan Reddy P",
+        "email": "charan.reddy@soexcellence.com",
+        "mobile": "8309215778"
+      },
+      "counts": {
+        "tickets": 18,
+        "open": 9
+      },
+      "tickets": [
+        {
+          "ticket_id": "F3WvKIYXZTwSGGDiKSxY",
+          "issue_no": 255,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": "8309215778",
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "testtststststst",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-24T20:21:57.648Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-08-24T20:21:57.648Z",
+          "last_modified": "2026-08-24T20:21:57.909Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "lwY1PK8TxonUFEbk91A7",
+          "issue_no": 188,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asfd",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-04-29T17:52:05.553Z",
+          "status_changed_by": "rVUgFGQT0ACQVyyeEdQq",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-04-29T17:52:05.553Z",
+          "last_modified": "2026-04-29T17:52:05.889Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshini Arulraj",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "mYptytsxJUoQzZJpWPXr",
+          "issue_no": 187,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": "1234567899",
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-04-29T17:51:06.742Z",
+          "status_changed_by": "oAurj5AYezq8bPTuxsjW",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-04-29T17:50:21.138Z",
+          "last_modified": "2026-04-29T17:51:06.177Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Surya Thiruvengadam",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "5mUEtTH7KxK8zxkmwqAO",
+          "issue_no": 171,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": "1234567890",
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "testing",
+          "category": "B!G",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-19T09:53:15.830Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-03-19T09:53:15.830Z",
+          "last_modified": "2026-03-19T09:53:16.120Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "DzDgJUaKKlTonnRkB1sr",
+          "issue_no": 120,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "Testing Auto Message ",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T13:50:24.753Z",
+          "status_changed_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-01-04T10:47:52.509Z",
+          "last_modified": "2026-01-10T13:50:24.753Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Jagan P",
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "edASPLeAdUpYyamGSl0A",
+          "issue_no": 115,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "I need to know my journey ",
+          "category": "journey",
+          "subcategory": "",
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T06:34:39.274Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-18T07:35:48.513Z",
+          "last_modified": "2025-12-18T07:35:51.384Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "NxeQhVcZbxvkRTkCV53b",
+          "issue_no": 114,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "Send my statements of accounts",
+          "category": "Finance",
+          "subcategory": "",
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T06:35:13.048Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "UIKyFTcAwpIh0TDRESZl",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-18T07:34:33.566Z",
+          "last_modified": "2025-12-18T07:34:41.462Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Ragavendhiran Sankar",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "dQxs4SHfarSGBNVZ9WEr",
+          "issue_no": 111,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "ticket chat screen test",
+          "category": "EiFlix Workshop",
+          "subcategory": "",
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T06:35:50.235Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "fRliApJvvUJ91dAyWMpn",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T12:14:13.813Z",
+          "last_modified": "2026-01-14T09:45:18.958Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Dharshan S",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "jBrkKt86hjlCGYnwTizh",
+          "issue_no": 110,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "finacne tickets",
+          "category": "Finance",
+          "subcategory": "",
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T10:07:34.162Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "UIKyFTcAwpIh0TDRESZl",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:34:39.141Z",
+          "last_modified": "2025-12-06T11:34:45.504Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Ragavendhiran Sankar",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "G3WjVLQLQuXacLh6vCSx",
+          "issue_no": 109,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "raising ticket from common function",
+          "category": "Referrals & Upgrades",
+          "subcategory": "",
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T10:06:49.327Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:34:04.616Z",
+          "last_modified": "2025-12-06T11:34:07.291Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "4W2fNuNxwAjJVurtBDug",
+          "issue_no": 108,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "testing connection",
+          "category": "B!G",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:13:40.214Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "IK6KVq0d1jBRADbKVhdQ"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:13:40.214Z",
+          "last_modified": "2025-12-06T11:13:43.959Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Hema"
+          ]
+        },
+        {
+          "ticket_id": "F6aINYz4N9Q04KNA7KYc",
+          "issue_no": 107,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "cloud function",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T10:39:20.490Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:12:25.999Z",
+          "last_modified": "2026-01-10T10:39:20.232Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Gokul Havinash"
+          ]
+        },
+        {
+          "ticket_id": "C020jPrjWPBtAHAf6wjz",
+          "issue_no": 106,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "raise ticket",
+          "category": "Finance",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:12:08.351Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "UIKyFTcAwpIh0TDRESZl",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:12:08.351Z",
+          "last_modified": "2025-12-06T11:12:09.305Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Ragavendhiran Sankar",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "Dg0Yd80lhHRVc2nvqx73",
+          "issue_no": 105,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "efilixx",
+          "category": "EiFlix Workshop",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T00:30:25.691Z",
+          "status_changed_by": "fRliApJvvUJ91dAyWMpn",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "fRliApJvvUJ91dAyWMpn",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:10:38.949Z",
+          "last_modified": "2026-01-14T00:30:25.691Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshan S",
+          "assigned_to_names": [
+            "Dharshan S",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "f7r4VdFWoj7lRzQYawbD",
+          "issue_no": 103,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "events and process",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:09:32.971Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:09:32.971Z",
+          "last_modified": "2025-12-06T11:09:35.522Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Gokul Havinash"
+          ]
+        },
+        {
+          "ticket_id": "rO5AZBdxmTPF5U1QPRy6",
+          "issue_no": 101,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "test 3",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:08:24.675Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:08:24.675Z",
+          "last_modified": "2025-12-06T11:08:25.517Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "X8FQkTxRq2CoDqQpy7rB",
+          "issue_no": 99,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "test 2",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:06:56.747Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:06:56.747Z",
+          "last_modified": "2025-12-06T11:06:57.309Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "S04N66akJ0EGpgcVLzEq",
+          "issue_no": 97,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Charan Reddy P",
+          "person_email": "charan.reddy@soexcellence.com",
+          "person_mobile": 8309215778,
+          "client_id": "6TtpB49tVs9AZYVgSZhT",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "testing functionssssss",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2025-12-06T11:06:23.244Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2025-12-06T11:06:23.243Z",
+          "last_modified": "2025-12-06T11:06:23.715Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "rVUgFGQT0ACQVyyeEdQq",
+        "name": "Dharshan S",
+        "email": "dharshansri.2092@gmail.com",
+        "mobile": "8838292092"
+      },
+      "counts": {
+        "tickets": 18,
+        "open": 7
+      },
+      "tickets": [
+        {
+          "ticket_id": "7dXIhMFpKptkpChZWo3Q",
+          "issue_no": 197,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-11T06:31:58.241Z",
+          "status_changed_by": "rVUgFGQT0ACQVyyeEdQq",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T06:31:58.241Z",
+          "last_modified": "2026-07-22T06:48:30.014Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshini Arulraj",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "nayoGTHD0BkbsxKZXDH8",
+          "issue_no": 170,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing icon in queuemanager\n",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-19T09:43:21.070Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-19T09:43:21.070Z",
+          "last_modified": "2026-03-19T09:43:21.248Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "lVnyTDFBQnzzohhYatP9",
+          "issue_no": 169,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing the ticket icon in queue manager",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-19T09:19:59.189Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-19T09:19:59.189Z",
+          "last_modified": "2026-03-19T09:19:59.447Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "test 1",
+              "date": {
+                "_seconds": 1775027660,
+                "_nanoseconds": 222000000
+              },
+              "writtenBy": "nssKGCHXXBpeyLKEmXUA"
+            },
+            {
+              "remarks": "test 2",
+              "date": {
+                "_seconds": 1775027664,
+                "_nanoseconds": 421000000
+              },
+              "writtenBy": "nssKGCHXXBpeyLKEmXUA"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "cfN92QahJOZ6J4sWeGFq",
+          "issue_no": 151,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "vignesh help me with my journey process ",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-16T19:05:03.102Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T18:55:51.192Z",
+          "last_modified": "2026-02-23T11:45:32.073Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "g0QzpEkuxdNmbSk96ZHo",
+          "issue_no": 150,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "Ahcrm notification test",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-31T19:44:10.314Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T18:54:24.117Z",
+          "last_modified": "2026-02-02T12:36:30.007Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "s72eBzjTFEraQqFRGw3j",
+          "issue_no": 149,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "Checking the notification of ahcrm",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-01-16T18:52:54.665Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T18:52:54.664Z",
+          "last_modified": "2026-01-16T18:53:51.516Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "nqgq9AWOuwJWl54OEg7O",
+          "issue_no": 146,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "Raising for image check",
+          "category": "B!G",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-01-16T10:15:04.883Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "IK6KVq0d1jBRADbKVhdQ"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T10:15:04.883Z",
+          "last_modified": "2026-01-16T10:15:05.207Z",
+          "files": 2,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Hema"
+          ]
+        },
+        {
+          "ticket_id": "7GUWdVdlRoZiv9vL6DBQ",
+          "issue_no": 145,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "Testing Image Upload ",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-16T10:01:36.513Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T10:00:04.150Z",
+          "last_modified": "2026-01-16T10:01:35.997Z",
+          "files": 2,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "s1mDa6AEXmKSbJN8Jjv0",
+          "issue_no": 144,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Tesitng Automatic Message 2",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-01-16T09:48:40.952Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T09:48:40.952Z",
+          "last_modified": "2026-02-23T11:45:34.404Z",
+          "files": 1,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "inm8J5fVa3R9cJTrYTav",
+          "issue_no": 143,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "testtibg automated message",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-01-16T09:43:21.127Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T09:43:21.127Z",
+          "last_modified": "2026-01-16T09:46:07.970Z",
+          "files": 1,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "lhqLHZuPg26n8cx9SyRb",
+          "issue_no": 142,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T19:12:31.715Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T19:05:04.138Z",
+          "last_modified": "2026-01-14T19:12:31.550Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "xfQ6FANHShcBVh0dllBS",
+          "issue_no": 138,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "test close",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:30:02.620Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T18:29:49.757Z",
+          "last_modified": "2026-01-14T18:34:29.968Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "t3pL8jJaQMTt32UvfLlx",
+          "issue_no": 136,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "LscWz10tYd7FqWzBL4h5",
+          "issue": "testing close message",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:21:06.405Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Resolved",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T18:20:22.466Z",
+          "last_modified": "2026-01-14T18:22:15.733Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "xA8UF3ZUfpdeGrVwHglb",
+          "issue_no": 134,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:10:03.506Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T12:27:01.569Z",
+          "last_modified": "2026-02-23T10:26:42.704Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "mEXY5Z71cLiHSpTdyJfB",
+          "issue_no": 132,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing notification 1",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:16:44.919Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T11:26:57.304Z",
+          "last_modified": "2026-01-14T19:03:54.915Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "LAk7LNkjvLNHWhZV3Jri",
+          "issue_no": 130,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing notification ",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:05:26.031Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Resolved",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T11:17:56.001Z",
+          "last_modified": "2026-01-14T18:18:37.623Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "DtNEXB99TbrYRmX90DJR",
+          "issue_no": 126,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:15:32.655Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Resolved",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T09:09:58.389Z",
+          "last_modified": "2026-01-14T18:17:43.082Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "t5ZEZhXVWJo8QTQYoUiS",
+          "issue_no": 122,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Dharshan S",
+          "person_email": "dharshansri.2092@gmail.com",
+          "person_mobile": "8838292092",
+          "client_id": "fRliApJvvUJ91dAyWMpn",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "testing",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-13T14:56:39.825Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-13T14:41:25.909Z",
+          "last_modified": "2026-01-14T18:18:32.874Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Jagan P",
+            "Vignesh S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "Z7L63M4XlM1RyTEzBmZk",
+        "name": "Abhinaya B",
+        "email": "abhinaya.b@soexcellence.com",
+        "mobile": "9789834802"
+      },
+      "counts": {
+        "tickets": 14,
+        "open": 6
+      },
+      "tickets": [
+        {
+          "ticket_id": "6T6M0B6QXnzyHsrQRJHn",
+          "issue_no": 177,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-30T09:36:57.745Z",
+          "status_changed_by": "Z7L63M4XlM1RyTEzBmZk",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-30T09:36:57.745Z",
+          "last_modified": "2026-03-30T09:36:57.913Z",
+          "files": 0,
+          "notes": [
+            {
+              "date": {
+                "_seconds": 1774947417,
+                "_nanoseconds": 393000000
+              },
+              "remarks": "test2",
+              "writtenBy": "nssKGCHXXBpeyLKEmXUA"
+            },
+            {
+              "remarks": "test",
+              "date": {
+                "_seconds": 1774947411,
+                "_nanoseconds": 409000000
+              },
+              "writtenBy": "nssKGCHXXBpeyLKEmXUA"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Abhinaya B",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "hvFL9EmmsDOqQ32BAsKq",
+          "issue_no": 176,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "new test ticket",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-23T07:29:45.038Z",
+          "status_changed_by": null,
+          "chat_status": "Decision Making",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-03-23T07:29:45.038Z",
+          "last_modified": "2026-03-23T12:01:25.342Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "Jvw7DZdWyT4COvzOYIHI",
+          "issue_no": 175,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test 4",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-04-01T07:13:19.226Z",
+          "status_changed_by": "nssKGCHXXBpeyLKEmXUA",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-03-23T06:56:26.402Z",
+          "last_modified": "2026-04-01T07:13:19.002Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Saravanan Aruljothi",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "9nyXa3MtM4Ze4JeYUjXb",
+          "issue_no": 174,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test 3",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-23T06:43:51.281Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-03-23T06:43:51.281Z",
+          "last_modified": "2026-03-23T06:57:52.952Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "05m4NFx6fxClrOq9J3PO",
+          "issue_no": 173,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-23T06:42:52.654Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-03-23T06:42:52.654Z",
+          "last_modified": "2026-03-23T11:59:43.453Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "9C8NA2wRQNXvBnti2wIM",
+          "issue_no": 172,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test ",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-23T06:41:40.311Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-03-23T06:41:40.311Z",
+          "last_modified": "2026-03-23T09:53:34.217Z",
+          "files": 2,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "zflP95gP2jKYzvZPwwBC",
+          "issue_no": 163,
+          "person_profileid": "tw3PR7rnZpvUbQRuhrgo",
+          "reported_by_name": "Arun Dass",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-03-10T07:53:31.241Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-10T07:36:11.960Z",
+          "last_modified": "2026-03-23T09:53:30.344Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "01",
+              "date": {
+                "_seconds": 1773309629,
+                "_nanoseconds": 460000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "2",
+              "date": {
+                "_seconds": 1773386462,
+                "_nanoseconds": 430000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "ZfrHHKprtIxuf4Oc5yaq",
+          "issue_no": 153,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-02-24T00:30:18.977Z",
+          "status_changed_by": "4YgjxMWDaqF4MTdTmIuw",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-02-11T12:56:30.410Z",
+          "last_modified": "2026-03-23T07:00:02.489Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Gokul Havinash",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "tlgT9CU3J7wwKMsi0BBE",
+          "issue_no": 148,
+          "person_profileid": "Z7L63M4XlM1RyTEzBmZk",
+          "reported_by_name": "Abhinaya B",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "testing notification ",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-01-16T17:57:00.167Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Decision Making",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T16:19:15.314Z",
+          "last_modified": "2026-03-23T09:53:40.446Z",
+          "files": 0,
+          "notes": null,
+          "review": {
+            "iBMwpJMbysfW3I5gvhGI": {
+              "_seconds": 1774943544,
+              "_nanoseconds": 554000000
+            }
+          },
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "ebrPAgZc3oJxxo6DUqte",
+          "issue_no": 147,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "testing",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-22T00:30:10.965Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-16T16:08:54.773Z",
+          "last_modified": "2026-03-23T07:00:16.496Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Charan Reddy P",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "Pqh6k0tpJcVIY4L3p2aX",
+          "issue_no": 140,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test close test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T18:32:51.667Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T18:31:03.169Z",
+          "last_modified": "2026-03-23T07:00:06.650Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "MUCyfPZgaTaQUO96juLp",
+          "issue_no": 128,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T09:12:01.387Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Resolved",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-14T09:11:26.553Z",
+          "last_modified": "2026-03-23T07:00:19.244Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "5eUUhn863EbXyvbTtDB1",
+          "issue_no": 124,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test for ticket in ahcrm",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-14T07:55:25.251Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-13T15:37:52.114Z",
+          "last_modified": "2026-03-23T07:00:09.576Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "Eln0WNIJLC4i8LZONw62",
+          "issue_no": 117,
+          "person_profileid": "fRliApJvvUJ91dAyWMpn",
+          "reported_by_name": "Dharshan S",
+          "person_name": "Abhinaya B",
+          "person_email": "abhinaya.b@soexcellence.com",
+          "person_mobile": "9789834802",
+          "client_id": "Z7L63M4XlM1RyTEzBmZk",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T10:17:58.083Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-01-03T03:56:57.692Z",
+          "last_modified": "2026-03-23T09:53:25.582Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "noets",
+              "date": {
+                "_seconds": 1767988107,
+                "_nanoseconds": 429000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "Dv9nH7eGOPHO6GsiX8jh",
+        "name": "Sashong Santhosh",
+        "email": "sashong.santhosh@soexcellence.com",
+        "mobile": "9940665679"
+      },
+      "counts": {
+        "tickets": 8,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "FOuLZdaKg0NHYP3RnLv6",
+          "issue_no": 240,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "functions",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:26.301Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T13:44:49.752Z",
+          "last_modified": "2026-07-16T00:30:26.301Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "2JE9T9N4r8RxMwTBfvKD",
+          "issue_no": 238,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Test",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-10T13:42:26.353Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T13:30:32.841Z",
+          "last_modified": "2026-07-10T13:42:25.904Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "699xvOEbDKl01DOlWhte",
+          "issue_no": 236,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "issue",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:23.050Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T13:22:03.460Z",
+          "last_modified": "2026-07-16T00:30:23.050Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "VvwTraD3f5w8JhHAMEJU",
+          "issue_no": 235,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "testing isue",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:29.328Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T13:18:24.855Z",
+          "last_modified": "2026-07-16T00:30:29.328Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "GXvK2Y2WNy4bM3RMQGZO",
+          "issue_no": 233,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "Testtttttt",
+          "category": "test",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-07-10T12:33:42.799Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Decision Making",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T12:33:42.799Z",
+          "last_modified": "2026-07-10T12:35:13.202Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "65F9beJinvJSRxcPZq96",
+          "issue_no": 227,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "testing issue",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:20.267Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T10:28:25.751Z",
+          "last_modified": "2026-07-16T00:30:20.267Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "3GvbMJAszYe6mOWbGQlR",
+          "issue_no": 225,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "test console issue",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:18.312Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T09:17:40.780Z",
+          "last_modified": "2026-07-16T00:30:18.312Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "ky2akIIhAPfVaBAEMotW",
+          "issue_no": 223,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Sashong Santhosh",
+          "person_email": "sashong.santhosh@soexcellence.com",
+          "person_mobile": "9940665679",
+          "client_id": "rva1u58bEVjeBZk1jnN0",
+          "issue_reported_by": "rva1u58bEVjeBZk1jnN0",
+          "issue": "testing cloud function",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:30.166Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T07:54:28.495Z",
+          "last_modified": "2026-07-16T00:30:30.166Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "iBMwpJMbysfW3I5gvhGI",
+        "name": "Vignesh S",
+        "email": "vignesh.s@soexcellence.com",
+        "mobile": "8428513714"
+      },
+      "counts": {
+        "tickets": 7,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "o9fsbTXbtEVKEivGwprZ",
+          "issue_no": 243,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Subject: Necessary Amendments to Refund Agreement – Pooja Jaywant\n\nI am responding to your message from February 25, 2026, regarding the INR 10,000 refund. I have reviewed the draft shared on May 8th and require the following corrections before signing:  \n\nProgram Name: The agreement incorrectly lists \"FTM\". This refund is specifically for the \"Launch Your Legacy\" (LYL) registration/token amount.  \n\nScope of Settlement (Clause 4): This refund pertains strictly to LYL. It must be clarified that this does not waive my rights regarding the outstanding September 2023 CTD Implementation Workshop, which remains undelivered.  \n\nReason for Cancellation (Clause 5): The cancellation is due to the program cost and resulting financial exigency, rather than a purely voluntary \"personal reason\".  \nTimeline: This matter has been in correspondence for nearly two years. I am looking for a swift conclusion. \n \nPlease share the revised draft reflecting these changes. Once the document accurately represents the LYL dispute and protects my rights regarding the undelivered CTD workshop, I will provide my bank details and sign.  \n\nPooja Jaywant\n7506022778",
+          "category": "journey",
+          "subcategory": null,
+          "status": "close",
+          "status_changed_at": "2026-07-18T11:09:52.667Z",
+          "status_changed_by": "V02NDc1PwhdhcqKrLLscxneKYvs2",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-07-15T10:00:31.418Z",
+          "last_modified": "2026-07-15T10:04:33.497Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "EvnivTyY9NJixoQJ5oRH",
+          "issue_no": 228,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "rva1u58bEVjeBZk1jnN0",
+          "issue": "Issue",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-21T00:30:19.665Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T10:33:44.613Z",
+          "last_modified": "2026-07-21T00:30:19.665Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "zd9AOHxUc3b9KxX51R33",
+          "issue_no": 221,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Hi I am a big participant. I had enrolled for wish. wanted to know when can I available the wish sessions. Thanks",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-08T00:30:17.754Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-06-03T04:51:23.860Z",
+          "last_modified": "2026-06-08T00:30:17.754Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "mzVfFMIet2PxrpWKz3Up",
+          "issue_no": 219,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "On 2 July 2024, I submitted my GSTin. I assumed that the same would be included in the invoices. I find that it has not happened. I want a resolution for this immediately.",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-07T00:30:19.414Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-06-01T16:02:41.010Z",
+          "last_modified": "2026-06-07T00:30:19.414Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "LcT1Zm2Yg2tty9HMUnBs",
+          "issue_no": 217,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "When I am trying to open the Eiflix App it is not opening. Every time it is coming Password entered is incorrect. And while trying to reset password msg sent to my email id is not visible to me. So I am unable to open the App.",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-07T00:30:17.302Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-06-01T15:38:58.348Z",
+          "last_modified": "2026-06-07T00:30:17.302Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "cuubWpk6fSPxuItMM18h",
+          "issue_no": 215,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Subject: Necessary Amendments to Refund Agreement – Pooja Jaywant\n\nI am responding to your message from February 25, 2026, regarding the INR 10,000 refund. I have reviewed the draft shared on May 8th and require the following corrections before signing:\n\nProgram Name: The agreement incorrectly lists \"FTM\". This refund is specifically for the \"Launch Your Legacy\" (LYL) registration/token amount.\n\nScope of Settlement (Clause 4): This refund pertains strictly to LYL. It must be clarified that this does not waive my rights regarding the outstanding September 2023 CTD Implementation Workshop, which remains undelivered.\n\nReason for Cancellation (Clause 5): The cancellation is due to the program cost and resulting financial exigency, rather than a purely voluntary \"personal reason\".\nTimeline: This matter has been in correspondence for nearly two years. I am looking for a swift conclusion.\n\nPlease share the revised draft reflecting these changes. Once the document accurately represents the LYL dispute and protects my rights regarding the undelivered CTD workshop, I will provide my bank details and sign.\n\nPooja Jaywant\n7506022778",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-07T00:30:18.485Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-06-01T15:34:31.006Z",
+          "last_modified": "2026-06-07T00:30:18.485Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "5JTTMYK05yi6p6HZ4KE3",
+          "issue_no": 213,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Vignesh S",
+          "person_email": "vignesh.s@soexcellence.com",
+          "person_mobile": "8428513714",
+          "client_id": "iBMwpJMbysfW3I5gvhGI",
+          "issue_reported_by": "iBMwpJMbysfW3I5gvhGI",
+          "issue": "Hi, when is the WatsonX event?",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-05T00:30:44.382Z",
+          "status_changed_by": "4YgjxMWDaqF4MTdTmIuw",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-05-28T19:47:40.989Z",
+          "last_modified": "2026-06-05T00:30:44.382Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Gokul Havinash",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Surya Thiruvengadam",
+        "email": "surya.thiruvengadam@soexcellence.com",
+        "mobile": "9944463102"
+      },
+      "counts": {
+        "tickets": 6,
+        "open": 5
+      },
+      "tickets": [
+        {
+          "ticket_id": "HxT0kGXQvJbZALEep8wF",
+          "issue_no": 257,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "test",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-24T20:33:32.230Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-08-24T20:33:32.230Z",
+          "last_modified": "2026-08-24T20:33:32.586Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "tcDqjO2yhBeFW2Z0fo1Q",
+          "issue_no": 253,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "oAurj5AYezq8bPTuxsjW",
+          "issue": "Hi I need support for event ",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-10T10:15:05.959Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-08-10T10:15:05.959Z",
+          "last_modified": "2026-08-10T10:15:08.072Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "yHmVCy0zazijehI7s4nj",
+          "issue_no": 251,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "oAurj5AYezq8bPTuxsjW",
+          "issue": "Hi I need critical support",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-10T10:14:12.154Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-08-10T10:14:12.154Z",
+          "last_modified": "2026-08-10T10:14:14.280Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "jWYqJK20eVNNAIxwq0Qn",
+          "issue_no": 249,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "oAurj5AYezq8bPTuxsjW",
+          "issue": "Describe What is Critical Support",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-10T10:12:35.986Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-08-10T10:12:35.985Z",
+          "last_modified": "2026-08-10T10:13:05.274Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "uGiDVpYRcFfysdHIP4C1",
+          "issue_no": 246,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "oAurj5AYezq8bPTuxsjW",
+          "issue": "B!G Accelerator Request for B!G Accelerator Opportunities!",
+          "category": null,
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-08-10T10:06:27.099Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-08-10T10:06:27.099Z",
+          "last_modified": "2026-08-10T10:11:07.919Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": []
+        },
+        {
+          "ticket_id": "Vjwcgf91el1mcUVpTCAX",
+          "issue_no": 193,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Surya Thiruvengadam",
+          "person_email": "surya.thiruvengadam@soexcellence.com",
+          "person_mobile": "9944463102",
+          "client_id": "oAurj5AYezq8bPTuxsjW",
+          "issue_reported_by": "0jD96xdWEoWZbrVMQFAH",
+          "issue": "Test Ticket",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-15T13:14:04.456Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "ypC5dosCN941yDazZJM7",
+          "ticket_from": null,
+          "reported_at": "2026-05-07T10:30:57.281Z",
+          "last_modified": "2026-08-10T10:11:27.324Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "iBMwpJMbysfW3I5gvhGI",
+        "name": "Abishek Vimal",
+        "email": "abishek.vimal@soexcellence.com",
+        "mobile": "9597624025"
+      },
+      "counts": {
+        "tickets": 5,
+        "open": 3
+      },
+      "tickets": [
+        {
+          "ticket_id": "NsJLULXwLjpObETnQhHd",
+          "issue_no": 231,
+          "person_profileid": "iBMwpJMbysfW3I5gvhGI",
+          "reported_by_name": "Vignesh S",
+          "person_name": "Abishek Vimal",
+          "person_email": "abishek.vimal@soexcellence.com",
+          "person_mobile": "9597624025",
+          "client_id": "Z0iTX4SQLoacReiPM0F3",
+          "issue_reported_by": "rva1u58bEVjeBZk1jnN0",
+          "issue": "issue sending message",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-16T00:30:28.480Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-07-10T12:30:35.577Z",
+          "last_modified": "2026-07-16T00:30:28.480Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "OFR2giBoAM08L4WhEu6q",
+          "issue_no": 207,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Abishek Vimal",
+          "person_email": "abishek.vimal@soexcellence.com",
+          "person_mobile": "9597624025",
+          "client_id": "Z0iTX4SQLoacReiPM0F3",
+          "issue_reported_by": "6TtpB49tVs9AZYVgSZhT",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-02T00:30:32.895Z",
+          "status_changed_by": "Z0iTX4SQLoacReiPM0F3",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T07:50:58.839Z",
+          "last_modified": "2026-06-02T00:30:32.895Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Abishek Vimal",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "0YE3P9uvQ1YofME9Disi",
+          "issue_no": 195,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Abishek Vimal",
+          "person_email": "abishek.vimal@soexcellence.com",
+          "person_mobile": "9597624025",
+          "client_id": "Z0iTX4SQLoacReiPM0F3",
+          "issue_reported_by": "0jD96xdWEoWZbrVMQFAH",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-11T05:28:47.936Z",
+          "status_changed_by": "rVUgFGQT0ACQVyyeEdQq",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T05:28:47.936Z",
+          "last_modified": "2026-05-11T05:28:48.278Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshini Arulraj",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "X1NqOvBW94d6Wbary612",
+          "issue_no": 165,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Abishek Vimal",
+          "person_email": "abishek.vimal@soexcellence.com",
+          "person_mobile": "9597624025",
+          "client_id": "Z0iTX4SQLoacReiPM0F3",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "test",
+          "category": "B!G",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-10T09:37:18.190Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "IK6KVq0d1jBRADbKVhdQ"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-10T09:37:18.190Z",
+          "last_modified": "2026-03-10T09:37:18.468Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "1",
+              "date": {
+                "_seconds": 1773301166,
+                "_nanoseconds": 515000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "2",
+              "date": {
+                "_seconds": 1773301176,
+                "_nanoseconds": 660000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "03",
+              "date": {
+                "_seconds": 1773301773,
+                "_nanoseconds": 176000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "04",
+              "date": {
+                "_seconds": 1773307513,
+                "_nanoseconds": 134000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "05",
+              "date": {
+                "_seconds": 1773309650,
+                "_nanoseconds": 700000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "tesing",
+              "date": {
+                "_seconds": 1773310005,
+                "_nanoseconds": 961000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "latest one",
+              "date": {
+                "_seconds": 1773386484,
+                "_nanoseconds": 885000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Hema"
+          ]
+        },
+        {
+          "ticket_id": "J6soMGLN56GkNGYmRUCv",
+          "issue_no": 164,
+          "person_profileid": "tw3PR7rnZpvUbQRuhrgo",
+          "reported_by_name": "Arun Dass",
+          "person_name": "Abishek Vimal",
+          "person_email": "abishek.vimal@soexcellence.com",
+          "person_mobile": "9597624025",
+          "client_id": "Z0iTX4SQLoacReiPM0F3",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-10T07:36:24.002Z",
+          "status_changed_by": "tw3PR7rnZpvUbQRuhrgo",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-10T07:36:24.002Z",
+          "last_modified": "2026-03-10T07:36:24.270Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "1",
+              "date": {
+                "_seconds": 1773303343,
+                "_nanoseconds": 383000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "02",
+              "date": {
+                "_seconds": 1773303353,
+                "_nanoseconds": 985000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "woowww",
+              "date": {
+                "_seconds": 1773303363,
+                "_nanoseconds": 128000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "new notes",
+              "date": {
+                "_seconds": 1773386453,
+                "_nanoseconds": 963000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Arun Dass",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "Dv9nH7eGOPHO6GsiX8jh",
+        "name": "Jagan P",
+        "email": "jagan.palani@soexcellence.com",
+        "mobile": "9360573546"
+      },
+      "counts": {
+        "tickets": 4,
+        "open": 4
+      },
+      "tickets": [
+        {
+          "ticket_id": "a9D7K8G7Diunbh5D8Mys",
+          "issue_no": 168,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Jagan P",
+          "person_email": "jagan.palani@soexcellence.com",
+          "person_mobile": "9360573546",
+          "client_id": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue_reported_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue": "test ",
+          "category": "Finance",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-13T10:46:14.208Z",
+          "status_changed_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "UIKyFTcAwpIh0TDRESZl",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "HUyBaaUc1J4iqeH2E8Ey",
+          "ticket_from": null,
+          "reported_at": "2026-03-13T10:46:14.208Z",
+          "last_modified": "2026-03-13T10:46:14.375Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Jagan P",
+          "assigned_to_names": [
+            "Ragavendhiran Sankar",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "OIfR4jHw7lIjlscnPw1u",
+          "issue_no": 162,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Jagan P",
+          "person_email": "jagan.palani@soexcellence.com",
+          "person_mobile": "9360573546",
+          "client_id": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue_reported_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-10T07:08:58.353Z",
+          "status_changed_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-10T07:08:58.353Z",
+          "last_modified": "2026-03-10T07:08:58.607Z",
+          "files": 0,
+          "notes": [
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "date": {
+                "_seconds": 1773307340,
+                "_nanoseconds": 388000000
+              },
+              "remarks": "123456789101112131415161718192021222324252262728"
+            },
+            {
+              "remarks": "test test test test test test test test test test test test",
+              "date": {
+                "_seconds": 1773307288,
+                "_nanoseconds": 745000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "date": {
+                "_seconds": 1773307239,
+                "_nanoseconds": 985000000
+              },
+              "remarks": "testing 02"
+            },
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "date": {
+                "_seconds": 1773307224,
+                "_nanoseconds": 102000000
+              },
+              "remarks": "testing 01"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Jagan P",
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        },
+        {
+          "ticket_id": "cXg1O8RtWWvCyOAEvzdO",
+          "issue_no": 161,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Jagan P",
+          "person_email": "jagan.palani@soexcellence.com",
+          "person_mobile": "9360573546",
+          "client_id": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue_reported_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue": "test",
+          "category": "test",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-05T10:20:43.068Z",
+          "status_changed_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "HUyBaaUc1J4iqeH2E8Ey",
+          "ticket_from": null,
+          "reported_at": "2026-03-05T10:20:43.068Z",
+          "last_modified": "2026-03-05T10:20:46.897Z",
+          "files": 0,
+          "notes": [
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "remarks": "test testtest test tets",
+              "date": {
+                "_seconds": 1773060976,
+                "_nanoseconds": 588000000
+              }
+            },
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "remarks": "test",
+              "date": {
+                "_seconds": 1772797887,
+                "_nanoseconds": 517000000
+              }
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Jagan P",
+          "assigned_to_names": [
+            "Harish R SOE"
+          ]
+        },
+        {
+          "ticket_id": "SPYyXWMXg2P4J5I8cnKi",
+          "issue_no": 160,
+          "person_profileid": "Dv9nH7eGOPHO6GsiX8jh",
+          "reported_by_name": "Jagan P",
+          "person_name": "Jagan P",
+          "person_email": "jagan.palani@soexcellence.com",
+          "person_mobile": "9360573546",
+          "client_id": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue_reported_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "issue": "test",
+          "category": "test",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-03-05T10:19:59.527Z",
+          "status_changed_by": "Dv9nH7eGOPHO6GsiX8jh",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "gY1QYnQT185NhBYwUwrx"
+          ],
+          "journey": "HUyBaaUc1J4iqeH2E8Ey",
+          "ticket_from": null,
+          "reported_at": "2026-03-05T10:19:59.527Z",
+          "last_modified": "2026-03-05T10:20:00.932Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "testsssgashgjadgfa test iasiaf",
+              "date": {
+                "_seconds": 1773060993,
+                "_nanoseconds": 397000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "test 2",
+              "date": {
+                "_seconds": 1773300917,
+                "_nanoseconds": 614000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Jagan P",
+          "assigned_to_names": [
+            "Harish R SOE"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Manoja Ramachandran",
+        "email": "manoja.ramachandran@soexcellence.com",
+        "mobile": "9361312535"
+      },
+      "counts": {
+        "tickets": 3,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "xCtCdmK1W1ihVvnfo58y",
+          "issue_no": 156,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Manoja Ramachandran",
+          "person_email": "manoja.ramachandran@soexcellence.com",
+          "person_mobile": "9361312535",
+          "client_id": "sJPXPSJXb1GaaUgakpv7",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test issue ",
+          "category": "test",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-03-08T00:30:17.407Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-02-13T05:17:15.155Z",
+          "last_modified": "2026-03-08T00:30:17.407Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "gtdIh6red9nEOAr5src7",
+          "issue_no": 155,
+          "person_profileid": "tw3PR7rnZpvUbQRuhrgo",
+          "reported_by_name": "Arun Dass",
+          "person_name": "Manoja Ramachandran",
+          "person_email": "manoja.ramachandran@soexcellence.com",
+          "person_mobile": "9361312535",
+          "client_id": "sJPXPSJXb1GaaUgakpv7",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test issue",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-02-25T00:30:19.967Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-02-12T18:15:02.049Z",
+          "last_modified": "2026-02-25T00:30:19.967Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        },
+        {
+          "ticket_id": "Z2fbt0pKFSJAMCpC4Eds",
+          "issue_no": 152,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Manoja Ramachandran",
+          "person_email": "manoja.ramachandran@soexcellence.com",
+          "person_mobile": "9361312535",
+          "client_id": "sJPXPSJXb1GaaUgakpv7",
+          "issue_reported_by": "sJPXPSJXb1GaaUgakpv7",
+          "issue": "test",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-02-11T13:05:29.250Z",
+          "status_changed_by": "UIKyFTcAwpIh0TDRESZl",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-02-11T12:51:15.249Z",
+          "last_modified": "2026-02-11T13:05:28.826Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Ragavendhiran Sankar",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Dharshini Arulraj",
+        "email": "dharshini.arulraj@soexcellence.com",
+        "mobile": "7094765334"
+      },
+      "counts": {
+        "tickets": 2,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "gQXgQLq8a4D9GHODqEmT",
+          "issue_no": 209,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Dharshini Arulraj",
+          "person_email": "dharshini.arulraj@soexcellence.com",
+          "person_mobile": "7094765334",
+          "client_id": "rVUgFGQT0ACQVyyeEdQq",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-02T00:30:35.025Z",
+          "status_changed_by": "Z0iTX4SQLoacReiPM0F3",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T07:57:41.581Z",
+          "last_modified": "2026-06-02T00:30:35.025Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Abishek Vimal",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "KE7ySynZUnc9GagBNaOy",
+          "issue_no": 201,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Dharshini Arulraj",
+          "person_email": "dharshini.arulraj@soexcellence.com",
+          "person_mobile": "7094765334",
+          "client_id": "rVUgFGQT0ACQVyyeEdQq",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-11T06:39:51.457Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T06:39:51.457Z",
+          "last_modified": "2026-05-11T06:39:51.789Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Harish R",
+        "email": "harish.jesus006@gmail.com",
+        "mobile": "1234567899"
+      },
+      "counts": {
+        "tickets": 2,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "lMKCYTRg7nsd5Ma5IElI",
+          "issue_no": 211,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Harish R",
+          "person_email": "harish.jesus006@gmail.com",
+          "person_mobile": "1234567899",
+          "client_id": "gsrf22ghzf9mcnaj8da",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-07-21T00:30:22.829Z",
+          "status_changed_by": "Z0iTX4SQLoacReiPM0F3",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T07:58:07.955Z",
+          "last_modified": "2026-07-21T00:30:22.829Z",
+          "files": 0,
+          "notes": [],
+          "review": {
+            "fRliApJvvUJ91dAyWMpn": {
+              "_seconds": 1783361340,
+              "_nanoseconds": 300000000
+            }
+          },
+          "mandate_review": {
+            "fRliApJvvUJ91dAyWMpn": {
+              "_seconds": 1783361340,
+              "_nanoseconds": 300000000
+            }
+          },
+          "status_changed_by_name": "Abishek Vimal",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        },
+        {
+          "ticket_id": "850It9B2nSSfcWxH4mmk",
+          "issue_no": 199,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Harish R",
+          "person_email": "harish.jesus006@gmail.com",
+          "person_mobile": "1234567899",
+          "client_id": "gsrf22ghzf9mcnaj8da",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-11T06:37:14.074Z",
+          "status_changed_by": "rVUgFGQT0ACQVyyeEdQq",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T06:37:14.074Z",
+          "last_modified": "2026-05-11T06:37:15.098Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshini Arulraj",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Test 123",
+        "email": "test123@soexcellence.com",
+        "mobile": "1234567890"
+      },
+      "counts": {
+        "tickets": 2,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "Z8QvCuQrdp5LWdvo2XL4",
+          "issue_no": 158,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Test 123",
+          "person_email": "test123@soexcellence.com",
+          "person_mobile": "1234567890",
+          "client_id": "KAO4LPPa8WX0SWrWzb1n",
+          "issue_reported_by": "Z7WwursHmt07j58XGPgh",
+          "issue": "test",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-03-15T00:30:32.648Z",
+          "status_changed_by": "4YgjxMWDaqF4MTdTmIuw",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-02-14T13:07:36.246Z",
+          "last_modified": "2026-03-15T00:30:32.648Z",
+          "files": 0,
+          "notes": [
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "date": {
+                "_seconds": 1772800312,
+                "_nanoseconds": 746000000
+              },
+              "remarks": "test"
+            },
+            {
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI",
+              "date": {
+                "_seconds": 1772800286,
+                "_nanoseconds": 702000000
+              },
+              "remarks": "summa"
+            },
+            {
+              "remarks": "notes has been add now",
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "date": {
+                "_seconds": 1771913331,
+                "_nanoseconds": 322000000
+              }
+            },
+            {
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "date": {
+                "_seconds": 1771912694,
+                "_nanoseconds": 487000000
+              },
+              "remarks": "old notes with new info"
+            },
+            {
+              "remarks": "new notes 23-02-26",
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "date": {
+                "_seconds": 1771827631,
+                "_nanoseconds": 110000000
+              }
+            },
+            {
+              "remarks": "notessss",
+              "date": {
+                "_seconds": 1771586831,
+                "_nanoseconds": 493000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "date": {
+                "_seconds": 1771482419,
+                "_nanoseconds": 770000000
+              },
+              "remarks": "new notes added"
+            },
+            {
+              "remarks": "new notes added",
+              "date": {
+                "_seconds": 1771482415,
+                "_nanoseconds": 787000000
+              },
+              "writtenBy": "oAurj5AYezq8bPTuxsjW"
+            },
+            {
+              "remarks": "new notes added",
+              "date": {
+                "_seconds": 1771482168,
+                "_nanoseconds": 588000000
+              },
+              "writtenBy": "oAurj5AYezq8bPTuxsjW"
+            },
+            {
+              "date": {
+                "_seconds": 1771419610,
+                "_nanoseconds": 837000000
+              },
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "remarks": "test notes"
+            },
+            {
+              "remarks": "033\n",
+              "date": {
+                "_seconds": 1773309511,
+                "_nanoseconds": 581000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {
+            "iBMwpJMbysfW3I5gvhGI": {
+              "_seconds": 1772695192,
+              "_nanoseconds": 220000000
+            }
+          },
+          "mandate_review": {},
+          "status_changed_by_name": "Gokul Havinash",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        },
+        {
+          "ticket_id": "UJv6Xcp4YjA5SgeH3u3s",
+          "issue_no": 157,
+          "person_profileid": "tw3PR7rnZpvUbQRuhrgo",
+          "reported_by_name": "Arun Dass",
+          "person_name": "Test 123",
+          "person_email": "test123@soexcellence.com",
+          "person_mobile": "1234567890",
+          "client_id": "KAO4LPPa8WX0SWrWzb1n",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "test",
+          "category": "Referrals & Upgrades",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-02-25T00:30:15.084Z",
+          "status_changed_by": "6TtpB49tVs9AZYVgSZhT",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "6TtpB49tVs9AZYVgSZhT"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-02-14T13:06:53.549Z",
+          "last_modified": "2026-02-25T00:30:15.084Z",
+          "files": 0,
+          "notes": [
+            {
+              "writtenBy": "oAurj5AYezq8bPTuxsjW",
+              "date": {
+                "_seconds": 1771849731,
+                "_nanoseconds": 748000000
+              },
+              "remarks": "old notes"
+            },
+            {
+              "date": {
+                "_seconds": 1771849724,
+                "_nanoseconds": 0
+              },
+              "remarks": "new notes",
+              "writtenBy": "oAurj5AYezq8bPTuxsjW"
+            },
+            {
+              "remarks": "new notess",
+              "date": {
+                "_seconds": 1773309525,
+                "_nanoseconds": 499000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {
+            "iBMwpJMbysfW3I5gvhGI": {
+              "_seconds": 1772695174,
+              "_nanoseconds": 171000000
+            }
+          },
+          "mandate_review": {},
+          "status_changed_by_name": "Charan Reddy P",
+          "assigned_to_names": [
+            "Charan Reddy P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "oAurj5AYezq8bPTuxsjW",
+        "name": "Arun Selvakumar",
+        "email": "arun.selvakumar@soexcellence.com",
+        "mobile": "8098199338"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "OLwugrsNBMmYSVoP0Via",
+          "issue_no": 184,
+          "person_profileid": "oAurj5AYezq8bPTuxsjW",
+          "reported_by_name": "Surya Thiruvengadam",
+          "person_name": "Arun Selvakumar",
+          "person_email": "arun.selvakumar@soexcellence.com",
+          "person_mobile": "8098199338",
+          "client_id": "0jD96xdWEoWZbrVMQFAH",
+          "issue_reported_by": "fRliApJvvUJ91dAyWMpn",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-04-28T11:25:38.424Z",
+          "status_changed_by": "oAurj5AYezq8bPTuxsjW",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-04-28T11:25:38.424Z",
+          "last_modified": "2026-04-28T11:25:38.645Z",
+          "files": 0,
+          "notes": [],
+          "review": {
+            "Z0iTX4SQLoacReiPM0F3": {
+              "_seconds": 1777980496,
+              "_nanoseconds": 626000000
+            }
+          },
+          "mandate_review": {},
+          "status_changed_by_name": "Surya Thiruvengadam",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "tw3PR7rnZpvUbQRuhrgo",
+        "name": "Arun Dass",
+        "email": "arundass.dir@gmail.com",
+        "mobile": "7200001505"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "4pvJCrNCgWZ5DTthvLj8",
+          "issue_no": 154,
+          "person_profileid": "tw3PR7rnZpvUbQRuhrgo",
+          "reported_by_name": "Arun Dass",
+          "person_name": "Arun Dass",
+          "person_email": "arundass.dir@gmail.com",
+          "person_mobile": "7200001505",
+          "client_id": "tw3PR7rnZpvUbQRuhrgo",
+          "issue_reported_by": "Z7L63M4XlM1RyTEzBmZk",
+          "issue": "tst issue",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-03-05T13:48:53.097Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "NIXIcZkY9uPgjiM9Q6i1",
+          "ticket_from": null,
+          "reported_at": "2026-02-12T18:14:07.761Z",
+          "last_modified": "2026-03-05T13:48:52.943Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "rVUgFGQT0ACQVyyeEdQq",
+        "name": "Hema",
+        "email": "hema23456j@gmail.com",
+        "mobile": "1234567899"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "L6YkjYW8IKImQz1aOPmc",
+          "issue_no": 203,
+          "person_profileid": "rVUgFGQT0ACQVyyeEdQq",
+          "reported_by_name": "Dharshini Arulraj",
+          "person_name": "Hema",
+          "person_email": "hema23456j@gmail.com",
+          "person_mobile": "1234567899",
+          "client_id": "IK6KVq0d1jBRADbKVhdQ",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-11T06:41:18.943Z",
+          "status_changed_by": "rVUgFGQT0ACQVyyeEdQq",
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T06:41:18.943Z",
+          "last_modified": "2026-05-11T06:41:19.753Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Dharshini Arulraj",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Janarthanan V2",
+        "email": "janarthananmargabandhu@gmail.com",
+        "mobile": "7845084228"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "OgkLT2VvLFI9xlWK4Tn0",
+          "issue_no": 166,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Janarthanan V2",
+          "person_email": "janarthananmargabandhu@gmail.com",
+          "person_mobile": "7845084228",
+          "client_id": "8ByKmGmkQaggP6Ib29CT",
+          "issue_reported_by": "8ByKmGmkQaggP6Ib29CT",
+          "issue": "testing",
+          "category": "Event & Process",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-03-13T07:32:25.311Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "4YgjxMWDaqF4MTdTmIuw",
+            "iBMwpJMbysfW3I5gvhGI"
+          ],
+          "journey": "SOORkBYIzPKbrFEcXzeQ",
+          "ticket_from": null,
+          "reported_at": "2026-03-13T07:25:22.381Z",
+          "last_modified": "2026-03-13T07:32:24.829Z",
+          "files": 0,
+          "notes": [
+            {
+              "remarks": "testing 01\n",
+              "date": {
+                "_seconds": 1773387191,
+                "_nanoseconds": 731000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            },
+            {
+              "remarks": "test 2",
+              "date": {
+                "_seconds": 1773387211,
+                "_nanoseconds": 408000000
+              },
+              "writtenBy": "iBMwpJMbysfW3I5gvhGI"
+            }
+          ],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Gokul Havinash",
+            "Vignesh S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "4aFZPlLtTo7hUpeCLeDf",
+        "name": "DAVID WILLSON K",
+        "email": "kishore.kannan@soexcellence.com",
+        "mobile": ""
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "A6SahSIih8HrJSHIhke7",
+          "issue_no": 190,
+          "person_profileid": "4aFZPlLtTo7hUpeCLeDf",
+          "reported_by_name": null,
+          "person_name": "DAVID WILLSON K",
+          "person_email": "kishore.kannan@soexcellence.com",
+          "person_mobile": "",
+          "client_id": "4aFZPlLtTo7hUpeCLeDf",
+          "issue_reported_by": "4aFZPlLtTo7hUpeCLeDf",
+          "issue": "Requesting access to the reframing playlist",
+          "category": null,
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-05-05T09:47:22.523Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-05-05T09:47:22.523Z",
+          "last_modified": "2026-05-05T09:47:24.613Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": []
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "6TtpB49tVs9AZYVgSZhT",
+        "name": "Meena A S",
+        "email": "meena.as@soexcellence.com",
+        "mobile": "9944070826"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "Y7xsScxQf4IqxPJW4XMt",
+          "issue_no": 205,
+          "person_profileid": "6TtpB49tVs9AZYVgSZhT",
+          "reported_by_name": "Charan Reddy P",
+          "person_name": "Meena A S",
+          "person_email": "meena.as@soexcellence.com",
+          "person_mobile": "9944070826",
+          "client_id": "3bOmPHG3A6bk7AxXekyM",
+          "issue_reported_by": "Z0iTX4SQLoacReiPM0F3",
+          "issue": "asdf",
+          "category": "Critical Support",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-02T00:30:33.810Z",
+          "status_changed_by": "Z0iTX4SQLoacReiPM0F3",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Z0iTX4SQLoacReiPM0F3",
+            "6TtpB49tVs9AZYVgSZhT",
+            "fRliApJvvUJ91dAyWMpn"
+          ],
+          "journey": "HUyBaaUc1J4iqeH2E8Ey",
+          "ticket_from": null,
+          "reported_at": "2026-05-11T06:43:03.325Z",
+          "last_modified": "2026-06-02T00:30:33.810Z",
+          "files": 0,
+          "notes": [],
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Abishek Vimal",
+          "assigned_to_names": [
+            "Abishek Vimal",
+            "Charan Reddy P",
+            "Dharshan S"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "IciEx1Eg60BETH2YAMct",
+        "name": "Ragav 2",
+        "email": "ragavstark7@gmail.com",
+        "mobile": "6381018441"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "LNBdWWaCIfSGoHVPF3Fw",
+          "issue_no": 245,
+          "person_profileid": "IciEx1Eg60BETH2YAMct",
+          "reported_by_name": "Ragav 2",
+          "person_name": "Ragav 2",
+          "person_email": "ragavstark7@gmail.com",
+          "person_mobile": "6381018441",
+          "client_id": "IciEx1Eg60BETH2YAMct",
+          "issue_reported_by": "IciEx1Eg60BETH2YAMct",
+          "issue": "hiiiiiiiii",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-07-20T10:10:24.519Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [
+            "iBMwpJMbysfW3I5gvhGI",
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2026-07-20T10:10:24.519Z",
+          "last_modified": "2026-07-20T10:10:26.771Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": [
+            "Vignesh S",
+            "Jagan P"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "0B7ljAeaRgDMnFcNtDw3",
+        "name": "Test 88",
+        "email": "test88@gmail.com",
+        "mobile": "1234567899"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "K6l5kz5p3WLfJTlqYuUP",
+          "issue_no": 178,
+          "person_profileid": "0B7ljAeaRgDMnFcNtDw3",
+          "reported_by_name": "Test 88",
+          "person_name": "Test 88",
+          "person_email": "test88@gmail.com",
+          "person_mobile": "1234567899",
+          "client_id": "0B7ljAeaRgDMnFcNtDw3",
+          "issue_reported_by": "0B7ljAeaRgDMnFcNtDw3",
+          "issue": "Requesting an onboarding slot",
+          "category": null,
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-04-21T12:33:54.001Z",
+          "status_changed_by": null,
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-04-21T12:33:54.001Z",
+          "last_modified": "2026-05-28T11:50:55.230Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": []
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "e1PivLcdSih4Gy0tPeab",
+        "name": "Tester 102",
+        "email": "tester102@gmail.com",
+        "mobile": "6381018441"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "to8KBjfX72IcKMabXA8X",
+          "issue_no": 181,
+          "person_profileid": "e1PivLcdSih4Gy0tPeab",
+          "reported_by_name": "Tester 102",
+          "person_name": "Tester 102",
+          "person_email": "tester102@gmail.com",
+          "person_mobile": "6381018441",
+          "client_id": "e1PivLcdSih4Gy0tPeab",
+          "issue_reported_by": "e1PivLcdSih4Gy0tPeab",
+          "issue": "I want to know about BiG",
+          "category": "B!G",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-06-03T00:30:41.245Z",
+          "status_changed_by": "IK6KVq0d1jBRADbKVhdQ",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "IK6KVq0d1jBRADbKVhdQ"
+          ],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-04-22T11:14:41.325Z",
+          "last_modified": "2026-06-03T00:30:41.245Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Hema",
+          "assigned_to_names": [
+            "Hema"
+          ]
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "IqcR3IPnWEsqWmKHo9wP",
+        "name": "Tester 103",
+        "email": "tester103@gmail.com",
+        "mobile": "1234567890"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 1
+      },
+      "tickets": [
+        {
+          "ticket_id": "zWz8v9gBucLPcGF8jakF",
+          "issue_no": 182,
+          "person_profileid": "IqcR3IPnWEsqWmKHo9wP",
+          "reported_by_name": "Tester 103",
+          "person_name": "Tester 103",
+          "person_email": "tester103@gmail.com",
+          "person_mobile": "1234567890",
+          "client_id": "IqcR3IPnWEsqWmKHo9wP",
+          "issue_reported_by": "IqcR3IPnWEsqWmKHo9wP",
+          "issue": "I would like to request an onboarding call slot.",
+          "category": null,
+          "subcategory": null,
+          "status": "Open",
+          "status_changed_at": "2026-04-27T10:10:04.048Z",
+          "status_changed_by": null,
+          "chat_status": "New",
+          "priority": null,
+          "assigned_to": [],
+          "journey": "",
+          "ticket_from": null,
+          "reported_at": "2026-04-27T10:10:04.048Z",
+          "last_modified": "2026-04-27T10:10:06.189Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": null,
+          "assigned_to_names": []
+        }
+      ]
+    },
+    {
+      "person": {
+        "profileid": "AKFsXA8d0JZgA9GkQ4LL",
+        "name": "Vadivelan Narayanan",
+        "email": "vadivelan.narayanan@soexcellence.com",
+        "mobile": "7010837098"
+      },
+      "counts": {
+        "tickets": 1,
+        "open": 0
+      },
+      "tickets": [
+        {
+          "ticket_id": "vANG4bu5i8jF74HWzn1P",
+          "issue_no": 113,
+          "person_profileid": "AKFsXA8d0JZgA9GkQ4LL",
+          "reported_by_name": "Vadivelan Narayanan",
+          "person_name": "Vadivelan Narayanan",
+          "person_email": "vadivelan.narayanan@soexcellence.com",
+          "person_mobile": "7010837098",
+          "client_id": "AKFsXA8d0JZgA9GkQ4LL",
+          "issue_reported_by": "AKFsXA8d0JZgA9GkQ4LL",
+          "issue": "test",
+          "category": "journey",
+          "subcategory": null,
+          "status": "Closed",
+          "status_changed_at": "2026-01-10T10:08:26.289Z",
+          "status_changed_by": "iBMwpJMbysfW3I5gvhGI",
+          "chat_status": "Responded",
+          "priority": null,
+          "assigned_to": [
+            "Dv9nH7eGOPHO6GsiX8jh"
+          ],
+          "journey": "zBztn10hQRJ75eHowrQ2",
+          "ticket_from": null,
+          "reported_at": "2025-12-18T06:12:34.380Z",
+          "last_modified": "2026-01-10T10:08:26.288Z",
+          "files": 0,
+          "notes": null,
+          "review": {},
+          "mandate_review": {},
+          "status_changed_by_name": "Vignesh S",
+          "assigned_to_names": [
+            "Jagan P"
+          ]
+        }
+      ]
+    }
+  ]
+}
