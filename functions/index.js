@@ -33,6 +33,7 @@ const podWorker = require("./components/pod-execution-pipeline/pod_worker")
 const seAtcUsage = require("./queue-aiatc-generation-pipeline/se_atc_usage")
 const atcOnDemand = require("./components/queue-required-stage-aiatc-creation/atc_ondemand")
 const seLiveTranscribe = require("./components/se_live_transcribe")
+const mediaSignedUrl = require("./components/media_signed_url")
 
 // Ticket System
 exports.TicketCreatedSlackNotification = ticketSystem.TicketCreatedSlackNotification; // w - "tickets/{ticketId}"
@@ -247,7 +248,9 @@ exports.workshopprogressmessagev2 = communication.workshopprogressmessagev2
 exports.workshopconfiguration = workshop.workshopconfiguration
 exports.workshopautocommunicationschedule = workshop.workshopautocommunicationschedule
 exports.eiflixadscommunicationschedule = workshop.eiflixadscommunicationschedule
+exports.newuseraicall = workshop.newuseraicall
 exports.discoverpagelog = workshop.discoverpagelog
+exports.eiflixtouchpointslack = workshop.eiflixtouchpointslack // c - "eiflixtouchpoints/{docid}" -> Slack (Hot Leads "Send to Slack")
 
 //tvlogin
 exports.authorizeTvDevice = workshop.authorizeTvDevice
@@ -329,4 +332,7 @@ exports.seAtcUsageRollup = seAtcUsage.seAtcUsageRollup // schedule "0 1 * * *" A
 //scope-enhancement live transcription — Firestore trigger submits to RunPod serverless; HTTP callback writes result back
 exports.seLiveTranscribeSubmit   = seLiveTranscribe.seLiveTranscribeSubmit    // w - "live assignment/{id}"
 exports.seLiveTranscribeCallback = seLiveTranscribe.seLiveTranscribeCallback  // onRequest — RunPod webhook
+
+//storage hardening — short-lived V4 signed read URLs in place of never-expiring download tokens
+exports.getMediaUrls = mediaSignedUrl.getMediaUrls // onCall — {refs} → signed URLs, auth-gated; fenced to avatars + the ATC notes prefixes (see docs/journals/2026-11-12-getmediaurls-atc-signed-urls.md)
 

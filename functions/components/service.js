@@ -96,8 +96,34 @@ function chunkArray(array, chunkSize) {
   return chunks;
 }
 
+// Delivery hold — the profile ids that must not be sent email or WhatsApp.
+// A profile is on hold when its profile_data doc OR its new_user_data doc has
+// deliveryonhold === true. false, or no deliveryonhold field at all, means send
+// as normal. A new_user_data doc adds both its doc id and its `profileid` field
+// (they're the same for sign-ups, but older docs may differ).
+// Throws if either read fails, so each caller can choose to send nothing rather
+// than message someone who is on hold.
+async function getDeliveryHeldProfileIds() {
+  const db = admin.firestore();
+  const [profileSnap, newUserSnap] = await Promise.all([
+    db.collection('profile_data').where('deliveryonhold', '==', true).select().get(),
+    db.collection('new_user_data').where('deliveryonhold', '==', true).select('profileid').get(),
+  ]);
+  const held = new Set();
+  profileSnap.docs.forEach((doc) => held.add(doc.id));
+  newUserSnap.docs.forEach((doc) => {
+    held.add(doc.id);
+    const profileid = doc.get('profileid');
+    if (profileid) held.add(String(profileid));
+  });
+  return held;
+}
+
 // Save Notification Record
-async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = []}){
+// receivingapp (optional) routes the push in notifyMobileApp: "breakthroughsapp"
+// (the default when the field is absent), "eiflixapp" or "all". Left off the
+// record unless a caller passes it, so every other caller's records are unchanged.
+async function saveNotificationRecord({title = "", message = "", subtitle = null, date = "", notificationimage = null, notificationtype = null, landingpage = null, sticky = false, logged = false, metadata = {}, profileid = [], receivingapp = null}){
     console.log('Save notification runnning');
 	var docid = admin.firestore().collection("notificationrecord").doc().id
     var notificationRecordData = {
@@ -114,6 +140,7 @@ async function saveNotificationRecord({title = "", message = "", subtitle = null
     profileid: profileid,
     success: false
   }
+  if (receivingapp) notificationRecordData.receivingapp = receivingapp;
   await admin.firestore().collection("notificationrecord").doc(docid).set(notificationRecordData).then(() =>{
     console.log("Notification Record Saved");
   }).catch(err =>{
@@ -1019,6 +1046,7 @@ module.exports = {
 	postmarkEgress,
 	monthName,
 	chunkArray,
+	getDeliveryHeldProfileIds,
 	saveNotificationRecord,
 	convertDate,
 	uploadImageFromUrl,
