@@ -365,6 +365,13 @@
       "codebase": "default"
     },
     {
+      "name": "getMediaUrls",
+      "type": "onCall",
+      "file": "components/media_signed_url.js",
+      "emulatorLoaded": true,
+      "codebase": "default"
+    },
+    {
       "name": "getSignedUrlAWS",
       "type": "onRequest",
       "file": "components/AWS_endpoint.js",
