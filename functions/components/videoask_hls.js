@@ -113,26 +113,51 @@ async function handleVideoAskWrite({ id, before, after }, deps) {
     return { outcome: "none", reason: decision.reason };
   }
 
+  // Configuration problems are known BEFORE any claim: fail fast with a visible error (Retry shows)
+  // instead of claiming and leaving the record at 'inprogress'.
+  const folder = videoAskPublitioFolder(deps.projectId);
+  if (folder.error) {
+    const error = `no Publitio folder for project ${folder.projectId} (${folder.error})`;
+    await markFailed(deps, id, decision.action, error, log);
+    return { outcome: "failed", error };
+  }
+
   const claim = await claimVideoAsk(deps.db, deps.ref, decision.action, deps.now());
   if (!claim.claimed) {
     log.log(`videoAskHLS ${id}: not claimed (${claim.reason})`);
     return { outcome: "not-claimed", reason: claim.reason };
   }
 
-  const res = await convertVideoAsk({
-    id, data: claim.data, publitio: deps.publitio(), bucket: deps.bucket, projectId: deps.projectId, log,
-  });
-  if (res.ok) {
-    await deps.ref.update({
-      hls: res.result, convertedtohls: true,
-      hlsstatus: STATUS.SUCCESS, hlserror: null, hlsupdatedat: deps.now(),
+  // From here on the record is 'inprogress'. EVERY exit must end in success or failed, so an
+  // unexpected throw (Publitio client, secrets, a Firestore write) can never strand it there.
+  let res;
+  try {
+    res = await convertVideoAsk({
+      id, data: claim.data, publitio: deps.publitio(), bucket: deps.bucket, projectId: deps.projectId, log,
     });
-    log.log(`videoAskHLS ${id}: success (${decision.action})`);
-    return { outcome: "success" };
+    if (res.ok) {
+      await deps.ref.update({
+        hls: res.result, convertedtohls: true,
+        hlsstatus: STATUS.SUCCESS, hlserror: null, hlsupdatedat: deps.now(),
+      });
+      log.log(`videoAskHLS ${id}: success (${decision.action})`);
+      return { outcome: "success" };
+    }
+  } catch (err) {
+    res = { ok: false, error: `unexpected error: ${(err && err.message) || err}` };
   }
-  await deps.ref.update({ hlsstatus: STATUS.FAILED, hlserror: String(res.error).slice(0, 500), hlsupdatedat: deps.now() });
-  log.error(`videoAskHLS ${id}: failed (${decision.action}) — ${res.error}`);
+  await markFailed(deps, id, decision.action, res.error, log);
   return { outcome: "failed", error: res.error };
+}
+
+/** Best-effort 'failed' write; logs (never throws) if even that write fails. */
+async function markFailed(deps, id, action, error, log) {
+  try {
+    await deps.ref.update({ hlsstatus: STATUS.FAILED, hlserror: String(error).slice(0, 500), hlsupdatedat: deps.now() });
+    log.error(`videoAskHLS ${id}: failed (${action}) — ${error}`);
+  } catch (err) {
+    log.error(`videoAskHLS ${id}: failed (${action}) — ${error}; could not write status: ${(err && err.message) || err}`);
+  }
 }
 
 module.exports = { STATUS, decideVideoAskAction, claimVideoAsk, convertVideoAsk, handleVideoAskWrite };
