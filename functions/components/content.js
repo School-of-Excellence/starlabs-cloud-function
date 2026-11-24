@@ -13,7 +13,8 @@ const {defineSecret} = require("firebase-functions/params");
 const { publitioApi } = require('publitio_js_sdk');
 const publitioSecret = defineSecret("PUBLITIO_SECRET")
 const publitioKey = defineSecret("PUBLITIO_KEY")
-const { resolveVideoAskSourceUrl, videoAskPublitioFolder, runningProjectId, shouldConvertVideoAsk } = require('./videoask_source_url');
+const { runningProjectId } = require('./videoask_source_url');
+const { handleVideoAskWrite } = require('./videoask_hls');
 
 
 exports.communityPostHLS = onDocumentWritten({
@@ -105,7 +106,8 @@ exports.communityPostHLS = onDocumentWritten({
 })
 
 // On WRITE, not create: the Product-delivery flow creates the doc before the upload and adds
-// fileurl later with an update. shouldConvertVideoAsk() bounds it (own hls write -> skip).
+// fileurl later with an update. Also handles the admin Retry (hlsstatus = 'retry').
+// Status machine, transaction claim and no-self-trigger guard live in videoask_hls.js.
 exports.videoAskHLS = onDocumentWritten({
   document:'/participantvideoask/{id}',
   secrets:[publitioKey,publitioSecret],
@@ -113,57 +115,14 @@ exports.videoAskHLS = onDocumentWritten({
 }, async (snap) => {
     const before = snap.data.before.exists ? snap.data.before.data() : null
     const after = snap.data.after.exists ? snap.data.after.data() : null
-    const decision = shouldConvertVideoAsk(before, after)
-    if (!decision.convert) {
-      console.log(`videoAskHLS ${snap.params.id}: no conversion (${decision.reason})`)
-      return
-    }
-    const publitio = new publitioApi(publitioKey.value(),publitioSecret.value())
-    var document = snap.data.after
-    var data = after
-    // Separate Publitio folder per environment, picked from the running project (fail closed).
-    const publitioFolder = videoAskPublitioFolder(runningProjectId())
-    if (publitioFolder.error) {
-      console.error(`videoAskHLS ${snap.params.id}: skipped, no Publitio folder for project ${publitioFolder.projectId} (${publitioFolder.error})`)
-      return
-    }
-    // Signed-URL migration (M-5): fileurl is a Storage path in new app versions,
-    // a legacy download URL in old ones. Give Publitio a URL it can fetch.
-    const source = await resolveVideoAskSourceUrl(data["fileurl"], { bucket: admin.storage().bucket() })
-    if (source.error) {
-      console.error(`videoAskHLS ${snap.params.id}: no source for Publitio (${source.error})`)
-      return
-    }
-    if (source.kind === "signed") {
-      console.log(`videoAskHLS ${snap.params.id}: signed ${source.path} ttlMs=${source.ttlMs}`)
-    }
-    var fileURL = source.url
-    await publitio.uploadRemoteFile({file_url: fileURL, privacy: 1, option_hls: 0, folder: publitioFolder.folder}).then(async result => {
-      console.log(result)
-      if (result.code != 201) {
-        console.error(`videoAskHLS ${snap.params.id}: Publitio upload failed`, result.code, result.error || result.message)
-      }
-      // /*
-      if(result.code == 201){
-        // Create 480P Version
-        await publitio.call('/files/versions/create/' + result['id'], 'POST', {
-          extension: 'mp4',
-          options: 'h_480'
-        }).then(async data => {
-          await document.ref.update({
-            hls: result,
-            convertedtohls: true
-          }).then(async () => {
-            console.log('document updated successfully')
-          })
-          console.log("Version Created ---------", data) 
-        }).catch((error) => {
-          console.log("Error Call ******", error)
-        })
-      }
-      // */
-    }).catch((error) => {
-      console.error(`videoAskHLS ${snap.params.id}: Publitio upload error`, error)
+    await handleVideoAskWrite({ id: snap.params.id, before, after }, {
+      db: admin.firestore(),
+      ref: snap.data.after.ref,
+      publitio: () => new publitioApi(publitioKey.value(), publitioSecret.value()),
+      bucket: admin.storage().bucket(),
+      projectId: runningProjectId(),
+      now: () => admin.firestore.FieldValue.serverTimestamp(),
+      log: console,
     })
 })
 

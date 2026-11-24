@@ -62,8 +62,8 @@ async function resolveVideoAskSourceUrl(fileurl, { bucket, now = Date.now() } = 
  * guessing a name or silently uploading test videos next to production ones.
  */
 const PUBLITIO_VIDEOASK_FOLDERS = {
-  "starlabs-test": { name: "videoask-test", id: null },               // TODO: paste Publitio folder ID
-  "fir-sample-aae4a": { name: "videoask-breakthroughs", id: null },   // TODO: paste Publitio folder ID
+  "starlabs-test": { name: "videoask-test", id: "8MLXGqjJ" },               // TODO: paste Publitio folder ID
+  "fir-sample-aae4a": { name: "videoask-breakthroughs", id: "2xz6o8HS" },   // TODO: paste Publitio folder ID
 };
 
 /** Project id of the running function (GCLOUD_PROJECT, else FIREBASE_CONFIG.projectId). */
