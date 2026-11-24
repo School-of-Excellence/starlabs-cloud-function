@@ -41,8 +41,9 @@ const POSTMARK_STARLABS_V1 = defineSecret("POSTMARK_STARLABS_V1");
 const POSTMARK_STARLABS_V2 = defineSecret("POSTMARK_STARLABS_V2");
 const POSTMARK_STARLABS_V3 = defineSecret("POSTMARK_STARLABS_V3");
 const POSTMARK_STARLABS_V4 = defineSecret("POSTMARK_STARLABS_V4");
+const POSTMARK_STARLABS_V5 = defineSecret("POSTMARK_STARLABS_V5");
 const POSTMARK_STARLABS_TEST = defineSecret("POSTMARK_STARLABS_TEST");
-const postmarkSecrets = { POSTMARK_STARLABS_V1, POSTMARK_STARLABS_V2, POSTMARK_STARLABS_V3, POSTMARK_STARLABS_V4, POSTMARK_STARLABS_TEST };
+const postmarkSecrets = { POSTMARK_STARLABS_V1, POSTMARK_STARLABS_V2, POSTMARK_STARLABS_V3, POSTMARK_STARLABS_V4, POSTMARK_STARLABS_V5, POSTMARK_STARLABS_TEST };
 // Postmark's edge blocks some shared Google egress IPs, so functions that call Postmark spread this
 // into their options to leave via Cloud NAT's static IP (35.226.111.222). The connector exists on production
 // only. Keyed off `production` rather than .env: firebase deploy evaluates function options with only
