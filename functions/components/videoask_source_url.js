@@ -4,8 +4,8 @@
 // store the Storage PATH instead (videoask/videoask/<date>_<name>). Publitio cannot read
 // a path, so videoAskHLS asks this helper for a URL it can fetch:
 //   - legacy http(s) value  -> passed through unchanged (old app versions, old rows)
-//   - videoask/videoask/... -> V4 signed READ URL with a FIXED 10-minute lifetime
-//   - anything else         -> rejected (never signs outside the VideoAsk folder)
+//   - any file path         -> V4 signed READ URL with a FIXED 10-minute lifetime (no folder restriction)
+//   - anything else         -> rejected (empty, "..", backslash)
 //
 // Why a fixed 10 minutes: Google Storage checks a signed URL's expiry when a download
 // STARTS (a running download finishes after expiry), Publitio fetches during the
@@ -19,14 +19,16 @@ function isHttpUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
 
-/** True only for a clean object path inside the VideoAsk folder. */
+/** A stored path without leading slashes ("/videoask/x.mp4" and "videoask/x.mp4" are the same object). */
+function normalizeVideoAskPath(value) {
+  return typeof value === "string" ? value.trim().replace(/^\/+/, "") : value;
+}
+
+/** True for any clean object path in the bucket (no folder restriction): non-empty, no "..", no "\\". */
 function isVideoAskPath(value) {
   if (typeof value !== "string") return false;
-  const p = value.trim();
-  return p.startsWith(VIDEOASK_PREFIX) &&
-    p.length > VIDEOASK_PREFIX.length &&
-    !p.includes("..") &&
-    !p.includes("\\");
+  const p = normalizeVideoAskPath(value);
+  return p.length > 0 && !p.endsWith("/") && !p.includes("..") && !p.includes("\\");
 }
 
 /**
@@ -40,9 +42,9 @@ async function resolveVideoAskSourceUrl(fileurl, { bucket, now = Date.now() } = 
     return { error: "missing-fileurl" };
   }
   if (isHttpUrl(fileurl)) return { url: fileurl.trim(), kind: "legacy-url" };
-  if (!isVideoAskPath(fileurl)) return { error: "path-outside-videoask" };
+  if (!isVideoAskPath(fileurl)) return { error: "invalid-path" };
 
-  const path = fileurl.trim();
+  const path = normalizeVideoAskPath(fileurl);
   const expiresAt = now + SOURCE_TTL_MS;
   try {
     const [url] = await bucket.file(path).getSignedUrl({ version: "v4", action: "read", expires: expiresAt });
