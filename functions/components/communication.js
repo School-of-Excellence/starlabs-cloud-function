@@ -45,7 +45,7 @@ const MYOPERATOR_TOKEN = defineSecret("MYOPERATOR_TOKEN");
 
 const postmark = require("postmark");
 // Postmark server tokens come from Cloud Secret Manager, declared once in service.js. Functions that
-// pick a server by a doc's `servername` field bind all five (`secrets: POSTMARK_SECRETS`); the field
+// pick a server by a doc's `servername` field bind all six (`secrets: POSTMARK_SECRETS`); the field
 // must equal one of the secret names.
 const POSTMARK_SECRETS = Object.values(commonService.postmarkSecrets);
 function postmarkServersMap() {
