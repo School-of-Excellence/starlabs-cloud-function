@@ -192,9 +192,9 @@
     },
     {
       "name": "communityPostHLS",
-      "type": "onDocumentCreated",
+      "type": "onDocumentWritten",
       "file": "components/content.js",
-      "triggerPath": "buffermix archive/{docid}",
+      "triggerPath": "/participantvideoask/{id}",
       "emulatorLoaded": false,
       "codebase": "default"
     },
