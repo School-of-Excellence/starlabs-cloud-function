@@ -4898,16 +4898,29 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
         // person, and everyone who replied in the thread — minus the author.
         const ids = new Set();
         const questionDoc = await admin.firestore().collection("workshopQA").doc(data["replyid"]).get();
-        if (questionDoc.exists && questionDoc.data()["profileid"]) {
-          ids.add(questionDoc.data()["profileid"]);
+        const questionData = questionDoc.exists ? (questionDoc.data() || {}) : {};
+        // "Admin Only" threads (CMS "Move to Admin Only" sets onetoone: true on
+        // the question and its replies) are private to the asker and the team:
+        // only the question's author is notified, never the tagged person or
+        // the other people who replied before the thread was moved.
+        const isPrivate = data["onetoone"] === true || questionData["onetoone"] === true;
+        if (questionData["profileid"]) {
+          ids.add(questionData["profileid"]);
         }
-        if (data["tag"]) {
-          ids.add(data["tag"]);
+        if (!isPrivate) {
+          if (data["tag"]) {
+            ids.add(data["tag"]);
+          }
+          const threadReplies = await admin.firestore().collection("workshopQA").where("replyid", "==", data["replyid"]).get();
+          threadReplies.docs.forEach(d => { const p = d.data()["profileid"]; if (p) ids.add(p); });
+        } else {
+          console.log("EiFlix Q&A push: private (Admin Only) thread, notifying the asker only");
         }
-        const threadReplies = await admin.firestore().collection("workshopQA").where("replyid", "==", data["replyid"]).get();
-        threadReplies.docs.forEach(d => { const p = d.data()["profileid"]; if (p) ids.add(p); });
         ids.delete(authorId);
         recipientIds = [...ids];
+      } else if (data["onetoone"] === true) {
+        // A question created as "Admin Only" is never announced to the workshop.
+        console.log("EiFlix Q&A push: private (Admin Only) question, no workshop push");
       } else {
         // A new question notifies every enrolled participant — minus the author.
         const enrolled = await admin.firestore().collection("workshop participant enrolled")
@@ -4938,6 +4951,10 @@ exports.ChatxNotification = onDocumentCreated("supportchat/{chatid}/messages/{ms
               type: "workshop_qa",
               workshopId: `${data["workshopId"]}`,
               workshopTitle: `${workshopname}`,
+              // Which thread to open on tap: the question, and the new message
+              // in it (the question itself for a new question).
+              questionId: `${isReply ? data["replyid"] : snapshot.id}`,
+              messageId: `${snapshot.id}`,
               click_action: "FLUTTER_NOTIFICATION_CLICK",
             },
             android: { priority: "high", notification: { channelId: "eiflix_qa", sound: "default" } },
