@@ -96,6 +96,9 @@ exports.participantsproductinitiated = onDocumentWritten('/participantsproduct/{
             else if(sequenceRef.path.includes("fieldwork")){
               type = "fieldwork"
             }
+            else if(sequenceRef.path.includes("arenavideoask")){
+              type = "videoask"
+            }
             else{
               type = "unknown"
             }
