@@ -112,6 +112,7 @@ exports.notifyMobileApp = onDocumentCreated({
   const receivingApp = notificationData["receivingapp"] || "breakthroughsapp";
   const sendBreakthroughs = receivingApp === "all" || receivingApp === "breakthroughsapp";
   const sendEiflix = receivingApp === "all" || receivingApp === "eiflixapp";
+  const sendSolarvoice = receivingApp === "all" || receivingApp === "solarvoiceapp";
 
   if (profileID.length === 0) {
     console.log("No profiles to notify");
@@ -295,6 +296,20 @@ exports.notifyMobileApp = onDocumentCreated({
       }
     }
 
+    if (sendSolarvoice) {
+      for (let a = 0; a < profileID.length; a += 30) {
+        const profileList = profileID.slice(a, a + 30).map(e =>
+          admin.firestore().collection("profile_data").doc(e)
+        );
+        fcmPromises.push(
+          admin.firestore().collection("solarvoice fcm token")
+            .where("profile_ref", "in", profileList).where("active", "==", true).get()
+            .catch(err => { console.error("Solar Voice FCM token fetch batch failed:", err);
+          return { docs: [] }; })
+        );
+      }
+    }
+    
     fcmPromises.push(...AHCRMPromises);
     console.log("ahcrm promises", AHCRMPromises.length);
     const fcmResults = await Promise.all(fcmPromises);
