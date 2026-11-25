@@ -13,6 +13,8 @@ const {defineSecret} = require("firebase-functions/params");
 const { publitioApi } = require('publitio_js_sdk');
 const publitioSecret = defineSecret("PUBLITIO_SECRET")
 const publitioKey = defineSecret("PUBLITIO_KEY")
+const { runningProjectId } = require('./videoask_source_url');
+const { handleVideoAskWrite } = require('./videoask_hls');
 
 
 exports.communityPostHLS = onDocumentWritten({
@@ -103,35 +105,24 @@ exports.communityPostHLS = onDocumentWritten({
     }
 })
 
-exports.videoAskHLS = onDocumentCreated({
+// On WRITE, not create: the Product-delivery flow creates the doc before the upload and adds
+// fileurl later with an update. Also handles the admin Retry (hlsstatus = 'retry').
+// Status machine, transaction claim and no-self-trigger guard live in videoask_hls.js.
+exports.videoAskHLS = onDocumentWritten({
   document:'/participantvideoask/{id}',
-  secrets:[publitioKey,publitioSecret]
+  secrets:[publitioKey,publitioSecret],
+  timeoutSeconds: 300, // a 120 s uncompressed phone video can take longer than the 60 s default to pull
 }, async (snap) => {
-    const publitio = new publitioApi(publitioKey.value(),publitioSecret.value())
-    var document = snap.data
-    var data = document.data()
-    var fileURL = data["fileurl"]
-    await publitio.uploadRemoteFile({file_url: fileURL, privacy: 1, option_hls: 0, folder: "VideoAsk"}).then(async result => {
-      console.log(result)
-      // /*
-      if(result.code == 201){
-        // Create 480P Version
-        await publitio.call('/files/versions/create/' + result['id'], 'POST', {
-          extension: 'mp4',
-          options: 'h_480'
-        }).then(async data => {
-          await document.ref.update({
-            hls: result,
-            convertedtohls: true
-          }).then(async () => {
-            console.log('document updated successfully')
-          })
-          console.log("Version Created ---------", data) 
-        }).catch((error) => {
-          console.log("Error Call ******", error)
-        })
-      }
-      // */
+    const before = snap.data.before.exists ? snap.data.before.data() : null
+    const after = snap.data.after.exists ? snap.data.after.data() : null
+    await handleVideoAskWrite({ id: snap.params.id, before, after }, {
+      db: admin.firestore(),
+      ref: snap.data.after.ref,
+      publitio: () => new publitioApi(publitioKey.value(), publitioSecret.value()),
+      bucket: admin.storage().bucket(),
+      projectId: runningProjectId(),
+      now: () => admin.firestore.FieldValue.serverTimestamp(),
+      log: console,
     })
 })
 

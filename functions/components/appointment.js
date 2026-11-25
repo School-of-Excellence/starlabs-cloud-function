@@ -446,7 +446,7 @@ exports.computeSlot = onDocumentCreated("/availability/{docid}", async (snapshot
 // New Appointment Booked
 exports.appointmentbooked = onDocumentCreated("/appointments/{docid}", async (snapshotdata) =>{
   var snapshot = snapshotdata.data
-  if(snapshot.exists){
+  if(snapshot.exists && !snapshot.data()["queueref"]){
     var appointmentname = ""
     var duration;
     var bookedby = {
@@ -911,6 +911,33 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
 
   // Appointment Cancelled
   if(!oldData["cancelled"] && newData["cancelled"]){
+    // Release the queue appointment slot
+    if (newData["queueref"]) {
+      try {
+        const queueBatch = admin.firestore().batch();
+        // Clear the booking on the slot doc in queue availability
+        const bookedSlots = await admin.firestore().collection("queue availability").where("appointmentref", "==", snapshot.after.ref).get();
+        bookedSlots.docs.forEach(d => queueBatch.update(d.ref, {
+          bookedby: null,
+          appointmentref: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }));
+
+        // Remove the booked slot from the queue token,
+        if (newData["queuetokenref"] && newData["queuestagename"]) {
+          const tokenSnap = await newData["queuetokenref"].get();
+          const bookedSlot = tokenSnap.data()?.bookedslot?.[newData["queuestagename"]];
+          if (bookedSlot?.appointmentref?.path === snapshot.after.ref.path) {
+            queueBatch.update(newData["queuetokenref"], {
+              [`bookedslot.${newData["queuestagename"]}`]: admin.firestore.FieldValue.delete(),
+            });
+          }
+        }
+        await queueBatch.commit();
+      } catch (err) {
+        console.log("Queue appointment release failed:", err.toString());
+      }
+    }
     await admin.firestore().doc(newData["appointment"].path).get().then(appointmentDoc=>{
       appointmentName = appointmentDoc.data()["appointmenttype"]
     })
@@ -1045,7 +1072,7 @@ exports.appointmentcancelled = onDocumentUpdated("/appointments/{docid}", async 
       }
     })
     var hostid = []
-    var hostbody = "Your slot with " + bookedby.name + + " for " + appointmentName + " has been cancelled"
+    var hostbody = "Your slot with " + bookedby.name  + " for " + appointmentName + " has been cancelled"
     for (let i = 0; i < snapshot.after.data()["hosts"].length; i++) {
       const hosts = snapshot.after.data()["hosts"][i];
       hostid.push(hosts.id)

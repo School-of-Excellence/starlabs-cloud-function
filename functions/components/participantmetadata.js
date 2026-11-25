@@ -395,7 +395,7 @@ exports.journey_to_pmd = onDocumentWritten('participantjourneyproduct/{docid}', 
       newData["lastsubscribedjourney"] = cancelledJourney[0]["journeyref"]?.id ?? null;
       newData["lastsubscriptionstart"] = cancelledJourney[0]["subscriptionstart"]?.toDate() ?? null;
       newData["lastsubscriptionend"] = cancelledJourney[0]["subscriptionend"]?.toDate() ?? null;
-      newData.lastsubscribedpurchaseref = refOf(completedjourney[0]);
+      newData.lastsubscribedpurchaseref = refOf(cancelledJourney[0]);
     } else {
       newData.customerstatus = "none";
       newData["participantmode"] = null;
