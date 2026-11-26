@@ -8,13 +8,15 @@
  *   → { found, matchedby, profileid, participantmode, customerstatus,
  *       activeproduct: [id], consumedproducts: [id], unconsumedproducts: [id],
  *       products: { ongoing, consumed, unconsumed: [{ product, journey, journeyname, status, statusdate, productdate }] },
- *       opentickets: [...] }
+ *       opentickets: [...], profileimg: [url] }
  *
  * Paired CRM: starlabs-test ↔ salescrm-test-19, fir-sample-aae4a ↔ salesleadcrm (tokens of any other project fail).
  * Match: the email when exactly one profile has it (a real profile beats test users), else the first existing
  * profileid. Tickets come from `clientissue` (not `participant metadata.customersupport`, which misses new tickets).
  * `products` reads `participantsproduct` and groups it the way productsdata_to_pmd fills participant metadata's lists;
  * each entry is shaped like SalesCRM's `person.activeproduct` (journey = package id), plus the package name.
+ * `profileimg` (2026-11-26): the participant's profile pictures, participant metadata `profileimg` then `profile`
+ * (Firebase Storage links with their download token); the CRM saves them as `person.profileimg` and shows them.
  */
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -34,6 +36,10 @@ const PM = "participant metadata";
 const ids = (list) => (Array.isArray(list) ? list.filter((id) => typeof id === "string" && id) : []);
 const iso = (t) => (t && typeof t.toDate === "function" ? t.toDate().toISOString() : null);
 const refId = (v) => (typeof v === "string" ? v.split("/").pop() : v && v.id) || null;
+/** Profile pictures: `profileimg` first, then `profile`; web links only, each once. [] when there are none. */
+const profileImages = (pm) => [...new Set(
+  [pm.profileimg, pm.profile].map((u) => (typeof u === "string" ? u.trim() : "")).filter((u) => /^https?:\/\//i.test(u)),
+)];
 
 // SalesCRM's Firebase Auth, only to verify its sign-in tokens (needs no credentials of that project).
 let crmAuth;
@@ -138,6 +144,7 @@ async function snapshot(db, body) {
     unconsumedproducts: ids(pm.unconsumedproducts),
     products,
     opentickets,
+    profileimg: profileImages(pm),
   };
 }
 
@@ -156,4 +163,5 @@ exports.crmParticipantSnapshot = onRequest(
 );
 
 exports._snapshot = snapshot;
+exports._profileImages = profileImages;
 exports._authorized = authorized;
